@@ -1,0 +1,69 @@
+{
+    "name": "seolinkmap/waasup",
+    "description": "Website as a Server unleashing Power (WaaSuP) - Production-ready SaaS Model Context Protocol (MCP) server for PHP",
+    "type": "library",
+    "require": {
+        "php": "^8.1",
+        "psr/http-message": "^1.0|^2.0",
+        "psr/http-server-middleware": "^1.0",
+        "psr/http-factory": "^1.0",
+        "psr/log": "^1.0|^2.0|^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "phpstan/phpstan": "^1.0",
+        "friendsofphp/php-cs-fixer": "^3.0",
+        "monolog/monolog": "^3.0",
+        "slim/slim": "^4.0",
+        "slim/psr7": "^1.0",
+        "symfony/var-dumper": "^6.0"
+    },
+    "suggest": {
+        "monolog/monolog": "For PSR-3 logging support",
+        "slim/slim": "For Slim Framework integration",
+        "slim/psr7": "For PSR-7/PSR-17 factories with Slim",
+        "illuminate/support": "For Laravel integration",
+        "symfony/psr-http-message-bridge": "For Laravel PSR-7 conversion",
+        "nyholm/psr7": "PSR-17 factory implementation"
+    },
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Seolinkmap\\Waasup\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Seolinkmap\\Waasup\\Tests\\": "tests/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Shawn Snarski",
+            "email": "pipaff@comptrio.com"
+        }
+    ],
+    "keywords": [
+        "waasup",
+        "website as a server",
+        "mcp",
+        "model-context-protocol",
+        "saas",
+        "oauth",
+        "sse",
+        "jsonrpc",
+        "anthropic",
+        "claude"
+    ],
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse",
+        "format": "php-cs-fixer fix",
+        "check-format": "php-cs-fixer fix --dry-run --diff"
+    },
+    "scripts-descriptions": {
+        "test": "Run the test suite",
+        "analyse": "Run static analysis with PHPStan",
+        "format": "Run PHP CS Fixer"
+    }
+}
