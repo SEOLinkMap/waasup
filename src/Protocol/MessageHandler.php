@@ -122,7 +122,7 @@ class MessageHandler
             if (!$sessionId) {
                 throw new ProtocolException('Internal error: ' . $e->getMessage(), -32603);
             }
-            return $this->storeErrorResponse($sessionId, -32603, 'Internal error: ' . $e->getMessage(), $id, $response);
+            return $this->storeErrorResponse($sessionId, -32603, 'Internal error', $id, $response);
         }
     }
 

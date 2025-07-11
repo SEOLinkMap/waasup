@@ -550,7 +550,7 @@ class MCPSaaSServerTest extends TestCase
         $this->assertEquals('*', $response->getHeaderLine('Access-Control-Allow-Origin'));
 
         $data = $this->assertJsonRpcError($response, -32002);
-        $this->assertStringContainsString('Method not allowed', $data['error']['message']);
+        $this->assertStringContainsString('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT.', $data['error']['message']);
     }
 
     public function testUnexpectedExceptionHandling(): void
