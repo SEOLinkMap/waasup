@@ -1,0 +1,14 @@
+/vendor/
+/node_modules/
+.env
+.env.local
+.env.*.local
+.DS_Store
+Thumbs.db
+/build/
+/coverage/
+/.phpunit.result.cache
+/composer.phar
+*.log
+.vscode/
+.idea/

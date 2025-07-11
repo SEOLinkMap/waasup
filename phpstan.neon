@@ -1,0 +1,19 @@
+parameters:
+    level: 7
+    paths:
+        - src
+    excludePaths:
+        - src/Integration/Laravel/*
+
+    treatPhpDocTypesAsCertain: false
+
+    ignoreErrors:
+        # Route argument methods (Slim routes can be mixed types)
+        - '#Cannot call method getArgument\(\) on class-string\|object#'
+
+        # JSON encoding can return false but we handle it
+        - '#Parameter \#1 \$string of method.*StreamInterface::write\(\) expects string, string\|false given#'
+
+        # Allow missing iterable value types
+        -
+            identifier: missingType.iterableValue

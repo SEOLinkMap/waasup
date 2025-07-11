@@ -1,0 +1,18 @@
+.PHONY: test install lint fix check docs
+
+install:
+	composer install
+
+test:
+	vendor/bin/phpunit
+
+lint:
+	vendor/bin/phpstan analyze
+
+fix:
+	vendor/bin/php-cs-fixer fix
+
+check: lint test  # Run all checks
+
+clean:
+	rm -rf build/ vendor/
