@@ -230,7 +230,7 @@ WaaSuP is designed to support compliance with:
 ## Contact
 
 For security-related questions or concerns:
-- **Email**: security@seolinkmap.com
+- **Email**: freetools@comptrio.com
 - **GitHub Issues**: For non-sensitive security discussions
 - **Documentation**: https://github.com/SEOLinkMap/waasup/wiki/Security
 
