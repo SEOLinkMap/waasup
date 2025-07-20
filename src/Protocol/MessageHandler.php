@@ -83,38 +83,38 @@ class MessageHandler
 
         try {
             switch ($method) {
-                case 'initialize':
-                    return $this->handleInitialize($params, $id, $sessionId, $response);
+            case 'initialize':
+                return $this->handleInitialize($params, $id, $sessionId, $response);
 
-                case 'ping':
-                    return $this->handlePing($id, $sessionId, $context, $response);
+            case 'ping':
+                return $this->handlePing($id, $sessionId, $context, $response);
 
-                case 'tools/list':
-                    return $this->handleToolsList($id, $sessionId, $context, $response);
+            case 'tools/list':
+                return $this->handleToolsList($id, $sessionId, $context, $response);
 
-                case 'tools/call':
-                    return $this->handleToolsCall($params, $id, $sessionId, $context, $response);
+            case 'tools/call':
+                return $this->handleToolsCall($params, $id, $sessionId, $context, $response);
 
-                case 'prompts/list':
-                    return $this->handlePromptsList($id, $sessionId, $context, $response);
+            case 'prompts/list':
+                return $this->handlePromptsList($id, $sessionId, $context, $response);
 
-                case 'prompts/get':
-                    return $this->handlePromptsGet($params, $id, $sessionId, $context, $response);
+            case 'prompts/get':
+                return $this->handlePromptsGet($params, $id, $sessionId, $context, $response);
 
-                case 'resources/list':
-                    return $this->handleResourcesList($id, $sessionId, $context, $response);
+            case 'resources/list':
+                return $this->handleResourcesList($id, $sessionId, $context, $response);
 
-                case 'resources/read':
-                    return $this->handleResourcesRead($params, $id, $sessionId, $context, $response);
+            case 'resources/read':
+                return $this->handleResourcesRead($params, $id, $sessionId, $context, $response);
 
-                case 'resources/templates/list':
-                    return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
+            case 'resources/templates/list':
+                return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
 
-                default:
-                    if (!$sessionId) {
-                        throw new ProtocolException('Session required', -32001);
-                    }
-                    return $this->storeErrorResponse($sessionId, -32601, 'Method not found', $id, $response);
+            default:
+                if (!$sessionId) {
+                    throw new ProtocolException('Session required', -32001);
+                }
+                return $this->storeErrorResponse($sessionId, -32601, 'Method not found', $id, $response);
             }
         } catch (ProtocolException $e) {
             throw $e;
@@ -129,21 +129,21 @@ class MessageHandler
     private function processNotification(string $method, array $params, ?string $sessionId): void
     {
         switch ($method) {
-            case 'initialized':
-            case 'notifications/initialized':
-                break;
+        case 'initialized':
+        case 'notifications/initialized':
+            break;
 
-            case 'notifications/cancelled':
-                if ($sessionId) {
-                    $messages = $this->storage->getMessages($sessionId);
-                    foreach ($messages as $message) {
-                        $this->storage->deleteMessage($message['id']);
-                    }
+        case 'notifications/cancelled':
+            if ($sessionId) {
+                $messages = $this->storage->getMessages($sessionId);
+                foreach ($messages as $message) {
+                    $this->storage->deleteMessage($message['id']);
                 }
-                break;
+            }
+            break;
 
-            case 'notifications/progress':
-                break;
+        case 'notifications/progress':
+            break;
         }
     }
 

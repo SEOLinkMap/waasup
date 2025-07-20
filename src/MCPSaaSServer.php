@@ -62,6 +62,8 @@ class MCPSaaSServer
                 return $this->handleCorsPreflightRequest($response);
             }
 
+            $this->validateOriginHeader($request);
+
             if ($request->getMethod() === 'POST') {
                 // Parse JSON FIRST to catch parse errors
                 $body = (string) $request->getBody();
@@ -125,6 +127,28 @@ class MCPSaaSServer
             );
             return $this->createErrorResponse($response, -32603, 'Internal error');
         }
+    }
+
+    private function extractProtocolVersion(Request $request): ?string
+    {
+        // Check MCP-Protocol-Version header first
+        $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
+        if ($headerVersion) {
+            return $headerVersion;
+        }
+
+        // For POST requests, peek at initialize message
+        if ($request->getMethod() === 'POST') {
+            $body = (string) $request->getBody();
+            if (!empty($body)) {
+                $data = json_decode($body, true);
+                if (isset($data['method']) && $data['method'] === 'initialize' && isset($data['params']['protocolVersion'])) {
+                    return $data['params']['protocolVersion'];
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -223,6 +247,30 @@ class MCPSaaSServer
             $this->contextData,
             $response
         );
+    }
+
+    /**
+     * Validate Origin header for 2025-03-26+ versions to prevent DNS rebinding attacks
+     */
+    private function validateOriginHeader(Request $request): void
+    {
+        $origin = $request->getHeaderLine('Origin');
+        $host = $request->getHeaderLine('Host');
+
+        // Allow requests without Origin header (non-browser clients)
+        if (empty($origin)) {
+            return;
+        }
+
+        // DNS rebinding protection: reject external origins trying to access localhost
+        $hostOnly = explode(':', $host)[0]; // Remove port
+        $originHost = parse_url($origin, PHP_URL_HOST) ?? '';
+
+        $localhostHosts = ['localhost', '127.0.0.1', '::1'];
+
+        if (in_array($hostOnly, $localhostHosts) && !in_array($originHost, $localhostHosts)) {
+            throw new ProtocolException('DNS rebinding attack detected', -32600);
+        }
     }
 
     /**
@@ -342,7 +390,7 @@ class MCPSaaSServer
     private function getDefaultConfig(): array
     {
         return [
-            'supported_versions' => ['2025-03-26', '2024-11-05'],
+            'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
             'server_info' => [
                 'name' => 'WaaSuP MCP SaaS Server',
                 'version' => '1.0.3'

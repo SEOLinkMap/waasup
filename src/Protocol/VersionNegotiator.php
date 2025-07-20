@@ -9,7 +9,7 @@ class VersionNegotiator
 {
     private array $supportedVersions;
 
-    public function __construct(array $supportedVersions = ['2025-03-18', '2024-11-05'])
+    public function __construct(array $supportedVersions = ['2025-06-18', '2025-03-26', '2024-11-05'])
     {
         $this->supportedVersions = $supportedVersions;
     }

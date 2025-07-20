@@ -8,7 +8,7 @@
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#)
 [![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen.svg)](#)
 
-**WaaSuP** (Website as a Server unleashing Power) - A production-ready, SaaS-oriented Model Context Protocol (MCP) server implementation for PHP. Built with enterprise-grade features including OAuth 2.1 authentication, real-time Server-Sent Events (SSE), and comprehensive tool management.
+**WaaSuP** (Website as a Server using PHP) - A production-ready, SaaS-oriented Model Context Protocol (MCP) server implementation for PHP. Built with enterprise-grade features including OAuth 2.1 authentication, real-time Server-Sent Events (SSE), and comprehensive tool management.
 
 ## 🚀 Try It Live
 
@@ -335,7 +335,7 @@ Content-Type: application/json
 
 ```php
 $config = [
-    'supported_versions' => ['2025-03-18', '2024-11-05'],
+    'supported_versions' => ['2025-03-26', '2024-11-05'],
     'server_info' => [
         'name' => 'Your MCP Server',
         'version' => '1.0.0'
