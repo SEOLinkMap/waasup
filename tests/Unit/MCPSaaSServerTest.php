@@ -5,6 +5,10 @@ namespace Seolinkmap\Waasup\Tests\Unit;
 use Seolinkmap\Waasup\MCPSaaSServer;
 use Seolinkmap\Waasup\Tests\TestCase;
 
+/*
+ * @todo test version support for proper nomenclature
+ */
+
 class MCPSaaSServerTest extends TestCase
 {
     private MCPSaaSServer $server;
@@ -29,7 +33,7 @@ class MCPSaaSServerTest extends TestCase
                     'name' => 'Test MCP Server',
                     'version' => '1.0.0-test'
                 ],
-                'supported_versions' => ['2025-03-18', '2024-11-05'],
+                'supported_versions' => ['2025-03-26', '2024-11-05'],
                 'sse' => [
                     'test_mode' => true
                 ]
@@ -610,7 +614,7 @@ class MCPSaaSServerTest extends TestCase
             'jsonrpc' => '2.0',
             'method' => 'initialize',
             'params' => [
-                'protocolVersion' => '2026-01-01',
+                'protocolVersion' => '2038-01-01',
                 'capabilities' => [],
                 'clientInfo' => ['name' => 'Future Client', 'version' => '2.0.0']
             ],
@@ -630,7 +634,7 @@ class MCPSaaSServerTest extends TestCase
         $this->assertEquals(200, $response->getStatusCode());
         $data = $this->assertJsonRpcSuccess($response, 1);
 
-        $this->assertEquals('2025-03-18', $data['result']['protocolVersion']);
+        $this->assertEquals('2025-03-26', $data['result']['protocolVersion']);
     }
 
     public function testCorsHeaders(): void

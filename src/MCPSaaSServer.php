@@ -342,10 +342,10 @@ class MCPSaaSServer
     private function getDefaultConfig(): array
     {
         return [
-            'supported_versions' => ['2025-03-18', '2024-11-05'],
+            'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
             'server_info' => [
                 'name' => 'WaaSuP MCP SaaS Server',
-                'version' => '1.0.0'
+                'version' => '1.1.0'
             ],
             'sse' => [
                 'keepalive_interval' => 1,      // seconds
