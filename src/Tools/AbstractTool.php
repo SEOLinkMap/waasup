@@ -78,8 +78,8 @@ abstract class AbstractTool implements ToolInterface
     }
 
         /**
-     * Create audio content response
-     */
+         * Create audio content response
+         */
     protected function createAudioResponse(string $filePath, string $text = '', ?string $name = null): array
     {
         $audioContent = AudioContentHandler::createFromFile($filePath, $name);

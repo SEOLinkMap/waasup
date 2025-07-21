@@ -260,54 +260,54 @@ class MessageHandler
         // Handle the actual method calls
         try {
             switch ($method) {
-                case 'initialize':
-                    return $this->handleInitialize($params, $id, $sessionId, $response);
+            case 'initialize':
+                return $this->handleInitialize($params, $id, $sessionId, $response);
 
-                case 'ping':
-                    return $this->handlePing($id, $sessionId, $context, $response);
+            case 'ping':
+                return $this->handlePing($id, $sessionId, $context, $response);
 
-                case 'tools/list':
-                    return $this->handleToolsList($id, $sessionId, $context, $response);
+            case 'tools/list':
+                return $this->handleToolsList($id, $sessionId, $context, $response);
 
-                case 'tools/call':
-                    return $this->handleToolsCall($params, $id, $sessionId, $context, $response);
+            case 'tools/call':
+                return $this->handleToolsCall($params, $id, $sessionId, $context, $response);
 
-                case 'prompts/list':
-                    return $this->handlePromptsList($id, $sessionId, $context, $response);
+            case 'prompts/list':
+                return $this->handlePromptsList($id, $sessionId, $context, $response);
 
-                case 'prompts/get':
-                    return $this->handlePromptsGet($params, $id, $sessionId, $context, $response);
+            case 'prompts/get':
+                return $this->handlePromptsGet($params, $id, $sessionId, $context, $response);
 
-                case 'resources/list':
-                    return $this->handleResourcesList($id, $sessionId, $context, $response);
+            case 'resources/list':
+                return $this->handleResourcesList($id, $sessionId, $context, $response);
 
-                case 'resources/read':
-                    return $this->handleResourcesRead($params, $id, $sessionId, $context, $response);
+            case 'resources/read':
+                return $this->handleResourcesRead($params, $id, $sessionId, $context, $response);
 
-                case 'resources/templates/list':
-                    return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
+            case 'resources/templates/list':
+                return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
 
-                case 'completions/complete':
-                    return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
+            case 'completions/complete':
+                return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
 
-                case 'elicitation/create':
-                    return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
+            case 'elicitation/create':
+                return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
 
-                case 'sampling/createMessage':
-                    return $this->handleSamplingResponse($params, $id, $sessionId, $context, $response);
+            case 'sampling/createMessage':
+                return $this->handleSamplingResponse($params, $id, $sessionId, $context, $response);
 
-                case 'roots/list':
-                    return $this->handleRootsListResponse($params, $id, $sessionId, $context, $response);
+            case 'roots/list':
+                return $this->handleRootsListResponse($params, $id, $sessionId, $context, $response);
 
-                case 'roots/read':
-                case 'roots/listDirectory':
-                    return $this->handleRootsReadResponse($params, $id, $sessionId, $context, $response);
+            case 'roots/read':
+            case 'roots/listDirectory':
+                return $this->handleRootsReadResponse($params, $id, $sessionId, $context, $response);
 
-                default:
-                    if (!$sessionId) {
-                        throw new ProtocolException('Session required', -32001);
-                    }
-                    return $this->storeErrorResponse($sessionId, -32601, 'Method not found', $id, $response);
+            default:
+                if (!$sessionId) {
+                    throw new ProtocolException('Session required', -32001);
+                }
+                return $this->storeErrorResponse($sessionId, -32601, 'Method not found', $id, $response);
             }
         } catch (ProtocolException $e) {
             throw $e;
@@ -487,36 +487,36 @@ class MessageHandler
             }
 
             switch ($item['type']) {
-                case 'text':
-                    $processedContent[] = [
-                        'type' => 'text',
-                        'text' => $item['text'] ?? ''
-                    ];
-                    break;
+            case 'text':
+                $processedContent[] = [
+                    'type' => 'text',
+                    'text' => $item['text'] ?? ''
+                ];
+                break;
 
-                case 'image':
-                    $processedContent[] = [
-                        'type' => 'image',
-                        'data' => $item['data'] ?? '',
-                        'mimeType' => $item['mimeType'] ?? 'image/jpeg'
-                    ];
-                    break;
+            case 'image':
+                $processedContent[] = [
+                    'type' => 'image',
+                    'data' => $item['data'] ?? '',
+                    'mimeType' => $item['mimeType'] ?? 'image/jpeg'
+                ];
+                break;
 
-                case 'audio':
-                    // Only allow audio in 2025-03-26+
-                    if (!$this->isFeatureSupported('audio_content', $protocolVersion)) {
-                        throw new ProtocolException("Audio content not supported in version {$protocolVersion}", -32602);
-                    }
+            case 'audio':
+                // Only allow audio in 2025-03-26+
+                if (!$this->isFeatureSupported('audio_content', $protocolVersion)) {
+                    throw new ProtocolException("Audio content not supported in version {$protocolVersion}", -32602);
+                }
 
-                    try {
-                        $processedContent[] = AudioContentHandler::processAudioContent($item);
-                    } catch (\Exception $e) {
-                        throw new ProtocolException("Invalid audio content: " . $e->getMessage(), -32602);
-                    }
-                    break;
+                try {
+                    $processedContent[] = AudioContentHandler::processAudioContent($item);
+                } catch (\Exception $e) {
+                    throw new ProtocolException("Invalid audio content: " . $e->getMessage(), -32602);
+                }
+                break;
 
-                default:
-                    throw new ProtocolException("Unsupported content type: {$item['type']}", -32602);
+            default:
+                throw new ProtocolException("Unsupported content type: {$item['type']}", -32602);
             }
         }
 
@@ -703,6 +703,32 @@ class MessageHandler
         ];
 
         return $this->storeSuccessResponse($sessionId, $elicitationData, $id, $response);
+    }
+
+    /**
+     * Request elicitation from client
+     */
+    public function requestElicitation(
+        string $sessionId,
+        string $message,
+        ?array $requestedSchema = null,
+        array $context = []
+    ): string {
+        $requestId = bin2hex(random_bytes(16));
+
+        $elicitationRequest = [
+        'jsonrpc' => '2.0',
+        'method' => 'elicitation/create',
+        'id' => $requestId,
+        'params' => [
+            'message' => $message,
+            'requestedSchema' => $requestedSchema
+        ]
+        ];
+
+        $this->storage->storeMessage($sessionId, $elicitationRequest, $context);
+
+        return $requestId;
     }
 
     private function generateCompletions(array $ref, ?string $argument, array $context): array

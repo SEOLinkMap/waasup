@@ -19,6 +19,7 @@ class MemoryStorage implements StorageInterface
     private array $users = [];
     private array $samplingResponses = [];
     private array $rootsResponses = [];
+    private array $elicitationResponses = [];
 
     public function __construct()
     {
@@ -403,5 +404,40 @@ class MemoryStorage implements StorageInterface
     public function addOAuthClient(string $clientId, array $clientData): void
     {
         $this->oauthClients[$clientId] = $clientData;
+    }
+
+    public function storeElicitationResponse(string $sessionId, string $requestId, array $responseData): bool
+    {
+        if (!isset($this->elicitationResponses[$sessionId])) {
+            $this->elicitationResponses[$sessionId] = [];
+        }
+
+        $this->elicitationResponses[$sessionId][$requestId] = [
+        'data' => $responseData,
+        'created_at' => time()
+        ];
+
+        return true;
+    }
+
+    public function getElicitationResponse(string $sessionId, string $requestId): ?array
+    {
+        return $this->elicitationResponses[$sessionId][$requestId] ?? null;
+    }
+
+    public function getElicitationResponses(string $sessionId): array
+    {
+        $responses = [];
+        $sessionResponses = $this->elicitationResponses[$sessionId] ?? [];
+
+        foreach ($sessionResponses as $requestId => $response) {
+            $responses[] = [
+            'request_id' => $requestId,
+            'data' => $response['data'],
+            'created_at' => $response['created_at']
+            ];
+        }
+
+        return $responses;
     }
 }

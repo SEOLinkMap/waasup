@@ -131,4 +131,19 @@ interface StorageInterface
      * Get all pending roots responses for a session
      */
     public function getRootsResponses(string $sessionId): array;
+
+    /**
+     * Store elicitation response from client
+     */
+    public function storeElicitationResponse(string $sessionId, string $requestId, array $responseData): bool;
+
+    /**
+     * Get elicitation response by request ID
+     */
+    public function getElicitationResponse(string $sessionId, string $requestId): ?array;
+
+    /**
+     * Get all pending elicitation responses for a session
+     */
+    public function getElicitationResponses(string $sessionId): array;
 }
