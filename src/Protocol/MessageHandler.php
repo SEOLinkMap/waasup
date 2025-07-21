@@ -19,6 +19,57 @@ class MessageHandler
     private VersionNegotiator $versionNegotiator;
     private array $sessionRequestIds = [];
 
+    private const FEATURE_MATRIX = [
+        '2024-11-05' => [
+            'tools' => true,
+            'prompts' => true,
+            'resources' => true,
+            'sampling' => true,
+            'roots' => true,
+            'ping' => true,
+            'progress_notifications' => false,
+            'tool_annotations' => false,
+            'audio_content' => false,
+            'completions' => false,
+            'elicitation' => false,
+            'structured_outputs' => false,
+            'resource_links' => false,
+            'progress_messages' => false
+        ],
+        '2025-03-26' => [
+            'tools' => true,
+            'prompts' => true,
+            'resources' => true,
+            'sampling' => true,
+            'roots' => true,
+            'ping' => true,
+            'progress_notifications' => true,
+            'tool_annotations' => true,
+            'audio_content' => true,
+            'completions' => true,
+            'elicitation' => false,
+            'structured_outputs' => false,
+            'resource_links' => false,
+            'progress_messages' => true
+        ],
+        '2025-06-18' => [
+            'tools' => true,
+            'prompts' => true,
+            'resources' => true,
+            'sampling' => true,
+            'roots' => true,
+            'ping' => true,
+            'progress_notifications' => true,
+            'tool_annotations' => true,
+            'audio_content' => true,
+            'completions' => true,
+            'elicitation' => true,
+            'structured_outputs' => true,
+            'resource_links' => true,
+            'progress_messages' => true
+        ]
+    ];
+
     public function __construct(
         ToolRegistry $toolRegistry,
         PromptRegistry $promptRegistry,
@@ -32,7 +83,7 @@ class MessageHandler
         $this->resourceRegistry = $resourceRegistry;
         $this->storage = $storage;
         $this->config = $config;
-        $this->versionNegotiator = $versionNegotiator ?? new VersionNegotiator($config['supported_versions'] ?? ['2025-03-18', '2024-11-05']);
+        $this->versionNegotiator = $versionNegotiator ?? new VersionNegotiator($config['supported_versions'] ?? ['2025-06-18', '2025-03-26', '2024-11-05']);
     }
 
     public function processMessage(
@@ -63,6 +114,22 @@ class MessageHandler
 
         $isNotification = $isExplicitNotification || !$hasId;
 
+        $protocolVersion = $this->getSessionVersion($sessionId);
+
+        // Skip version gating for initialize method as it handles version negotiation
+        if ($method !== 'initialize') {
+            if (!$this->isMethodSupported($method, $protocolVersion)) {
+                if ($isNotification) {
+                    return $response
+                        ->withHeader('Content-Type', 'application/json')
+                        ->withHeader('Access-Control-Allow-Origin', '*')
+                        ->withStatus(202);
+                } else {
+                    return $this->storeErrorResponse($sessionId, -32601, "Method not supported in protocol version {$protocolVersion}", $id, $response);
+                }
+            }
+        }
+
         if (!$isNotification && $sessionId !== null && $id !== null) {
             if (!isset($this->sessionRequestIds[$sessionId])) {
                 $this->sessionRequestIds[$sessionId] = [];
@@ -74,7 +141,7 @@ class MessageHandler
         }
 
         if ($isNotification) {
-            $this->processNotification($method, $params, $sessionId);
+            $this->processNotification($method, $params, $sessionId, $protocolVersion);
             return $response
                 ->withHeader('Content-Type', 'application/json')
                 ->withHeader('Access-Control-Allow-Origin', '*')
@@ -137,7 +204,43 @@ class MessageHandler
         }
     }
 
-    private function processNotification(string $method, array $params, ?string $sessionId): void
+    private function isMethodSupported(string $method, string $protocolVersion): bool
+    {
+        $methodFeatureMap = [
+            'initialize' => 'tools',
+            'ping' => 'ping',
+            'tools/list' => 'tools',
+            'tools/call' => 'tools',
+            'prompts/list' => 'prompts',
+            'prompts/get' => 'prompts',
+            'resources/list' => 'resources',
+            'resources/read' => 'resources',
+            'resources/templates/list' => 'resources',
+            'completions/complete' => 'completions',
+            'elicitation/create' => 'elicitation',
+            'sampling/createMessage' => 'sampling',
+            'roots/list' => 'roots',
+            'roots/read' => 'roots',
+            'roots/listDirectory' => 'roots',
+            'notifications/initialized' => 'tools',
+            'notifications/cancelled' => 'tools',
+            'notifications/progress' => 'progress_notifications'
+        ];
+
+        $feature = $methodFeatureMap[$method] ?? null;
+        if (!$feature) {
+            return false;
+        }
+
+        return $this->isFeatureSupported($feature, $protocolVersion);
+    }
+
+    private function isFeatureSupported(string $feature, string $protocolVersion): bool
+    {
+        return self::FEATURE_MATRIX[$protocolVersion][$feature] ?? false;
+    }
+
+    private function processNotification(string $method, array $params, ?string $sessionId, string $protocolVersion): void
     {
         switch ($method) {
         case 'initialized':
@@ -167,7 +270,6 @@ class MessageHandler
 
         $selectedVersion = $this->versionNegotiator->negotiate($clientProtocolVersion);
 
-        // CRITICAL: Store the negotiated version for this session
         if ($sessionId) {
             $this->storeSessionVersion($sessionId, $selectedVersion);
         }
@@ -177,13 +279,20 @@ class MessageHandler
         'version' => '1.1.0'
         ];
 
-        $capabilities = [
-        'tools' => ['listChanged' => true],
-        'prompts' => ['listChanged' => true],
-        'resources' => ['subscribe' => false, 'listChanged' => true]
-        ];
+        $capabilities = [];
 
-        // Version-specific capabilities - only add if supported in negotiated version
+        if ($this->isFeatureSupported('tools', $selectedVersion)) {
+            $capabilities['tools'] = ['listChanged' => true];
+        }
+
+        if ($this->isFeatureSupported('prompts', $selectedVersion)) {
+            $capabilities['prompts'] = ['listChanged' => true];
+        }
+
+        if ($this->isFeatureSupported('resources', $selectedVersion)) {
+            $capabilities['resources'] = ['subscribe' => false, 'listChanged' => true];
+        }
+
         if ($this->isFeatureSupported('completions', $selectedVersion)) {
             $capabilities['completions'] = true;
         }
@@ -223,26 +332,6 @@ class MessageHandler
             ->withStatus(200);
     }
 
-    private function isFeatureSupported(string $feature, string $version): bool
-    {
-        $featureMatrix = [
-            'tool_annotations' => ['2025-03-26', '2025-06-18'],
-            'audio_content' => ['2025-03-26', '2025-06-18'],
-            'structured_outputs' => ['2025-06-18'],
-            'elicitation' => ['2025-06-18'],
-            'resource_links' => ['2025-06-18'],
-            'progress_messages' => ['2025-03-26', '2025-06-18'],
-            'completions' => ['2025-03-26', '2025-06-18'],
-            'sampling' => ['2024-11-05', '2025-03-26', '2025-06-18'],
-            'roots' => ['2024-11-05', '2025-03-26', '2025-06-18']
-        ];
-
-        return in_array($version, $featureMatrix[$feature] ?? []);
-    }
-
-    /**
-     * Initiate a sampling request to the client
-     */
     public function requestSampling(
         string $sessionId,
         array $messages,
@@ -265,7 +354,6 @@ class MessageHandler
         ]
         ];
 
-        // Store the request for tracking
         $this->storage->storeMessage($sessionId, $samplingRequest, $context);
 
         return $requestId;
@@ -277,8 +365,6 @@ class MessageHandler
             throw new ProtocolException('Session required', -32001);
         }
 
-        // This would be called when client responds to our sampling request
-        // Store the response for the application to process
         $samplingResult = [
         'requestId' => $id,
         'model' => $params['model'] ?? null,
@@ -287,7 +373,6 @@ class MessageHandler
         'content' => $params['content'] ?? []
         ];
 
-        // Store result with special marker for sampling responses
         $resultData = [
         'type' => 'sampling_response',
         'result' => $samplingResult,
@@ -299,9 +384,6 @@ class MessageHandler
         return $this->storeSuccessResponse($sessionId, ['received' => true], $id, $response);
     }
 
-    /**
-     * Request roots list from connected client
-     */
     public function requestRootsList(string $sessionId, array $context = []): string
     {
         $requestId = bin2hex(random_bytes(16));
@@ -318,9 +400,6 @@ class MessageHandler
         return $requestId;
     }
 
-    /**
-     * Request file/directory operations from client roots
-     */
     public function requestRootsRead(
         string $sessionId,
         string $uri,
@@ -341,9 +420,6 @@ class MessageHandler
         return $requestId;
     }
 
-    /**
-     * Request directory listing from client roots
-     */
     public function requestRootsListDirectory(
         string $sessionId,
         string $uri,
@@ -411,12 +487,11 @@ class MessageHandler
     private function getSessionVersion(?string $sessionId): string
     {
         if (!$sessionId) {
-            return '2024-11-05'; // fallback to oldest version
+            return '2024-11-05';
         }
 
-        // Get negotiated version from session storage
         $sessionData = $this->storage->getSession($sessionId);
-        return $sessionData['protocol_version'] ?? '2024-11-05'; // Default to oldest, not newest
+        return $sessionData['protocol_version'] ?? '2024-11-05';
     }
 
     private function storeSessionVersion(string $sessionId, string $version): void
@@ -473,13 +548,11 @@ class MessageHandler
         if ($ref['type'] === 'ref/tool') {
             $toolName = $ref['name'];
             if ($this->toolRegistry->hasTool($toolName)) {
-                // Generate argument completions for the tool
                 $completions = $this->generateToolCompletions($toolName, $argument);
             }
         } elseif ($ref['type'] === 'ref/prompt') {
             $promptName = $ref['name'];
             if ($this->promptRegistry->hasPrompt($promptName)) {
-                // Generate argument completions for the prompt
                 $completions = $this->generatePromptCompletions($promptName, $argument);
             }
         }
@@ -489,7 +562,6 @@ class MessageHandler
 
     private function generateToolCompletions(string $toolName, ?string $argument): array
     {
-        // Implementation would depend on tool's input schema
         return [
         ['value' => 'example_value', 'description' => 'Example completion'],
         ];
@@ -497,7 +569,6 @@ class MessageHandler
 
     private function generatePromptCompletions(string $promptName, ?string $argument): array
     {
-        // Implementation would depend on prompt's argument schema
         return [
         ['value' => 'example_arg', 'description' => 'Example argument'],
         ];
@@ -505,6 +576,12 @@ class MessageHandler
 
     public function sendProgressNotification(string $sessionId, int $progress, string $message = ''): void
     {
+        $protocolVersion = $this->getSessionVersion($sessionId);
+
+        if (!$this->isFeatureSupported('progress_notifications', $protocolVersion)) {
+            return;
+        }
+
         $notification = [
         'jsonrpc' => '2.0',
         'method' => 'notifications/progress',
@@ -514,8 +591,7 @@ class MessageHandler
         ]
         ];
 
-        // Add message field for 2025-03-26+
-        if ($this->isFeatureSupported('progress_messages', $this->getSessionVersion($sessionId))) {
+        if ($this->isFeatureSupported('progress_messages', $protocolVersion)) {
             $notification['params']['message'] = $message;
         }
 
@@ -543,7 +619,7 @@ class MessageHandler
         }
 
         $sessionVersion = $this->getSessionVersion($sessionId);
-        $result = $this->toolRegistry->getToolsList($sessionVersion); // Pass version to registry
+        $result = $this->toolRegistry->getToolsList($sessionVersion);
 
         return $this->storeSuccessResponse($sessionId, $result, $id, $response);
     }
@@ -566,7 +642,6 @@ class MessageHandler
 
             $sessionVersion = $this->getSessionVersion($sessionId);
 
-            // Support structured outputs (2025-06-18+)
             if ($this->isFeatureSupported('structured_outputs', $sessionVersion)) {
                 if (isset($result['_meta']) && $result['_meta']['structured'] === true) {
                     $wrappedResult = [
@@ -579,7 +654,6 @@ class MessageHandler
                     'structuredContent' => $result['data']
                     ];
 
-                    // Resource links support
                     if (isset($result['_meta']['resourceLinks'])) {
                         $wrappedResult['resourceLinks'] = $result['_meta']['resourceLinks'];
                     }
@@ -594,7 +668,6 @@ class MessageHandler
                     ];
                 }
             } else {
-                // Legacy format for older versions
                 $wrappedResult = [
                 'content' => [
                     [
