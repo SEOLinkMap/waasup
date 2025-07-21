@@ -8,6 +8,7 @@ use Seolinkmap\Waasup\Prompts\Registry\PromptRegistry;
 use Seolinkmap\Waasup\Resources\Registry\ResourceRegistry;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 use Seolinkmap\Waasup\Tools\Registry\ToolRegistry;
+use Seolinkmap\Waasup\Content\AudioContentHandler;
 
 class MessageHandler
 {
@@ -359,6 +360,55 @@ class MessageHandler
         return $requestId;
     }
 
+    /**
+     * Process content array with audio support
+     */
+    private function processContentWithAudio(array $content, string $protocolVersion): array
+    {
+        $processedContent = [];
+
+        foreach ($content as $item) {
+            if (!isset($item['type'])) {
+                throw new ProtocolException('Content item missing type', -32602);
+            }
+
+            switch ($item['type']) {
+                case 'text':
+                    $processedContent[] = [
+                        'type' => 'text',
+                        'text' => $item['text'] ?? ''
+                    ];
+                    break;
+
+                case 'image':
+                    $processedContent[] = [
+                        'type' => 'image',
+                        'data' => $item['data'] ?? '',
+                        'mimeType' => $item['mimeType'] ?? 'image/jpeg'
+                    ];
+                    break;
+
+                case 'audio':
+                    // Only allow audio in 2025-03-26+
+                    if (!$this->isFeatureSupported('audio_content', $protocolVersion)) {
+                        throw new ProtocolException("Audio content not supported in version {$protocolVersion}", -32602);
+                    }
+
+                    try {
+                        $processedContent[] = AudioContentHandler::processAudioContent($item);
+                    } catch (\Exception $e) {
+                        throw new ProtocolException("Invalid audio content: " . $e->getMessage(), -32602);
+                    }
+                    break;
+
+                default:
+                    throw new ProtocolException("Unsupported content type: {$item['type']}", -32602);
+            }
+        }
+
+        return $processedContent;
+    }
+
     private function handleSamplingResponse(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
     {
         if (!$sessionId) {
@@ -641,6 +691,11 @@ class MessageHandler
             $result = $this->toolRegistry->execute($toolName, $arguments, $context);
 
             $sessionVersion = $this->getSessionVersion($sessionId);
+
+            // Process result content if it contains audio
+            if (isset($result['content']) && is_array($result['content'])) {
+                $result['content'] = $this->processContentWithAudio($result['content'], $sessionVersion);
+            }
 
             if ($this->isFeatureSupported('structured_outputs', $sessionVersion)) {
                 if (isset($result['_meta']) && $result['_meta']['structured'] === true) {

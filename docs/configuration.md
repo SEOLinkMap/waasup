@@ -20,7 +20,7 @@ This document covers the actual configuration options available in the MCP SaaS 
 use Seolinkmap\Waasup\MCPSaaSServer;
 
 $config = [
-    'supported_versions' => ['2025-03-18', '2024-11-05'],
+    'supported_versions' => ['2025-06-18', '2025-03-18', '2024-11-05'],
     'server_info' => [
         'name' => 'My MCP Server',
         'version' => '1.0.0'
@@ -48,8 +48,9 @@ $server = new MCPSaaSServer(
 ```php
 // Configure which MCP protocol versions to support
 $config['supported_versions'] = [
-    '2025-03-18',  // Latest
-    '2024-11-05'   // Stable
+    '2025-06-18',  // Latest
+    '2025-03-26',  // Stable
+    '2024-11-05'   // Deprecated, but still used
 ];
 ```
 

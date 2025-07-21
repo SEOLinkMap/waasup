@@ -33,6 +33,27 @@ Want to see WaaSuP in action? **Try our live demo at seolinkmap.com/mcp-repo** w
 - Composer
 - Database (MySQL/PostgreSQL recommended for production)
 
+## **Feature Matrix Summary**
+
+| Feature | 2024-11-05 | 2025-03-26 | 2025-06-18 |
+|---------|------------|------------|------------|
+| Tools | ✅ | ✅ | ✅ |
+| Prompts | ✅ | ✅ | ✅ |
+| Resources | ✅ | ✅ | ✅ |
+| Sampling | ✅ | ✅ | ✅ |
+| Roots | ✅ | ✅ | ✅ |
+| Ping | ✅ | ✅ | ✅ |
+| Progress Notifications | ❌ | ✅ | ✅ |
+| Tool Annotations | ❌ | ✅ | ✅ |
+| Audio Content | ❌ | ✅ | ✅ |
+| Completions | ❌ | ✅ | ✅ |
+| OAuth 2.1 | ❌ | ✅ | ✅ |
+| Elicitation | ❌ | ❌ | ✅ |
+| Structured Outputs | ❌ | ❌ | ✅ |
+| Resource Links | ❌ | ❌ | ✅ |
+| Resource Indicators | ❌ | ❌ | ✅ (Required) |
+
+
 ## Installation
 
 ```bash
@@ -335,7 +356,7 @@ Content-Type: application/json
 
 ```php
 $config = [
-    'supported_versions' => ['2025-03-26', '2024-11-05'],
+    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
     'server_info' => [
         'name' => 'Your MCP Server',
         'version' => '1.0.0'

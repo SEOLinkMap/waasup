@@ -2,6 +2,8 @@
 
 namespace Seolinkmap\Waasup\Tools;
 
+use Seolinkmap\Waasup\Content\AudioContentHandler;
+
 /**
  * Abstract base class for tools
  */
@@ -71,6 +73,61 @@ abstract class AbstractTool implements ToolInterface
         foreach ($required as $requiredParam) {
             if (!isset($parameters[$requiredParam])) {
                 throw new \InvalidArgumentException("Missing required parameter: {$requiredParam}");
+            }
+        }
+    }
+
+        /**
+     * Create audio content response
+     */
+    protected function createAudioResponse(string $filePath, string $text = '', ?string $name = null): array
+    {
+        $audioContent = AudioContentHandler::createFromFile($filePath, $name);
+
+        $content = [];
+
+        if (!empty($text)) {
+            $content[] = [
+                'type' => 'text',
+                'text' => $text
+            ];
+        }
+
+        $content[] = $audioContent;
+
+        return ['content' => $content];
+    }
+
+    /**
+     * Create mixed content response with audio
+     */
+    protected function createMixedContentResponse(array $items): array
+    {
+        $content = [];
+
+        foreach ($items as $item) {
+            if ($item['type'] === 'audio_file') {
+                $content[] = AudioContentHandler::createFromFile($item['path'], $item['name'] ?? null);
+            } elseif ($item['type'] === 'audio_data') {
+                $content[] = AudioContentHandler::processAudioContent($item);
+            } else {
+                $content[] = $item;
+            }
+        }
+
+        return ['content' => $content];
+    }
+
+    /**
+     * Validate audio input parameter
+     */
+    protected function validateAudioParameter(array $parameters, string $paramName): void
+    {
+        if (isset($parameters[$paramName])) {
+            try {
+                AudioContentHandler::processAudioContent($parameters[$paramName]);
+            } catch (\Exception $e) {
+                throw new \InvalidArgumentException("Invalid audio parameter '{$paramName}': " . $e->getMessage());
             }
         }
     }
