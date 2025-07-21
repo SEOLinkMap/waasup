@@ -114,8 +114,7 @@ class MessageHandler
                     return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
                 }
                 break;
-
-            case 'elicitation/request':
+            case 'elicitation/create':
                 if ($this->isFeatureSupported('elicitation', $this->getSessionVersion($sessionId))) {
                     return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
                 }
