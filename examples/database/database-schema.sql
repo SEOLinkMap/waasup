@@ -131,6 +131,16 @@ CREATE TABLE `mcp_roots_responses` (
     KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE mcprepo_elicitation_responses (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    session_id VARCHAR(255) NOT NULL,
+    elicitation_id VARCHAR(255) NOT NULL,
+    response_data JSON NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_session_elicitation (session_id, elicitation_id),
+    INDEX idx_created_at (created_at)
+);
+
 -- Sample data for MySQL
 INSERT INTO `mcp_agencies` (`uuid`, `name`, `active`) VALUES
 ('550e8400-e29b-41d4-a716-446655440000', 'Test Agency', 1);

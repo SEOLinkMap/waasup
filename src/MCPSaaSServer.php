@@ -455,6 +455,39 @@ class MCPSaaSServer
     }
 
     /**
+     * Request structured user input via elicitation (2025-06-18 feature)
+     */
+    public function requestElicitation(
+        string $sessionId,
+        string $message,
+        ?array $requestedSchema = null,
+        array $context = []
+    ): string {
+        return $this->messageHandler->requestElicitation(
+            $sessionId,
+            $message,
+            $requestedSchema,
+            $context
+        );
+    }
+
+    /**
+     * Get elicitation response by request ID
+     */
+    public function getElicitationResponse(string $sessionId, string $requestId): ?array
+    {
+        return $this->storage->getElicitationResponse($sessionId, $requestId);
+    }
+
+    /**
+     * Get all elicitation responses for session
+     */
+    public function getElicitationResponses(string $sessionId): array
+    {
+        return $this->storage->getElicitationResponses($sessionId);
+    }
+
+    /**
      * Get sampling response by request ID
      */
     public function getSamplingResponse(string $sessionId, string $requestId): ?array

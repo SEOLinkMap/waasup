@@ -19,14 +19,15 @@ class VersionNegotiator
      */
     public function negotiate(string $clientVersion): string
     {
-        // Find newest version we support that client can handle
+        // Convert to comparable format or use semantic version comparison
+        $clientVersionTime = strtotime($clientVersion);
+
         foreach ($this->supportedVersions as $version) {
-            if ($version <= $clientVersion) {
+            $versionTime = strtotime($version);
+            if ($versionTime <= $clientVersionTime) {
                 return $version;
             }
         }
-
-        // Fallback to oldest supported version
         return end($this->supportedVersions);
     }
 

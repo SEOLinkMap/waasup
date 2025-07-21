@@ -87,12 +87,121 @@ class MessageHandler
         $this->versionNegotiator = $versionNegotiator ?? new VersionNegotiator($config['supported_versions'] ?? ['2025-06-18', '2025-03-26', '2024-11-05']);
     }
 
+    /**
+     * Process message - handle both single messages and batches
+     */
     public function processMessage(
         array $data,
         ?string $sessionId,
         array $context,
         Response $response
     ): Response {
+        $protocolVersion = $this->getSessionVersion($sessionId);
+
+        // Check if this is a batch request (array of requests)
+        if ($this->isBatchRequest($data)) {
+            return $this->processBatchRequest($data, $sessionId, $context, $response, $protocolVersion);
+        }
+
+        // Single request processing (existing logic)
+        return $this->processSingleMessage($data, $sessionId, $context, $response, $protocolVersion);
+    }
+
+    /**
+     * Check if request is a batch (array of JSON-RPC requests)
+     */
+    private function isBatchRequest(array $data): bool
+    {
+        // If data is an indexed array (not associative), it's a batch
+        return array_keys($data) === range(0, count($data) - 1);
+    }
+
+    /**
+     * Process JSON-RPC batch request (2025-03-26 only)
+     */
+    private function processBatchRequest(
+        array $batchData,
+        ?string $sessionId,
+        array $context,
+        Response $response,
+        string $protocolVersion
+    ): Response {
+        // Batching only supported in 2025-03-26
+        if ($protocolVersion !== '2025-03-26') {
+            throw new ProtocolException('JSON-RPC batching not supported in this protocol version', -32600);
+        }
+
+        if (empty($batchData)) {
+            throw new ProtocolException('Invalid Request: empty batch', -32600);
+        }
+
+        $batchResponses = [];
+        $hasNotifications = false;
+
+        foreach ($batchData as $index => $requestData) {
+            if (!is_array($requestData)) {
+                throw new ProtocolException('Invalid Request: batch item must be object', -32600);
+            }
+
+            try {
+                // Process each request in the batch
+                $singleResponse = $this->processSingleMessage($requestData, $sessionId, $context, $response, $protocolVersion);
+
+                // Check if this was a notification (no response expected)
+                $hasId = array_key_exists('id', $requestData);
+                $isNotification = !$hasId || $requestData['id'] === null;
+
+                if (!$isNotification) {
+                    // Extract the JSON response from the single response
+                    $responseBody = $singleResponse->getBody()->getContents();
+                    $responseData = json_decode($responseBody, true);
+
+                    if ($responseData && isset($responseData['result']) || isset($responseData['error'])) {
+                        $batchResponses[] = $responseData;
+                    }
+                } else {
+                    $hasNotifications = true;
+                }
+            } catch (ProtocolException $e) {
+                // Add error response for this batch item
+                $batchResponses[] = [
+                    'jsonrpc' => '2.0',
+                    'error' => [
+                        'code' => $e->getCode(),
+                        'message' => $e->getMessage()
+                    ],
+                    'id' => $requestData['id'] ?? null
+                ];
+            }
+        }
+
+        // If all requests were notifications, return 202 with no body
+        if (empty($batchResponses) && $hasNotifications) {
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withHeader('Access-Control-Allow-Origin', '*')
+                ->withStatus(202);
+        }
+
+        // Return batch response
+        $response->getBody()->write(json_encode($batchResponses));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withHeader('Access-Control-Allow-Origin', '*')
+            ->withStatus(200);
+    }
+
+    /**
+     * Process single JSON-RPC message
+     */
+    private function processSingleMessage(
+        array $data,
+        ?string $sessionId,
+        array $context,
+        Response $response,
+        string $protocolVersion
+    ): Response {
+
         if (!isset($data['jsonrpc']) || $data['jsonrpc'] !== '2.0') {
             throw new ProtocolException('Invalid Request', -32600);
         }
@@ -115,9 +224,7 @@ class MessageHandler
 
         $isNotification = $isExplicitNotification || !$hasId;
 
-        $protocolVersion = $this->getSessionVersion($sessionId);
-
-        // Skip version gating for initialize method as it handles version negotiation
+        // Skip version gating for initialize method
         if ($method !== 'initialize') {
             if (!$this->isMethodSupported($method, $protocolVersion)) {
                 if ($isNotification) {
@@ -131,6 +238,7 @@ class MessageHandler
             }
         }
 
+        // Duplicate request ID check
         if (!$isNotification && $sessionId !== null && $id !== null) {
             if (!isset($this->sessionRequestIds[$sessionId])) {
                 $this->sessionRequestIds[$sessionId] = [];
@@ -149,51 +257,57 @@ class MessageHandler
                 ->withStatus(202);
         }
 
+        // Handle the actual method calls
         try {
             switch ($method) {
-            case 'initialize':
-                return $this->handleInitialize($params, $id, $sessionId, $response);
+                case 'initialize':
+                    return $this->handleInitialize($params, $id, $sessionId, $response);
 
-            case 'ping':
-                return $this->handlePing($id, $sessionId, $context, $response);
+                case 'ping':
+                    return $this->handlePing($id, $sessionId, $context, $response);
 
-            case 'tools/list':
-                return $this->handleToolsList($id, $sessionId, $context, $response);
+                case 'tools/list':
+                    return $this->handleToolsList($id, $sessionId, $context, $response);
 
-            case 'tools/call':
-                return $this->handleToolsCall($params, $id, $sessionId, $context, $response);
+                case 'tools/call':
+                    return $this->handleToolsCall($params, $id, $sessionId, $context, $response);
 
-            case 'prompts/list':
-                return $this->handlePromptsList($id, $sessionId, $context, $response);
+                case 'prompts/list':
+                    return $this->handlePromptsList($id, $sessionId, $context, $response);
 
-            case 'prompts/get':
-                return $this->handlePromptsGet($params, $id, $sessionId, $context, $response);
+                case 'prompts/get':
+                    return $this->handlePromptsGet($params, $id, $sessionId, $context, $response);
 
-            case 'resources/list':
-                return $this->handleResourcesList($id, $sessionId, $context, $response);
+                case 'resources/list':
+                    return $this->handleResourcesList($id, $sessionId, $context, $response);
 
-            case 'resources/read':
-                return $this->handleResourcesRead($params, $id, $sessionId, $context, $response);
+                case 'resources/read':
+                    return $this->handleResourcesRead($params, $id, $sessionId, $context, $response);
 
-            case 'resources/templates/list':
-                return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
-            case 'completions/complete':
-                return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
-            case 'elicitation/create':
-                return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
-            case 'sampling/createMessage':
-                return $this->handleSamplingResponse($params, $id, $sessionId, $context, $response);
-            case 'roots/list':
-                return $this->handleRootsListResponse($params, $id, $sessionId, $context, $response);
+                case 'resources/templates/list':
+                    return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
 
-            case 'roots/read':
-            case 'roots/listDirectory':
-                return $this->handleRootsReadResponse($params, $id, $sessionId, $context, $response);
-            default:
-                if (!$sessionId) {
-                    throw new ProtocolException('Session required', -32001);
-                }
-                return $this->storeErrorResponse($sessionId, -32601, 'Method not found', $id, $response);
+                case 'completions/complete':
+                    return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
+
+                case 'elicitation/create':
+                    return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
+
+                case 'sampling/createMessage':
+                    return $this->handleSamplingResponse($params, $id, $sessionId, $context, $response);
+
+                case 'roots/list':
+                    return $this->handleRootsListResponse($params, $id, $sessionId, $context, $response);
+
+                case 'roots/read':
+                case 'roots/listDirectory':
+                    return $this->handleRootsReadResponse($params, $id, $sessionId, $context, $response);
+
+                default:
+                    if (!$sessionId) {
+                        throw new ProtocolException('Session required', -32001);
+                    }
+                    return $this->storeErrorResponse($sessionId, -32601, 'Method not found', $id, $response);
             }
         } catch (ProtocolException $e) {
             throw $e;
@@ -709,8 +823,10 @@ class MessageHandler
                     'structuredContent' => $result['data']
                     ];
 
-                    if (isset($result['_meta']['resourceLinks'])) {
-                        $wrappedResult['resourceLinks'] = $result['_meta']['resourceLinks'];
+                    if ($this->isFeatureSupported('resource_links', $sessionVersion)) {
+                        if (isset($result['_meta']['resourceLinks'])) {
+                            $wrappedResult['resourceLinks'] = $result['_meta']['resourceLinks'];
+                        }
                     }
                 } else {
                     $wrappedResult = [
