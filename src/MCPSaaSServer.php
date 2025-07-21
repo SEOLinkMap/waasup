@@ -439,6 +439,97 @@ class MCPSaaSServer
     }
 
     /**
+     * Request LLM sampling from connected client
+     */
+    public function requestSampling(
+        string $sessionId,
+        array $messages,
+        array $options = []
+    ): string {
+        return $this->messageHandler->requestSampling(
+            $sessionId,
+            $messages,
+            $options,
+            $this->contextData ?? []
+        );
+    }
+
+    /**
+     * Get sampling response by request ID
+     */
+    public function getSamplingResponse(string $sessionId, string $requestId): ?array
+    {
+        return $this->storage->getSamplingResponse($sessionId, $requestId);
+    }
+
+    /**
+     * Get all sampling responses for session
+     */
+    public function getSamplingResponses(string $sessionId): array
+    {
+        return $this->storage->getSamplingResponses($sessionId);
+    }
+
+    /**
+     * Request list of available filesystem roots from client
+     */
+    public function requestRootsList(string $sessionId): string
+    {
+        return $this->messageHandler->requestRootsList(
+            $sessionId,
+            $this->contextData ?? []
+        );
+    }
+
+    /**
+     * Request file/directory read from client filesystem
+     */
+    public function requestRootsRead(
+        string $sessionId,
+        string $uri,
+        array $options = []
+    ): string {
+        return $this->messageHandler->requestRootsRead(
+            $sessionId,
+            $uri,
+            $options,
+            $this->contextData ?? []
+        );
+    }
+
+    /**
+     * Request directory listing from client filesystem
+     */
+    public function requestRootsListDirectory(
+        string $sessionId,
+        string $uri,
+        array $options = []
+    ): string {
+        return $this->messageHandler->requestRootsListDirectory(
+            $sessionId,
+            $uri,
+            $options,
+            $this->contextData ?? []
+        );
+    }
+
+    /**
+     * Get roots response by request ID
+     */
+    public function getRootsResponse(string $sessionId, string $requestId): ?array
+    {
+        return $this->storage->getRootsResponse($sessionId, $requestId);
+    }
+
+    /**
+     * Get all roots responses for session
+     */
+    public function getRootsResponses(string $sessionId): array
+    {
+        return $this->storage->getRootsResponses($sessionId);
+    }
+
+    /**
      * Get default configuration
      */
     private function getDefaultConfig(): array

@@ -109,6 +109,28 @@ CREATE TABLE `mcp_oauth_tokens` (
     CONSTRAINT `fk_tokens_client` FOREIGN KEY (`client_id`) REFERENCES `mcp_oauth_clients` (`client_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `mcp_sampling_responses` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `session_id` varchar(255) NOT NULL,
+    `request_id` varchar(255) NOT NULL,
+    `response_data` longtext NOT NULL,
+    `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_session_request` (`session_id`, `request_id`),
+    KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `mcp_roots_responses` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `session_id` varchar(255) NOT NULL,
+    `request_id` varchar(255) NOT NULL,
+    `response_data` longtext NOT NULL,
+    `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_session_request` (`session_id`, `request_id`),
+    KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Sample data for MySQL
 INSERT INTO `mcp_agencies` (`uuid`, `name`, `active`) VALUES
 ('550e8400-e29b-41d4-a716-446655440000', 'Test Agency', 1);

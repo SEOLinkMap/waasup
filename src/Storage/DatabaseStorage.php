@@ -485,6 +485,134 @@ class DatabaseStorage implements StorageInterface
         return true;
     }
 
+    public function storeSamplingResponse(string $sessionId, string $requestId, array $responseData): bool
+    {
+        $sql = "INSERT INTO `{$this->tablePrefix}sampling_responses`
+            (`session_id`, `request_id`, `response_data`, `created_at`)
+            VALUES (:session_id, :request_id, :response_data, :created_at)";
+
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute(
+            [
+            ':session_id' => $sessionId,
+            ':request_id' => $requestId,
+            ':response_data' => json_encode($responseData),
+            ':created_at' => $this->getCurrentTimestamp()
+            ]
+        );
+    }
+
+    public function getSamplingResponse(string $sessionId, string $requestId): ?array
+    {
+        $sql = "SELECT `response_data`, `created_at` FROM `{$this->tablePrefix}sampling_responses`
+            WHERE `session_id` = :session_id AND `request_id` = :request_id
+            ORDER BY `created_at` DESC LIMIT 1";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(
+            [
+            ':session_id' => $sessionId,
+            ':request_id' => $requestId
+            ]
+        );
+
+        $result = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($result) {
+            return [
+            'data' => json_decode($result['response_data'], true),
+            'created_at' => $result['created_at']
+            ];
+        }
+
+        return null;
+    }
+
+    public function getSamplingResponses(string $sessionId): array
+    {
+        $sql = "SELECT `request_id`, `response_data`, `created_at`
+            FROM `{$this->tablePrefix}sampling_responses`
+            WHERE `session_id` = :session_id
+            ORDER BY `created_at` ASC";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':session_id' => $sessionId]);
+
+        $responses = [];
+        while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+            $responses[] = [
+            'request_id' => $row['request_id'],
+            'data' => json_decode($row['response_data'], true),
+            'created_at' => $row['created_at']
+            ];
+        }
+
+        return $responses;
+    }
+
+    public function storeRootsResponse(string $sessionId, string $requestId, array $responseData): bool
+    {
+        $sql = "INSERT INTO `{$this->tablePrefix}roots_responses`
+            (`session_id`, `request_id`, `response_data`, `created_at`)
+            VALUES (:session_id, :request_id, :response_data, :created_at)";
+
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute(
+            [
+            ':session_id' => $sessionId,
+            ':request_id' => $requestId,
+            ':response_data' => json_encode($responseData),
+            ':created_at' => $this->getCurrentTimestamp()
+            ]
+        );
+    }
+
+    public function getRootsResponse(string $sessionId, string $requestId): ?array
+    {
+        $sql = "SELECT `response_data`, `created_at` FROM `{$this->tablePrefix}roots_responses`
+            WHERE `session_id` = :session_id AND `request_id` = :request_id
+            ORDER BY `created_at` DESC LIMIT 1";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(
+            [
+            ':session_id' => $sessionId,
+            ':request_id' => $requestId
+            ]
+        );
+
+        $result = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($result) {
+            return [
+            'data' => json_decode($result['response_data'], true),
+            'created_at' => $result['created_at']
+            ];
+        }
+
+        return null;
+    }
+
+    public function getRootsResponses(string $sessionId): array
+    {
+        $sql = "SELECT `request_id`, `response_data`, `created_at`
+            FROM `{$this->tablePrefix}roots_responses`
+            WHERE `session_id` = :session_id
+            ORDER BY `created_at` ASC";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':session_id' => $sessionId]);
+
+        $responses = [];
+        while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+            $responses[] = [
+            'request_id' => $row['request_id'],
+            'data' => json_decode($row['response_data'], true),
+            'created_at' => $row['created_at']
+            ];
+        }
+
+        return $responses;
+    }
+
     private function getDefaultConfig(): array
     {
         return [

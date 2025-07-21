@@ -101,4 +101,34 @@ interface StorageInterface
      * Find user by email address
      */
     public function findUserByEmail(string $email): ?array;
+
+    /**
+     * Store sampling response from client
+     */
+    public function storeSamplingResponse(string $sessionId, string $requestId, array $responseData): bool;
+
+    /**
+     * Get sampling response by request ID
+     */
+    public function getSamplingResponse(string $sessionId, string $requestId): ?array;
+
+    /**
+     * Get all pending sampling responses for a session
+     */
+    public function getSamplingResponses(string $sessionId): array;
+
+    /**
+     * Store roots response from client
+     */
+    public function storeRootsResponse(string $sessionId, string $requestId, array $responseData): bool;
+
+    /**
+     * Get roots response by request ID
+     */
+    public function getRootsResponse(string $sessionId, string $requestId): ?array;
+
+    /**
+     * Get all pending roots responses for a session
+     */
+    public function getRootsResponses(string $sessionId): array;
 }

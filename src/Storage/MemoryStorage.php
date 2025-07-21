@@ -17,6 +17,8 @@ class MemoryStorage implements StorageInterface
     private array $oauthClients = [];
     private array $authCodes = [];
     private array $users = [];
+    private array $samplingResponses = [];
+    private array $rootsResponses = [];
 
     public function __construct()
     {
@@ -46,6 +48,76 @@ class MemoryStorage implements StorageInterface
     public function getMessages(string $sessionId, array $context = []): array
     {
         return $this->messages[$sessionId] ?? [];
+    }
+
+    public function storeSamplingResponse(string $sessionId, string $requestId, array $responseData): bool
+    {
+        if (!isset($this->samplingResponses[$sessionId])) {
+            $this->samplingResponses[$sessionId] = [];
+        }
+
+        $this->samplingResponses[$sessionId][$requestId] = [
+        'data' => $responseData,
+        'created_at' => time()
+        ];
+
+        return true;
+    }
+
+    public function getSamplingResponse(string $sessionId, string $requestId): ?array
+    {
+        return $this->samplingResponses[$sessionId][$requestId] ?? null;
+    }
+
+    public function getSamplingResponses(string $sessionId): array
+    {
+        $responses = [];
+        $sessionResponses = $this->samplingResponses[$sessionId] ?? [];
+
+        foreach ($sessionResponses as $requestId => $response) {
+            $responses[] = [
+            'request_id' => $requestId,
+            'data' => $response['data'],
+            'created_at' => $response['created_at']
+            ];
+        }
+
+        return $responses;
+    }
+
+    public function storeRootsResponse(string $sessionId, string $requestId, array $responseData): bool
+    {
+        if (!isset($this->rootsResponses[$sessionId])) {
+            $this->rootsResponses[$sessionId] = [];
+        }
+
+        $this->rootsResponses[$sessionId][$requestId] = [
+        'data' => $responseData,
+        'created_at' => time()
+        ];
+
+        return true;
+    }
+
+    public function getRootsResponse(string $sessionId, string $requestId): ?array
+    {
+        return $this->rootsResponses[$sessionId][$requestId] ?? null;
+    }
+
+    public function getRootsResponses(string $sessionId): array
+    {
+        $responses = [];
+        $sessionResponses = $this->rootsResponses[$sessionId] ?? [];
+
+        foreach ($sessionResponses as $requestId => $response) {
+            $responses[] = [
+            'request_id' => $requestId,
+            'data' => $response['data'],
+            'created_at' => $response['created_at']
+            ];
+        }
+
+        return $responses;
     }
 
     public function deleteMessage(string $messageId): bool

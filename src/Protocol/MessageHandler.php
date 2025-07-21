@@ -110,15 +110,17 @@ class MessageHandler
             case 'resources/templates/list':
                 return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
             case 'completions/complete':
-                if ($this->isFeatureSupported('completions', $this->getSessionVersion($sessionId))) {
-                    return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
-                }
-                break;
+                return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
             case 'elicitation/create':
-                if ($this->isFeatureSupported('elicitation', $this->getSessionVersion($sessionId))) {
-                    return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
-                }
-                break;
+                return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
+            case 'sampling/createMessage':
+                return $this->handleSamplingResponse($params, $id, $sessionId, $context, $response);
+            case 'roots/list':
+                return $this->handleRootsListResponse($params, $id, $sessionId, $context, $response);
+
+            case 'roots/read':
+            case 'roots/listDirectory':
+                return $this->handleRootsReadResponse($params, $id, $sessionId, $context, $response);
             default:
                 if (!$sessionId) {
                     throw new ProtocolException('Session required', -32001);
@@ -190,6 +192,14 @@ class MessageHandler
             $capabilities['elicitation'] = true;
         }
 
+        if ($this->isFeatureSupported('sampling', $selectedVersion)) {
+            $capabilities['sampling'] = [];
+        }
+
+        if ($this->isFeatureSupported('roots', $selectedVersion)) {
+            $capabilities['roots'] = ['listChanged' => true];
+        }
+
         $result = [
         'protocolVersion' => $selectedVersion,
         'capabilities' => $capabilities,
@@ -216,16 +226,186 @@ class MessageHandler
     private function isFeatureSupported(string $feature, string $version): bool
     {
         $featureMatrix = [
-        'tool_annotations' => ['2025-03-26', '2025-06-18'],
-        'audio_content' => ['2025-03-26', '2025-06-18'],
-        'structured_outputs' => ['2025-06-18'],
-        'elicitation' => ['2025-06-18'],
-        'resource_links' => ['2025-06-18'],
-        'progress_messages' => ['2025-03-26', '2025-06-18'],
-        'completions' => ['2025-03-26', '2025-06-18']
+            'tool_annotations' => ['2025-03-26', '2025-06-18'],
+            'audio_content' => ['2025-03-26', '2025-06-18'],
+            'structured_outputs' => ['2025-06-18'],
+            'elicitation' => ['2025-06-18'],
+            'resource_links' => ['2025-06-18'],
+            'progress_messages' => ['2025-03-26', '2025-06-18'],
+            'completions' => ['2025-03-26', '2025-06-18'],
+            'sampling' => ['2024-11-05', '2025-03-26', '2025-06-18'],
+            'roots' => ['2024-11-05', '2025-03-26', '2025-06-18']
         ];
 
         return in_array($version, $featureMatrix[$feature] ?? []);
+    }
+
+    /**
+     * Initiate a sampling request to the client
+     */
+    public function requestSampling(
+        string $sessionId,
+        array $messages,
+        array $options = [],
+        array $context = []
+    ): string {
+        $requestId = bin2hex(random_bytes(16));
+
+        $samplingRequest = [
+        'jsonrpc' => '2.0',
+        'method' => 'sampling/createMessage',
+        'id' => $requestId,
+        'params' => [
+            'messages' => $messages,
+            'includeContext' => $options['includeContext'] ?? 'none',
+            'temperature' => $options['temperature'] ?? null,
+            'maxTokens' => $options['maxTokens'] ?? null,
+            'stopSequences' => $options['stopSequences'] ?? null,
+            'metadata' => $options['metadata'] ?? []
+        ]
+        ];
+
+        // Store the request for tracking
+        $this->storage->storeMessage($sessionId, $samplingRequest, $context);
+
+        return $requestId;
+    }
+
+    private function handleSamplingResponse(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
+    {
+        if (!$sessionId) {
+            throw new ProtocolException('Session required', -32001);
+        }
+
+        // This would be called when client responds to our sampling request
+        // Store the response for the application to process
+        $samplingResult = [
+        'requestId' => $id,
+        'model' => $params['model'] ?? null,
+        'stopReason' => $params['stopReason'] ?? null,
+        'role' => $params['role'] ?? 'assistant',
+        'content' => $params['content'] ?? []
+        ];
+
+        // Store result with special marker for sampling responses
+        $resultData = [
+        'type' => 'sampling_response',
+        'result' => $samplingResult,
+        'timestamp' => time()
+        ];
+
+        $this->storage->storeSamplingResponse($sessionId, $id, $resultData);
+
+        return $this->storeSuccessResponse($sessionId, ['received' => true], $id, $response);
+    }
+
+    /**
+     * Request roots list from connected client
+     */
+    public function requestRootsList(string $sessionId, array $context = []): string
+    {
+        $requestId = bin2hex(random_bytes(16));
+
+        $rootsRequest = [
+        'jsonrpc' => '2.0',
+        'method' => 'roots/list',
+        'id' => $requestId,
+        'params' => []
+        ];
+
+        $this->storage->storeMessage($sessionId, $rootsRequest, $context);
+
+        return $requestId;
+    }
+
+    /**
+     * Request file/directory operations from client roots
+     */
+    public function requestRootsRead(
+        string $sessionId,
+        string $uri,
+        array $options = [],
+        array $context = []
+    ): string {
+        $requestId = bin2hex(random_bytes(16));
+
+        $readRequest = [
+        'jsonrpc' => '2.0',
+        'method' => 'roots/read',
+        'id' => $requestId,
+        'params' => array_merge(['uri' => $uri], $options)
+        ];
+
+        $this->storage->storeMessage($sessionId, $readRequest, $context);
+
+        return $requestId;
+    }
+
+    /**
+     * Request directory listing from client roots
+     */
+    public function requestRootsListDirectory(
+        string $sessionId,
+        string $uri,
+        array $options = [],
+        array $context = []
+    ): string {
+        $requestId = bin2hex(random_bytes(16));
+
+        $listRequest = [
+        'jsonrpc' => '2.0',
+        'method' => 'roots/listDirectory',
+        'id' => $requestId,
+        'params' => array_merge(['uri' => $uri], $options)
+        ];
+
+        $this->storage->storeMessage($sessionId, $listRequest, $context);
+
+        return $requestId;
+    }
+
+    private function handleRootsListResponse(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
+    {
+        if (!$sessionId) {
+            throw new ProtocolException('Session required', -32001);
+        }
+
+        $rootsResult = [
+        'requestId' => $id,
+        'roots' => $params['roots'] ?? []
+        ];
+
+        $resultData = [
+        'type' => 'roots_list_response',
+        'result' => $rootsResult,
+        'timestamp' => time()
+        ];
+
+        $this->storage->storeRootsResponse($sessionId, $id, $resultData);
+
+        return $this->storeSuccessResponse($sessionId, ['received' => true], $id, $response);
+    }
+
+    private function handleRootsReadResponse(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
+    {
+        if (!$sessionId) {
+            throw new ProtocolException('Session required', -32001);
+        }
+
+        $readResult = [
+        'requestId' => $id,
+        'contents' => $params['contents'] ?? []
+        ];
+
+        $resultData = [
+        'type' => 'roots_read_response',
+        'result' => $readResult,
+        'timestamp' => time()
+        ];
+
+        $this->storage->storeRootsResponse($sessionId, $id, $resultData);
+
+        return $this->storeSuccessResponse($sessionId, ['received' => true], $id, $response);
     }
 
     private function getSessionVersion(?string $sessionId): string
