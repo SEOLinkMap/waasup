@@ -10,9 +10,6 @@ use Psr\Http\Server\RequestHandlerInterface as RequestHandler;
 use Seolinkmap\Waasup\Exception\AuthenticationException;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 
-/**
- * Generic OAuth authentication middleware for MCP
- */
 class AuthMiddleware
 {
     private StorageInterface $storage;
@@ -32,9 +29,6 @@ class AuthMiddleware
         $this->config = array_merge($this->getDefaultConfig(), $config);
     }
 
-    /**
-     * Process authentication and validate OAuth tokens with resource binding
-     */
     public function __invoke(Request $request, RequestHandler $handler): Response
     {
         try {
@@ -53,28 +47,22 @@ class AuthMiddleware
             $accessToken = $this->extractAccessToken($request);
 
             if (!$accessToken) {
-                return $this->createOAuthDiscoveryResponse();
+                return $this->createOAuthDiscoveryResponse($request);
             }
 
             $tokenData = $this->validateToken($accessToken, $contextData);
 
             if (!$tokenData) {
-                return $this->createOAuthDiscoveryResponse();
+                return $this->createOAuthDiscoveryResponse($request);
             }
 
             $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
 
-            // Validate resource binding for MCP 2025-06-18 OAuth Resource Server requirements
+            // OAuth Resource Server validation for 2025-06-18
             if ($protocolVersion === '2025-06-18') {
-                $baseUrl = $this->getBaseUrl($request);
-                $expectedResource = $baseUrl . '/mcp/' . $contextId;
-
-                if (isset($tokenData['resource']) && $tokenData['resource'] !== $expectedResource) {
-                    throw new AuthenticationException('Token not bound to this resource');
-                }
+                $this->validateResourceServerRequirements($request, $tokenData);
             }
 
-            // Add context data including protocol version to request
             $request = $request->withAttribute(
                 'mcp_context',
                 [
@@ -88,110 +76,52 @@ class AuthMiddleware
 
             return $handler->handle($request);
         } catch (AuthenticationException $e) {
-            return $this->createOAuthDiscoveryResponse();
+            return $this->createOAuthDiscoveryResponse($request);
         } catch (\Exception $e) {
             return $this->createErrorResponse('Internal authentication error', 500);
         }
     }
 
-    /**
-     * Extract context identifier from request
-     * Override this method for custom routing schemes
-     */
-    protected function extractContextId(Request $request): ?string
+    // RFC 8707 Resource Indicators validation for 2025-06-18
+    private function validateResourceServerRequirements(Request $request, array $tokenData): void
     {
-        $route = $request->getAttribute('__route__');
+        $baseUrl = $this->getBaseUrl($request);
+        $contextId = $this->extractContextId($request);
+        $expectedResource = $baseUrl . '/mcp/' . $contextId;
 
-        if ($route && method_exists($route, 'getArgument')) {
-            // Try common parameter names
-            $contextId = $route->getArgument('agencyUuid') ??
-                        $route->getArgument('userId') ??
-                        $route->getArgument('contextId');
+        // Token must be bound to this specific resource
+        if (!isset($tokenData['resource']) || $tokenData['resource'] !== $expectedResource) {
+            throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
+        }
 
-            if ($contextId) {
-                return $contextId;
+        // Audience validation prevents token mis-redemption
+        if (!isset($tokenData['aud']) || !in_array($expectedResource, (array)$tokenData['aud'])) {
+            throw new AuthenticationException('Token audience validation failed');
+        }
+
+        if (isset($tokenData['scope']) && !$this->validateTokenScope($tokenData['scope'])) {
+            throw new AuthenticationException('Token scope invalid for this resource server');
+        }
+    }
+
+    private function validateTokenScope(string $scope): bool
+    {
+        $tokenScopes = explode(' ', $scope);
+        $requiredScopes = $this->config['required_scopes'] ?? ['mcp:read'];
+
+        foreach ($requiredScopes as $requiredScope) {
+            if (!in_array($requiredScope, $tokenScopes)) {
+                return false;
             }
         }
 
-        // Fallback to path parsing
-        $path = $request->getUri()->getPath();
-        $segments = explode('/', trim($path, '/'));
-
-        // Look for UUID-like strings in path
-        foreach ($segments as $segment) {
-            if ($this->isValidUuid($segment)) {
-                return $segment;
-            }
-        }
-
-        return null;
+        return true;
     }
 
-    /**
-     * Validate context data
-     */
-    protected function validateContext(string $contextId): ?array
+    protected function createOAuthDiscoveryResponse(Request $request): Response
     {
-        // Try different context types
-        $contextTypes = $this->config['context_types'] ?? ['agency', 'user'];
-
-        foreach ($contextTypes as $type) {
-            $contextData = $this->storage->getContextData($contextId, $type);
-            if ($contextData) {
-                $contextData['context_type'] = $type;
-                return $contextData;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Extract Bearer token from Authorization header
-     */
-    protected function extractAccessToken(Request $request): ?string
-    {
-        $authHeader = $request->getHeaderLine('Authorization');
-
-        if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
-            return $matches[1];
-        }
-
-        return null;
-    }
-
-    /**
-     * Validate OAuth token
-     */
-    protected function validateToken(string $accessToken, array $contextData): ?array
-    {
-        $tokenData = $this->storage->validateToken($accessToken, $contextData);
-
-        if (!$tokenData) {
-            return null;
-        }
-
-        // Additional validation can be added here
-        if ($this->config['validate_scope'] && isset($tokenData['scope'])) {
-            $requiredScopes = $this->config['required_scopes'] ?? [];
-            $tokenScopes = explode(' ', $tokenData['scope']);
-
-            foreach ($requiredScopes as $requiredScope) {
-                if (!in_array($requiredScope, $tokenScopes)) {
-                    return null;
-                }
-            }
-        }
-
-        return $tokenData;
-    }
-
-    /**
-     * Create OAuth discovery response
-     */
-    protected function createOAuthDiscoveryResponse(): Response
-    {
-        $baseUrl = $this->config['base_url'] ?? 'https://localhost';
+        $baseUrl = $this->config['base_url'] ?? $this->getBaseUrl($request);
+        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
 
         $responseData = [
             'jsonrpc' => '2.0',
@@ -209,6 +139,16 @@ class AuthMiddleware
             'id' => null
         ];
 
+        // OAuth Resource Server metadata for 2025-06-18
+        if ($protocolVersion === '2025-06-18') {
+            $contextId = $this->extractContextId($request);
+            $resourceUrl = $baseUrl . '/mcp/' . $contextId;
+
+            $responseData['error']['data']['oauth']['resource'] = $resourceUrl;
+            $responseData['error']['data']['oauth']['resource_metadata_endpoint'] = $baseUrl . '/.well-known/oauth-protected-resource';
+            $responseData['error']['data']['oauth']['authorization_server_metadata_endpoint'] = $baseUrl . '/.well-known/oauth-authorization-server';
+        }
+
         $jsonContent = json_encode($responseData);
         if ($jsonContent === false) {
             $jsonContent = '{"jsonrpc":"2.0","error":{"code":-32000,"message":"JSON encoding error"},"id":null}';
@@ -216,16 +156,99 @@ class AuthMiddleware
 
         $stream = $this->streamFactory->createStream($jsonContent);
 
-        return $this->responseFactory->createResponse(401)
+        $response = $this->responseFactory->createResponse(401)
             ->withBody($stream)
             ->withHeader('Content-Type', 'application/json')
-            ->withHeader('WWW-Authenticate', 'Bearer realm="MCP Server"')
             ->withHeader('Access-Control-Allow-Origin', '*');
+
+        // WWW-Authenticate header with resource metadata for 2025-06-18
+        if ($protocolVersion === '2025-06-18') {
+            $resourceMetadataUrl = $baseUrl . '/.well-known/oauth-protected-resource';
+            $response = $response->withHeader(
+                'WWW-Authenticate',
+                'Bearer realm="MCP Server", resource_metadata="' . $resourceMetadataUrl . '"'
+            );
+        } else {
+            $response = $response->withHeader('WWW-Authenticate', 'Bearer realm="MCP Server"');
+        }
+
+        return $response;
     }
 
-    /**
-     * Create generic error response
-     */
+    protected function validateToken(string $accessToken, array $contextData): ?array
+    {
+        $tokenData = $this->storage->validateToken($accessToken, $contextData);
+
+        if (!$tokenData) {
+            return null;
+        }
+
+        if ($this->config['validate_scope'] && isset($tokenData['scope'])) {
+            $requiredScopes = $this->config['required_scopes'] ?? [];
+            $tokenScopes = explode(' ', $tokenData['scope']);
+
+            foreach ($requiredScopes as $requiredScope) {
+                if (!in_array($requiredScope, $tokenScopes)) {
+                    return null;
+                }
+            }
+        }
+
+        return $tokenData;
+    }
+
+    protected function extractContextId(Request $request): ?string
+    {
+        $route = $request->getAttribute('__route__');
+
+        if ($route && method_exists($route, 'getArgument')) {
+            $contextId = $route->getArgument('agencyUuid') ??
+                        $route->getArgument('userId') ??
+                        $route->getArgument('contextId');
+
+            if ($contextId) {
+                return $contextId;
+            }
+        }
+
+        $path = $request->getUri()->getPath();
+        $segments = explode('/', trim($path, '/'));
+
+        foreach ($segments as $segment) {
+            if ($this->isValidUuid($segment)) {
+                return $segment;
+            }
+        }
+
+        return null;
+    }
+
+    protected function validateContext(string $contextId): ?array
+    {
+        $contextTypes = $this->config['context_types'] ?? ['agency', 'user'];
+
+        foreach ($contextTypes as $type) {
+            $contextData = $this->storage->getContextData($contextId, $type);
+            if ($contextData) {
+                $contextData['context_type'] = $type;
+                return $contextData;
+            }
+        }
+
+        return null;
+    }
+
+    protected function extractAccessToken(Request $request): ?string
+    {
+        $authHeader = $request->getHeaderLine('Authorization');
+
+        if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+            return $matches[1];
+        }
+
+        return null;
+    }
+
     protected function createErrorResponse(string $message, int $status): Response
     {
         $responseData = [
@@ -250,17 +273,11 @@ class AuthMiddleware
             ->withHeader('Access-Control-Allow-Origin', '*');
     }
 
-    /**
-     * Validate UUID format
-     */
     protected function isValidUuid(string $uuid): bool
     {
         return preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $uuid) === 1;
     }
 
-    /**
-     * Get base URL from request
-     */
     protected function getBaseUrl(Request $request): string
     {
         $uri = $request->getUri();
@@ -268,16 +285,15 @@ class AuthMiddleware
                ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
-    /**
-     * Get default configuration
-     */
     protected function getDefaultConfig(): array
     {
         return [
             'context_types' => ['agency', 'user'],
-            'validate_scope' => false,
-            'required_scopes' => [],
-            'base_url' => 'https://localhost'
+            'validate_scope' => true,
+            'required_scopes' => ['mcp:read'],
+            'base_url' => 'https://localhost',
+            'resource_server_metadata' => true,
+            'require_resource_binding' => true
         ];
     }
 }

@@ -5,9 +5,6 @@ namespace Seolinkmap\Waasup\Discovery;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
-/**
- * Provides OAuth discovery endpoints (.well-known)
- */
 class WellKnownProvider
 {
     private array $config;
@@ -17,35 +14,54 @@ class WellKnownProvider
         $this->config = array_merge($this->getDefaultConfig(), $config);
     }
 
-    /**
-     * OAuth protected resource discovery with MCP 2025-06-18 enhancements
-     */
+    // OAuth Resource Server metadata (RFC 9728) with version-specific features
     public function protectedResource(Request $request, Response $response): Response
     {
         $baseUrl = $this->getBaseUrl($request);
-        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
+        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: $this->detectProtocolFromPath($request);
 
         $discovery = [
             'resource' => $baseUrl,
             'authorization_servers' => [$baseUrl],
             'bearer_methods_supported' => ['header'],
-            'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read']
+            'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read', 'mcp:write']
         ];
 
-        // Add OAuth Resource Server metadata for MCP 2025-06-18
         if ($protocolVersion === '2025-06-18') {
+            // OAuth Resource Server features for 2025-06-18
             $discovery['resource_server'] = true;
             $discovery['resource_indicators_supported'] = true;
             $discovery['token_binding_supported'] = true;
+            $discovery['audience_validation_required'] = true;
+            $discovery['resource_indicator_endpoint'] = $baseUrl . '/oauth/resource';
+            $discovery['token_endpoint_auth_methods_supported'] = ['client_secret_post', 'private_key_jwt'];
+            $discovery['token_binding_methods_supported'] = ['resource_indicator'];
+            $discovery['content_types_supported'] = ['application/json', 'text/event-stream'];
+            $discovery['mcp_features_supported'] = [
+                'tools', 'prompts', 'resources', 'sampling', 'roots', 'ping',
+                'progress_notifications', 'tool_annotations', 'audio_content',
+                'completions', 'elicitation', 'structured_outputs', 'resource_links'
+            ];
+        } elseif ($protocolVersion === '2025-03-26') {
+            $discovery['streamable_http_supported'] = true;
+            $discovery['json_rpc_batching_supported'] = true;
+            $discovery['mcp_features_supported'] = [
+                'tools', 'prompts', 'resources', 'sampling', 'roots', 'ping',
+                'progress_notifications', 'tool_annotations', 'audio_content', 'completions'
+            ];
+        } else {
+            // 2024-11-05 basic features
+            $discovery['http_sse_supported'] = true;
+            $discovery['mcp_features_supported'] = [
+                'tools', 'prompts', 'resources', 'sampling', 'roots', 'ping', 'progress_notifications'
+            ];
         }
 
         $response->getBody()->write(json_encode($discovery));
         return $response->withHeader('Content-Type', 'application/json');
     }
 
-    /**
-     * OAuth authorization server discovery with version support
-     */
+    // OAuth Authorization Server metadata with version support
     public function authorizationServer(Request $request, Response $response): Response
     {
         $baseUrl = $this->getBaseUrl($request);
@@ -64,10 +80,19 @@ class WellKnownProvider
             'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read']
         ];
 
-        // Add resource indicators support for MCP 2025-06-18
+        // Resource indicators support for 2025-06-18
         if ($protocolVersion === '2025-06-18') {
             $discovery['resource_indicators_supported'] = true;
             $discovery['token_binding_methods_supported'] = ['resource_indicator'];
+            $discovery['require_resource_parameter'] = true;
+            $discovery['pkce_methods_supported'] = ['S256'];
+            $discovery['token_endpoint_auth_methods_supported'] = ['client_secret_post', 'private_key_jwt', 'none'];
+        }
+
+        // OAuth 2.1 features for 2025-03-26+
+        if (in_array($protocolVersion, ['2025-03-26', '2025-06-18'])) {
+            $discovery['pkce_required'] = true;
+            $discovery['authorization_response_iss_parameter_supported'] = true;
         }
 
         $response->getBody()->write(json_encode($discovery));
@@ -79,6 +104,21 @@ class WellKnownProvider
         $uri = $request->getUri();
         return $uri->getScheme() . '://' . $uri->getHost() .
                ($uri->getPort() ? ':' . $uri->getPort() : '');
+    }
+
+    // Detect protocol version from request path or default
+    private function detectProtocolFromPath(Request $request): string
+    {
+        $path = $request->getUri()->getPath();
+
+        // Some basic detection logic - can be enhanced
+        if (strpos($path, '2025-06-18') !== false) {
+            return '2025-06-18';
+        } elseif (strpos($path, '2025-03-26') !== false) {
+            return '2025-03-26';
+        }
+
+        return '2024-11-05';
     }
 
     private function getDefaultConfig(): array

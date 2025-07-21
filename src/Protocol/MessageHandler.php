@@ -20,6 +20,7 @@ class MessageHandler
     private VersionNegotiator $versionNegotiator;
     private array $sessionRequestIds = [];
 
+    // MCP spec feature matrix - gates features by protocol version
     private const FEATURE_MATRIX = [
         '2024-11-05' => [
             'tools' => true,
@@ -28,14 +29,17 @@ class MessageHandler
             'sampling' => true,
             'roots' => true,
             'ping' => true,
-            'progress_notifications' => false,
+            'progress_notifications' => true,
             'tool_annotations' => false,
             'audio_content' => false,
             'completions' => false,
             'elicitation' => false,
             'structured_outputs' => false,
             'resource_links' => false,
-            'progress_messages' => false
+            'progress_messages' => false,
+            'json_rpc_batching' => false,
+            'oauth_resource_server' => false,
+            'resource_indicators' => false
         ],
         '2025-03-26' => [
             'tools' => true,
@@ -51,7 +55,10 @@ class MessageHandler
             'elicitation' => false,
             'structured_outputs' => false,
             'resource_links' => false,
-            'progress_messages' => true
+            'progress_messages' => true,
+            'json_rpc_batching' => true,
+            'oauth_resource_server' => false,
+            'resource_indicators' => false
         ],
         '2025-06-18' => [
             'tools' => true,
@@ -67,7 +74,10 @@ class MessageHandler
             'elicitation' => true,
             'structured_outputs' => true,
             'resource_links' => true,
-            'progress_messages' => true
+            'progress_messages' => true,
+            'json_rpc_batching' => true,
+            'oauth_resource_server' => true,
+            'resource_indicators' => true
         ]
     ];
 
@@ -87,9 +97,6 @@ class MessageHandler
         $this->versionNegotiator = $versionNegotiator ?? new VersionNegotiator($config['supported_versions'] ?? ['2025-06-18', '2025-03-26', '2024-11-05']);
     }
 
-    /**
-     * Process message - handle both single messages and batches
-     */
     public function processMessage(
         array $data,
         ?string $sessionId,
@@ -98,27 +105,29 @@ class MessageHandler
     ): Response {
         $protocolVersion = $this->getSessionVersion($sessionId);
 
-        // Check if this is a batch request (array of requests)
+        // MCP 2025-06-18 requires protocol version header validation
+        if ($protocolVersion === '2025-06-18') {
+            if (!isset($context['protocol_version']) || $context['protocol_version'] !== $protocolVersion) {
+                throw new ProtocolException('MCP-Protocol-Version header required and must match negotiated version for 2025-06-18', -32600);
+            }
+        }
+
         if ($this->isBatchRequest($data)) {
+            if (!$this->isFeatureSupported('json_rpc_batching', $protocolVersion)) {
+                throw new ProtocolException('JSON-RPC batching not supported in this protocol version', -32600);
+            }
             return $this->processBatchRequest($data, $sessionId, $context, $response, $protocolVersion);
         }
 
-        // Single request processing (existing logic)
         return $this->processSingleMessage($data, $sessionId, $context, $response, $protocolVersion);
     }
 
-    /**
-     * Check if request is a batch (array of JSON-RPC requests)
-     */
     private function isBatchRequest(array $data): bool
     {
-        // If data is an indexed array (not associative), it's a batch
         return array_keys($data) === range(0, count($data) - 1);
     }
 
-    /**
-     * Process JSON-RPC batch request (2025-03-26 only)
-     */
+    // JSON-RPC batching only supported in 2025-03-26+
     private function processBatchRequest(
         array $batchData,
         ?string $sessionId,
@@ -126,11 +135,6 @@ class MessageHandler
         Response $response,
         string $protocolVersion
     ): Response {
-        // Batching only supported in 2025-03-26
-        if ($protocolVersion !== '2025-03-26') {
-            throw new ProtocolException('JSON-RPC batching not supported in this protocol version', -32600);
-        }
-
         if (empty($batchData)) {
             throw new ProtocolException('Invalid Request: empty batch', -32600);
         }
@@ -144,26 +148,22 @@ class MessageHandler
             }
 
             try {
-                // Process each request in the batch
                 $singleResponse = $this->processSingleMessage($requestData, $sessionId, $context, $response, $protocolVersion);
 
-                // Check if this was a notification (no response expected)
                 $hasId = array_key_exists('id', $requestData);
                 $isNotification = !$hasId || $requestData['id'] === null;
 
                 if (!$isNotification) {
-                    // Extract the JSON response from the single response
                     $responseBody = $singleResponse->getBody()->getContents();
                     $responseData = json_decode($responseBody, true);
 
-                    if ($responseData && isset($responseData['result']) || isset($responseData['error'])) {
+                    if ($responseData && (isset($responseData['result']) || isset($responseData['error']))) {
                         $batchResponses[] = $responseData;
                     }
                 } else {
                     $hasNotifications = true;
                 }
             } catch (ProtocolException $e) {
-                // Add error response for this batch item
                 $batchResponses[] = [
                     'jsonrpc' => '2.0',
                     'error' => [
@@ -175,7 +175,7 @@ class MessageHandler
             }
         }
 
-        // If all requests were notifications, return 202 with no body
+        // All notifications = 202 with no body
         if (empty($batchResponses) && $hasNotifications) {
             return $response
                 ->withHeader('Content-Type', 'application/json')
@@ -183,7 +183,6 @@ class MessageHandler
                 ->withStatus(202);
         }
 
-        // Return batch response
         $response->getBody()->write(json_encode($batchResponses));
         return $response
             ->withHeader('Content-Type', 'application/json')
@@ -191,9 +190,6 @@ class MessageHandler
             ->withStatus(200);
     }
 
-    /**
-     * Process single JSON-RPC message
-     */
     private function processSingleMessage(
         array $data,
         ?string $sessionId,
@@ -238,7 +234,7 @@ class MessageHandler
             }
         }
 
-        // Duplicate request ID check
+        // Prevent duplicate request IDs per session
         if (!$isNotification && $sessionId !== null && $id !== null) {
             if (!isset($this->sessionRequestIds[$sessionId])) {
                 $this->sessionRequestIds[$sessionId] = [];
@@ -257,7 +253,6 @@ class MessageHandler
                 ->withStatus(202);
         }
 
-        // Handle the actual method calls
         try {
             switch ($method) {
             case 'initialize':
@@ -474,9 +469,7 @@ class MessageHandler
         return $requestId;
     }
 
-    /**
-     * Process content array with audio support
-     */
+    // Audio content processing only for 2025-03-26+
     private function processContentWithAudio(array $content, string $protocolVersion): array
     {
         $processedContent = [];
@@ -503,7 +496,6 @@ class MessageHandler
                 break;
 
             case 'audio':
-                // Only allow audio in 2025-03-26+
                 if (!$this->isFeatureSupported('audio_content', $protocolVersion)) {
                     throw new ProtocolException("Audio content not supported in version {$protocolVersion}", -32602);
                 }
@@ -686,28 +678,31 @@ class MessageHandler
         }
     }
 
+    // Elicitation only supported in 2025-06-18
     private function handleElicitationRequest(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
     {
         if (!$sessionId) {
             throw new ProtocolException('Session required', -32001);
         }
 
+        $sessionVersion = $this->getSessionVersion($sessionId);
+        if (!$this->isFeatureSupported('elicitation', $sessionVersion)) {
+            return $this->storeErrorResponse($sessionId, -32601, 'Elicitation not supported in this protocol version', $id, $response);
+        }
+
         $prompt = $params['message'] ?? '';
-        $options = $params['requestedSchema'] ?? null;
+        $requestedSchema = $params['requestedSchema'] ?? null;
 
         $elicitationData = [
         'type' => 'elicitation',
         'prompt' => $prompt,
-        'options' => $options,
+        'requestedSchema' => $requestedSchema,
         'requestId' => $id
         ];
 
         return $this->storeSuccessResponse($sessionId, $elicitationData, $id, $response);
     }
 
-    /**
-     * Request elicitation from client
-     */
     public function requestElicitation(
         string $sessionId,
         string $message,
@@ -764,6 +759,7 @@ class MessageHandler
         ];
     }
 
+    // Progress notifications with version-aware message field
     public function sendProgressNotification(string $sessionId, int $progress, string $message = ''): void
     {
         $protocolVersion = $this->getSessionVersion($sessionId);
@@ -781,6 +777,7 @@ class MessageHandler
         ]
         ];
 
+        // Message field only supported in 2025-03-26+
         if ($this->isFeatureSupported('progress_messages', $protocolVersion)) {
             $notification['params']['message'] = $message;
         }
@@ -832,11 +829,11 @@ class MessageHandler
 
             $sessionVersion = $this->getSessionVersion($sessionId);
 
-            // Process result content if it contains audio
             if (isset($result['content']) && is_array($result['content'])) {
                 $result['content'] = $this->processContentWithAudio($result['content'], $sessionVersion);
             }
 
+            // Structured outputs only in 2025-06-18
             if ($this->isFeatureSupported('structured_outputs', $sessionVersion)) {
                 if (isset($result['_meta']) && $result['_meta']['structured'] === true) {
                     $wrappedResult = [
@@ -849,6 +846,7 @@ class MessageHandler
                     'structuredContent' => $result['data']
                     ];
 
+                    // Resource links only in 2025-06-18
                     if ($this->isFeatureSupported('resource_links', $sessionVersion)) {
                         if (isset($result['_meta']['resourceLinks'])) {
                             $wrappedResult['resourceLinks'] = $result['_meta']['resourceLinks'];
