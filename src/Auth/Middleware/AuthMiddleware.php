@@ -32,24 +32,24 @@ class AuthMiddleware
         $this->config = array_merge($this->getDefaultConfig(), $config);
     }
 
+    /**
+     * Process authentication and validate OAuth tokens with resource binding
+     */
     public function __invoke(Request $request, RequestHandler $handler): Response
     {
         try {
-            // Extract context identifier from route (agency UUID, user ID, etc.)
             $contextId = $this->extractContextId($request);
 
             if (!$contextId) {
                 throw new AuthenticationException('Missing context identifier');
             }
 
-            // Validate context (agency, user, etc.)
             $contextData = $this->validateContext($contextId);
 
             if (!$contextData) {
                 throw new AuthenticationException('Invalid or inactive context');
             }
 
-            // Extract and validate OAuth token
             $accessToken = $this->extractAccessToken($request);
 
             if (!$accessToken) {
@@ -62,14 +62,27 @@ class AuthMiddleware
                 return $this->createOAuthDiscoveryResponse();
             }
 
-            // Add context data to request
+            $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
+
+            // Validate resource binding for MCP 2025-06-18 OAuth Resource Server requirements
+            if ($protocolVersion === '2025-06-18') {
+                $baseUrl = $this->getBaseUrl($request);
+                $expectedResource = $baseUrl . '/mcp/' . $contextId;
+
+                if (isset($tokenData['resource']) && $tokenData['resource'] !== $expectedResource) {
+                    throw new AuthenticationException('Token not bound to this resource');
+                }
+            }
+
+            // Add context data including protocol version to request
             $request = $request->withAttribute(
                 'mcp_context',
                 [
-                'context_data' => $contextData,
-                'token_data' => $tokenData,
-                'context_id' => $contextId,
-                'base_url' => $this->getBaseUrl($request)
+                    'context_data' => $contextData,
+                    'token_data' => $tokenData,
+                    'context_id' => $contextId,
+                    'base_url' => $this->getBaseUrl($request),
+                    'protocol_version' => $protocolVersion
                 ]
             );
 

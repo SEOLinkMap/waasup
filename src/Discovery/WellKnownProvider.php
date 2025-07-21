@@ -18,11 +18,38 @@ class WellKnownProvider
     }
 
     /**
-     * OAuth authorization server discovery
+     * OAuth protected resource discovery with MCP 2025-06-18 enhancements
+     */
+    public function protectedResource(Request $request, Response $response): Response
+    {
+        $baseUrl = $this->getBaseUrl($request);
+        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
+
+        $discovery = [
+            'resource' => $baseUrl,
+            'authorization_servers' => [$baseUrl],
+            'bearer_methods_supported' => ['header'],
+            'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read']
+        ];
+
+        // Add OAuth Resource Server metadata for MCP 2025-06-18
+        if ($protocolVersion === '2025-06-18') {
+            $discovery['resource_server'] = true;
+            $discovery['resource_indicators_supported'] = true;
+            $discovery['token_binding_supported'] = true;
+        }
+
+        $response->getBody()->write(json_encode($discovery));
+        return $response->withHeader('Content-Type', 'application/json');
+    }
+
+    /**
+     * OAuth authorization server discovery with version support
      */
     public function authorizationServer(Request $request, Response $response): Response
     {
         $baseUrl = $this->getBaseUrl($request);
+        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
 
         $discovery = [
             'issuer' => $baseUrl,
@@ -37,25 +64,11 @@ class WellKnownProvider
             'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read']
         ];
 
-        $response->getBody()->write(json_encode($discovery));
-        return $response->withHeader('Content-Type', 'application/json');
-    }
-
-    /**
-     * OAuth protected resource discovery
-     */
-    public function protectedResource(Request $request, Response $response): Response
-    {
-        $baseUrl = $this->getBaseUrl($request);
-
-        $discovery = [
-        'resource' => $baseUrl,
-        'authorization_servers' => [$baseUrl],
-        'bearer_methods_supported' => ['header'],
-        'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read'],
-        'resource_server' => true,
-        'resource_indicators_supported' => true
-        ];
+        // Add resource indicators support for MCP 2025-06-18
+        if ($protocolVersion === '2025-06-18') {
+            $discovery['resource_indicators_supported'] = true;
+            $discovery['token_binding_methods_supported'] = ['resource_indicator'];
+        }
 
         $response->getBody()->write(json_encode($discovery));
         return $response->withHeader('Content-Type', 'application/json');
