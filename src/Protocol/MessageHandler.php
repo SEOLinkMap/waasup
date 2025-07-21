@@ -181,7 +181,7 @@ class MessageHandler
         'resources' => ['subscribe' => false, 'listChanged' => true]
         ];
 
-        // ADD: Version-specific capabilities - only add if supported in negotiated version
+        // Version-specific capabilities - only add if supported in negotiated version
         if ($this->isFeatureSupported('completions', $selectedVersion)) {
             $capabilities['completions'] = true;
         }
@@ -273,8 +273,8 @@ class MessageHandler
             throw new ProtocolException('Session required', -32001);
         }
 
-        $prompt = $params['prompt'] ?? '';
-        $options = $params['options'] ?? null;
+        $prompt = $params['message'] ?? '';
+        $options = $params['requestedSchema'] ?? null;
 
         $elicitationData = [
         'type' => 'elicitation',
@@ -386,7 +386,7 @@ class MessageHandler
 
             $sessionVersion = $this->getSessionVersion($sessionId);
 
-            // NEW: Support structured outputs (2025-06-18+)
+            // Support structured outputs (2025-06-18+)
             if ($this->isFeatureSupported('structured_outputs', $sessionVersion)) {
                 if (isset($result['_meta']) && $result['_meta']['structured'] === true) {
                     $wrappedResult = [
@@ -396,11 +396,10 @@ class MessageHandler
                             'text' => json_encode($result['data'], JSON_PRETTY_PRINT)
                         ]
                     ],
-                    'isStructured' => true,
-                    'schema' => $result['_meta']['schema'] ?? null
+                    'structuredContent' => $result['data']
                     ];
 
-                    // NEW: Resource links support
+                    // Resource links support
                     if (isset($result['_meta']['resourceLinks'])) {
                         $wrappedResult['resourceLinks'] = $result['_meta']['resourceLinks'];
                     }
