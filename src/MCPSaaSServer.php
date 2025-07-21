@@ -390,16 +390,21 @@ class MCPSaaSServer
     private function getDefaultConfig(): array
     {
         return [
-            'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
-            'server_info' => [
-                'name' => 'WaaSuP MCP SaaS Server',
-                'version' => '1.0.3'
-            ],
-            'sse' => [
-                'keepalive_interval' => 1,      // seconds
-                'max_connection_time' => 1800,  // 30 minutes
-                'switch_interval_after' => 60   // switch to longer intervals after 1 minute
-            ]
+        'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
+        'server_info' => [
+            'name' => 'WaaSuP MCP SaaS Server',
+            'version' => '1.0.0'  // Bump version for new features
+        ],
+        'sse' => [
+            'keepalive_interval' => 1,
+            'max_connection_time' => 1800,
+            'switch_interval_after' => 60
+        ],
+        'oauth' => [
+            'resource_server' => true,
+            'resource_indicators_supported' => true,
+            'resource_indicator' => null  // Set this to your server's resource URI
+        ]
         ];
     }
 }

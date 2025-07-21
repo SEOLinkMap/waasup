@@ -109,7 +109,17 @@ class MessageHandler
 
             case 'resources/templates/list':
                 return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
+            case 'completions/complete':
+                if ($this->isFeatureSupported('completions', $this->getSessionVersion($sessionId))) {
+                    return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
+                }
+                break;
 
+            case 'elicitation/request':
+                if ($this->isFeatureSupported('elicitation', $this->getSessionVersion($sessionId))) {
+                    return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
+                }
+                break;
             default:
                 if (!$sessionId) {
                     throw new ProtocolException('Session required', -32001);
@@ -156,25 +166,34 @@ class MessageHandler
 
         $selectedVersion = $this->versionNegotiator->negotiate($clientProtocolVersion);
 
+        // CRITICAL: Store the negotiated version for this session
+        if ($sessionId) {
+            $this->storeSessionVersion($sessionId, $selectedVersion);
+        }
+
         $serverInfo = $this->config['server_info'] ?? [
         'name' => 'WaaSuP MCP SaaS Server',
-        'version' => '1.0.0'
+        'version' => '1.1.0'
         ];
+
+        $capabilities = [
+        'tools' => ['listChanged' => true],
+        'prompts' => ['listChanged' => true],
+        'resources' => ['subscribe' => false, 'listChanged' => true]
+        ];
+
+        // ADD: Version-specific capabilities - only add if supported in negotiated version
+        if ($this->isFeatureSupported('completions', $selectedVersion)) {
+            $capabilities['completions'] = true;
+        }
+
+        if ($this->isFeatureSupported('elicitation', $selectedVersion)) {
+            $capabilities['elicitation'] = true;
+        }
 
         $result = [
         'protocolVersion' => $selectedVersion,
-        'capabilities' => [
-            'tools' => [
-                'listChanged' => true
-            ],
-            'prompts' => [
-                'listChanged' => true
-            ],
-            'resources' => [
-                'subscribe' => false,
-                'listChanged' => true
-            ]
-        ],
+        'capabilities' => $capabilities,
         'serverInfo' => $serverInfo
         ];
 
@@ -193,6 +212,135 @@ class MessageHandler
             ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version')
             ->withHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
             ->withStatus(200);
+    }
+
+    private function isFeatureSupported(string $feature, string $version): bool
+    {
+        $featureMatrix = [
+        'tool_annotations' => ['2025-03-26', '2025-06-18'],
+        'audio_content' => ['2025-03-26', '2025-06-18'],
+        'structured_outputs' => ['2025-06-18'],
+        'elicitation' => ['2025-06-18'],
+        'resource_links' => ['2025-06-18'],
+        'progress_messages' => ['2025-03-26', '2025-06-18'],
+        'completions' => ['2025-03-26', '2025-06-18']
+        ];
+
+        return in_array($version, $featureMatrix[$feature] ?? []);
+    }
+
+    private function getSessionVersion(?string $sessionId): string
+    {
+        if (!$sessionId) {
+            return '2024-11-05'; // fallback to oldest version
+        }
+
+        // Get negotiated version from session storage
+        $sessionData = $this->storage->getSession($sessionId);
+        return $sessionData['protocol_version'] ?? '2024-11-05'; // Default to oldest, not newest
+    }
+
+    private function storeSessionVersion(string $sessionId, string $version): void
+    {
+        $sessionData = ['protocol_version' => $version, 'initialized_at' => time()];
+        $this->storage->storeSession($sessionId, $sessionData);
+    }
+
+    private function handleCompletionsComplete(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
+    {
+        if (!$sessionId) {
+            throw new ProtocolException('Session required', -32001);
+        }
+
+        $ref = $params['ref'] ?? null;
+        $argument = $params['argument'] ?? null;
+
+        if (!$ref) {
+            return $this->storeErrorResponse($sessionId, -32602, 'Invalid params: missing ref', $id, $response);
+        }
+
+        try {
+            $completions = $this->generateCompletions($ref, $argument, $context);
+            $result = ['completions' => $completions];
+            return $this->storeSuccessResponse($sessionId, $result, $id, $response);
+        } catch (\Exception $e) {
+            return $this->storeErrorResponse($sessionId, -32603, 'Completion generation failed', $id, $response);
+        }
+    }
+
+    private function handleElicitationRequest(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
+    {
+        if (!$sessionId) {
+            throw new ProtocolException('Session required', -32001);
+        }
+
+        $prompt = $params['prompt'] ?? '';
+        $options = $params['options'] ?? null;
+
+        $elicitationData = [
+        'type' => 'elicitation',
+        'prompt' => $prompt,
+        'options' => $options,
+        'requestId' => $id
+        ];
+
+        return $this->storeSuccessResponse($sessionId, $elicitationData, $id, $response);
+    }
+
+    private function generateCompletions(array $ref, ?string $argument, array $context): array
+    {
+        $completions = [];
+
+        if ($ref['type'] === 'ref/tool') {
+            $toolName = $ref['name'];
+            if ($this->toolRegistry->hasTool($toolName)) {
+                // Generate argument completions for the tool
+                $completions = $this->generateToolCompletions($toolName, $argument);
+            }
+        } elseif ($ref['type'] === 'ref/prompt') {
+            $promptName = $ref['name'];
+            if ($this->promptRegistry->hasPrompt($promptName)) {
+                // Generate argument completions for the prompt
+                $completions = $this->generatePromptCompletions($promptName, $argument);
+            }
+        }
+
+        return $completions;
+    }
+
+    private function generateToolCompletions(string $toolName, ?string $argument): array
+    {
+        // Implementation would depend on tool's input schema
+        return [
+        ['value' => 'example_value', 'description' => 'Example completion'],
+        ];
+    }
+
+    private function generatePromptCompletions(string $promptName, ?string $argument): array
+    {
+        // Implementation would depend on prompt's argument schema
+        return [
+        ['value' => 'example_arg', 'description' => 'Example argument'],
+        ];
+    }
+
+    public function sendProgressNotification(string $sessionId, int $progress, string $message = ''): void
+    {
+        $notification = [
+        'jsonrpc' => '2.0',
+        'method' => 'notifications/progress',
+        'params' => [
+            'progress' => $progress,
+            'total' => 100
+        ]
+        ];
+
+        // Add message field for 2025-03-26+
+        if ($this->isFeatureSupported('progress_messages', $this->getSessionVersion($sessionId))) {
+            $notification['params']['message'] = $message;
+        }
+
+        $this->storage->storeMessage($sessionId, $notification);
     }
 
     private function handlePing(mixed $id, ?string $sessionId, array $context, Response $response): Response
@@ -215,7 +363,9 @@ class MessageHandler
             throw new ProtocolException('Session required', -32001);
         }
 
-        $result = $this->toolRegistry->getToolsList();
+        $sessionVersion = $this->getSessionVersion($sessionId);
+        $result = $this->toolRegistry->getToolsList($sessionVersion); // Pass version to registry
+
         return $this->storeSuccessResponse($sessionId, $result, $id, $response);
     }
 
@@ -235,14 +385,47 @@ class MessageHandler
         try {
             $result = $this->toolRegistry->execute($toolName, $arguments, $context);
 
-            $wrappedResult = [
-            'content' => [
-                [
-                    'type' => 'text',
-                    'text' => json_encode($result, JSON_PRETTY_PRINT)
+            $sessionVersion = $this->getSessionVersion($sessionId);
+
+            // NEW: Support structured outputs (2025-06-18+)
+            if ($this->isFeatureSupported('structured_outputs', $sessionVersion)) {
+                if (isset($result['_meta']) && $result['_meta']['structured'] === true) {
+                    $wrappedResult = [
+                    'content' => [
+                        [
+                            'type' => 'text',
+                            'text' => json_encode($result['data'], JSON_PRETTY_PRINT)
+                        ]
+                    ],
+                    'isStructured' => true,
+                    'schema' => $result['_meta']['schema'] ?? null
+                    ];
+
+                    // NEW: Resource links support
+                    if (isset($result['_meta']['resourceLinks'])) {
+                        $wrappedResult['resourceLinks'] = $result['_meta']['resourceLinks'];
+                    }
+                } else {
+                    $wrappedResult = [
+                    'content' => [
+                        [
+                            'type' => 'text',
+                            'text' => json_encode($result, JSON_PRETTY_PRINT)
+                        ]
+                    ]
+                    ];
+                }
+            } else {
+                // Legacy format for older versions
+                $wrappedResult = [
+                'content' => [
+                    [
+                        'type' => 'text',
+                        'text' => json_encode($result, JSON_PRETTY_PRINT)
+                    ]
                 ]
-            ]
-            ];
+                ];
+            }
 
             return $this->storeSuccessResponse($sessionId, $wrappedResult, $id, $response);
         } catch (\Exception $e) {

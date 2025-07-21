@@ -55,36 +55,53 @@ class ToolRegistry
     /**
      * Get all registered tools for tools/list response
      */
-    public function getToolsList(): array
+    public function getToolsList(string $protocolVersion = '2025-06-18'): array
     {
         $tools = [];
 
         // Add tool instances
         foreach ($this->tools as $tool) {
-            $tools[] = [
-                'name' => $tool->getName(),
-                'description' => $tool->getDescription(),
-                'inputSchema' => $tool->getInputSchema(),
-                'annotations' => $tool->getAnnotations()
+            $toolData = [
+            'name' => $tool->getName(),
+            'description' => $tool->getDescription(),
+            'inputSchema' => $tool->getInputSchema()
             ];
+
+            // GATE: Only include annotations for versions that support them (2025-03-26+)
+            if ($this->supportsToolAnnotations($protocolVersion)) {
+                $toolData['annotations'] = $tool->getAnnotations();
+            }
+
+            $tools[] = $toolData;
         }
 
         // Add callable tools
         foreach ($this->callables as $name => $callable) {
-            $tools[] = [
-                'name' => $name,
-                'description' => $callable['schema']['description'] ?? "Tool: {$name}",
-                'inputSchema' => $callable['schema']['inputSchema'] ?? ['type' => 'object'],
-                'annotations' => $callable['schema']['annotations'] ?? [
-                    'readOnlyHint' => true,
-                    'destructiveHint' => false,
-                    'idempotentHint' => true,
-                    'openWorldHint' => false
-                ]
+            $toolData = [
+            'name' => $name,
+            'description' => $callable['schema']['description'] ?? "Tool: {$name}",
+            'inputSchema' => $callable['schema']['inputSchema'] ?? ['type' => 'object']
             ];
+
+            // GATE: Only include annotations for supported versions
+            if ($this->supportsToolAnnotations($protocolVersion)) {
+                $toolData['annotations'] = $callable['schema']['annotations'] ?? [
+                'readOnlyHint' => true,
+                'destructiveHint' => false,
+                'idempotentHint' => true,
+                'openWorldHint' => false
+                ];
+            }
+
+            $tools[] = $toolData;
         }
 
         return ['tools' => $tools];
+    }
+
+    private function supportsToolAnnotations(string $version): bool
+    {
+        return in_array($version, ['2025-03-26', '2025-06-18']);
     }
 
     /**

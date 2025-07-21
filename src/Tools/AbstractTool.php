@@ -51,10 +51,13 @@ abstract class AbstractTool implements ToolInterface
     protected function getDefaultAnnotations(): array
     {
         return [
-            'readOnlyHint' => true,
-            'destructiveHint' => false,
-            'idempotentHint' => true,
-            'openWorldHint' => false
+        'readOnlyHint' => true,
+        'destructiveHint' => false,
+        'idempotentHint' => true,
+        'openWorldHint' => false,
+        'experimental' => false,
+        'requiresUserConfirmation' => false,
+        'sensitive' => false
         ];
     }
 

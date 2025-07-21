@@ -49,10 +49,12 @@ class WellKnownProvider
         $baseUrl = $this->getBaseUrl($request);
 
         $discovery = [
-            'resource' => $baseUrl,
-            'authorization_servers' => [$baseUrl],
-            'bearer_methods_supported' => ['header'],
-            'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read']
+        'resource' => $baseUrl,
+        'authorization_servers' => [$baseUrl],
+        'bearer_methods_supported' => ['header'],
+        'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read'],
+        'resource_server' => true,
+        'resource_indicators_supported' => true
         ];
 
         $response->getBody()->write(json_encode($discovery));

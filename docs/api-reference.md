@@ -23,7 +23,7 @@ The MCP SaaS Server implements the Model Context Protocol using JSON-RPC 2.0 ove
 ### Base URL Pattern
 ```
 POST https://your-server.com/mcp/{agencyUuid}[/{sessionId}]
-GET  https://your-server.com/mcp/{agencyUuid}/sse (for SSE connection)
+GET  https://your-server.com/mcp/{agencyUuid} (for SSE connection)
 ```
 
 ### Headers
@@ -178,7 +178,7 @@ Content-Type: application/json
 }
 ```
 
-**Note**: The `initialize` method is the ONLY method that returns a direct HTTP response. All other methods return `{"status": "queued"}` and deliver the actual response via SSE.
+**Note**: The `initialize` method is the ONLY method that returns a direct HTTP response. All other methods return `{"status": "queued"}` and deliver the actual response via SSE or Streamable HTTP.
 
 ### Session Validation
 All non-initialize requests require valid session:
@@ -487,7 +487,7 @@ The `SSETransport` class handles real-time response delivery.
 
 **SSE Connection:**
 ```bash
-GET /mcp/550e8400-e29b-41d4-a716-446655440000/sse?access_token=your-token&session_id=sess_123
+GET /mcp/550e8400-e29b-41d4-a716-446655440000?access_token=your-token&session_id=sess_123
 Accept: text/event-stream
 Cache-Control: no-cache
 ```
@@ -591,7 +591,7 @@ curl -X POST https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000 \
 
 **Step 2: Establish SSE Connection**
 ```bash
-curl -N https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000/sse \
+curl -N https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000 \
   -H "Authorization: Bearer your-access-token" \
   -G -d "session_id=sess_1234567890abcdef"
 ```
@@ -648,7 +648,7 @@ class MCPClient {
     }
 
     connectSSE(agencyId) {
-        const url = `${this.baseUrl}/mcp/${agencyId}/sse?session_id=${this.sessionId}`;
+        const url = `${this.baseUrl}/mcp/${agencyId}?session_id=${this.sessionId}`;
 
         this.eventSource = new EventSource(url, {
             headers: {

@@ -215,12 +215,6 @@ $app->get('/.well-known/oauth-authorization-server',
 $app->map(['GET', 'POST', 'OPTIONS'], '/mcp/{agencyUuid}[/{sessID}]',
     [$mcpProvider, 'handleMCP'])
     ->add($mcpProvider->getAuthMiddleware());
-
-// IMPORTANT: Also need SSE route for response delivery
-$app->get('/mcp/{agencyUuid}/sse', function($request, $response, $args) use ($mcpProvider) {
-    // SSE handling is built into the main handler when method=GET
-    return $mcpProvider->handleMCP($request, $response);
-});
 ```
 
 ### Flexible Route Parameter Names
