@@ -9,9 +9,10 @@ use Seolinkmap\Waasup\Storage\StorageInterface;
 use Slim\Psr7\NonBufferedBody;
 
 /**
- * Handles SSE transport for real-time message delivery
+ * Handles Streamable HTTP transport for MCP 2025-03-26+
+ * Uses chunked HTTP streaming for full-duplex communication
  */
-class SSETransport implements TransportInterface
+class StreamableHTTPTransport implements TransportInterface
 {
     private StorageInterface $storage;
     private array $config;
@@ -22,68 +23,63 @@ class SSETransport implements TransportInterface
         $this->config = array_merge($this->getDefaultConfig(), $config);
     }
 
-    /**
-     * Handle SSE connection
-     */
     public function handleConnection(
         Request $request,
         Response $response,
         string $sessionId,
         array $context
     ): Response {
-        // CRITICAL: Close session to prevent blocking - PHP sessions are file-locked
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_write_close();
         }
 
-        // Check if we're in a test environment for shortened behavior
         $isTestMode = $this->config['test_mode'] ?? false;
 
-        // Set low process priority (only in non-test environments)
         if (!$isTestMode && function_exists('exec')) {
             exec('renice 10 ' . getmypid());
         }
 
+        // Get protocol version from context if available
+        $protocolVersion = $context['protocol_version'] ?? '2025-03-26';
+
         $response = $response
             ->withBody(new NonBufferedBody())
-            ->withHeader('Content-Type', 'text/event-stream')
+            ->withHeader('Content-Type', 'application/json')
+            ->withHeader('Transfer-Encoding', 'chunked')
             ->withHeader('Cache-Control', 'no-cache')
             ->withHeader('Connection', 'keep-alive')
             ->withHeader('X-Accel-Buffering', 'no')
+            ->withHeader('MCP-Protocol-Version', $protocolVersion)
             ->withHeader('Access-Control-Allow-Origin', '*')
-            ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id')
+            ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version')
             ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 
         $body = $response->getBody();
 
-        // Send endpoint event immediately (MCP spec requirement)
-        $this->sendEndpointEvent($body, $sessionId, $context);
+        $this->sendConnectionAck($body, $sessionId, $context);
 
-        // In test mode, send any pending messages and return immediately
         if ($isTestMode) {
             $this->checkAndSendMessages($body, $sessionId);
             return $response;
         }
 
-        // Start message polling loop (production mode only)
         $this->pollForMessages($body, $sessionId, $context);
-
         return $response;
     }
 
-    private function sendEndpointEvent(StreamInterface $body, string $sessionId, array $context): void
+    private function sendConnectionAck(StreamInterface $body, string $sessionId, array $context): void
     {
-        // Build endpoint URL from context
-        $baseUrl = $context['base_url'] ?? 'https://localhost';
-        $contextId = $context['context_id'] ?? 'unknown';
-        $endpointUrl = "{$baseUrl}/mcp/{$contextId}/{$sessionId}";
+        $ackMessage = [
+            'jsonrpc' => '2.0',
+            'method' => 'notifications/connection',
+            'params' => [
+                'status' => 'connected',
+                'sessionId' => $sessionId,
+                'timestamp' => date('c')
+            ]
+        ];
 
-        $endpointData = sprintf(
-            "event: endpoint\ndata: %s\n\n",
-            $endpointUrl
-        );
-
-        $body->write($endpointData);
+        $this->writeChunkedMessage($body, $ackMessage);
     }
 
     private function pollForMessages(StreamInterface $body, string $sessionId, array $context): void
@@ -95,32 +91,38 @@ class SSETransport implements TransportInterface
         $endTime = $startTime + $maxTime;
 
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
-            // Send keepalive
             $this->sendKeepalive($body);
 
             if (connection_aborted()) {
                 break;
             }
 
-            // Check for messages and send them
             if ($this->checkAndSendMessages($body, $sessionId)) {
-                $startTime = time(); // Reset timer on activity
+                $startTime = time();
             }
 
-            // Adjust polling interval after initial period
             $currentTime = time();
             if ($currentTime - $startTime > $switchTime) {
-                $pollInterval = max($pollInterval * 2, 5); // Increase interval, max 5 seconds
+                $pollInterval = max($pollInterval * 2, 5);
             }
 
             sleep($pollInterval);
         }
+
+        $this->sendConnectionClose($body);
     }
 
     private function sendKeepalive(StreamInterface $body): void
     {
-        $keepaliveData = ": keepalive\n\n";
-        $body->write($keepaliveData);
+        $keepaliveMessage = [
+            'jsonrpc' => '2.0',
+            'method' => 'notifications/ping',
+            'params' => [
+                'timestamp' => date('c')
+            ]
+        ];
+
+        $this->writeChunkedMessage($body, $keepaliveMessage);
     }
 
     private function checkAndSendMessages(StreamInterface $body, string $sessionId): bool
@@ -132,28 +134,45 @@ class SSETransport implements TransportInterface
         }
 
         foreach ($messages as $message) {
-            $messageData = sprintf(
-                "event: message\ndata: %s\n\n",
-                json_encode($message['data'])
-            );
-
-            $body->write($messageData);
-
-            // Delete message after sending
+            $this->writeChunkedMessage($body, $message['data']);
             $this->storage->deleteMessage($message['id']);
         }
 
-        // We know messages were sent since $messages wasn't empty
         return true;
+    }
+
+    private function sendConnectionClose(StreamInterface $body): void
+    {
+        $closeMessage = [
+            'jsonrpc' => '2.0',
+            'method' => 'notifications/connection',
+            'params' => [
+                'status' => 'closed',
+                'timestamp' => date('c')
+            ]
+        ];
+
+        $this->writeChunkedMessage($body, $closeMessage);
+    }
+
+    private function writeChunkedMessage(StreamInterface $body, array $message): void
+    {
+        $jsonData = json_encode($message);
+        if ($jsonData === false) {
+            return;
+        }
+
+        $jsonData .= "\n";
+        $body->write($jsonData);
     }
 
     private function getDefaultConfig(): array
     {
         return [
-            'keepalive_interval' => 1,     // seconds
-            'max_connection_time' => 1800, // 30 minutes
-            'switch_interval_after' => 60,  // switch to longer intervals after 1 minute
-            'test_mode' => false           // set to true in tests
+            'keepalive_interval' => 2,
+            'max_connection_time' => 1800,
+            'switch_interval_after' => 60,
+            'test_mode' => false
         ];
     }
 }

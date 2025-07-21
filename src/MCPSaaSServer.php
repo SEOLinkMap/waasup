@@ -15,6 +15,7 @@ use Seolinkmap\Waasup\Resources\Registry\ResourceRegistry;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 use Seolinkmap\Waasup\Tools\Registry\ToolRegistry;
 use Seolinkmap\Waasup\Transport\SSETransport;
+use Seolinkmap\Waasup\Transport\StreamableHTTPTransport;
 
 class MCPSaaSServer
 {
@@ -25,6 +26,7 @@ class MCPSaaSServer
     private VersionNegotiator $versionNegotiator;
     private MessageHandler $messageHandler;
     private SSETransport $sseTransport;
+    private StreamableHTTPTransport $streamableTransport;
     private LoggerInterface $logger;
     private array $config;
     private ?array $contextData = null;
@@ -48,6 +50,7 @@ class MCPSaaSServer
         $this->versionNegotiator = new VersionNegotiator($this->config['supported_versions']);
         $this->messageHandler = new MessageHandler($this->toolRegistry, $this->promptRegistry, $this->resourceRegistry, $this->storage, $this->config, $this->versionNegotiator);
         $this->sseTransport = new SSETransport($this->storage, $this->config['sse']);
+        $this->streamableTransport = new StreamableHTTPTransport($this->storage, $this->config['streamable_http']);
     }
 
     /**
@@ -88,6 +91,15 @@ class MCPSaaSServer
                 }
 
                 $this->sessionId = $this->negotiateSessionId($request, $data);
+
+                // Extract and store protocol version for initialize requests
+                if (($data['method'] ?? '') === 'initialize') {
+                    $protocolVersion = $this->extractProtocolFromInitialize($request);
+                    if ($protocolVersion && $this->sessionId) {
+                        $this->storage->storeSession($this->sessionId, ['protocol_version' => $protocolVersion]);
+                    }
+                }
+
                 return $this->handleMCPRequest($request, $response, $data);
             }
 
@@ -96,7 +108,8 @@ class MCPSaaSServer
                     throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
                 }
                 $this->sessionId = $this->negotiateSessionId($request);
-                return $this->handleSSEConnection($request, $response);
+                $protocolVersion = $this->getSessionProtocolVersion($request);
+                return $this->handleStreamConnection($request, $response, $protocolVersion);
             }
 
             throw new ProtocolException('Method not allowed', -32002);
@@ -129,26 +142,56 @@ class MCPSaaSServer
         }
     }
 
-    private function extractProtocolVersion(Request $request): ?string
+    /**
+     * Get protocol version for streaming connections (GET requests)
+     * Spec-compliant: only check headers for versions that require them
+     */
+    private function getSessionProtocolVersion(Request $request): string
     {
-        // Check MCP-Protocol-Version header first
-        $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
-        if ($headerVersion) {
-            return $headerVersion;
+        // First get the negotiated version from session
+        $sessionData = $this->storage->getSession($this->sessionId);
+        $negotiatedVersion = $sessionData['protocol_version'] ?? '2024-11-05';
+
+        // Only check MCP-Protocol-Version header for 2025-06-18 (spec requirement)
+        if ($negotiatedVersion === '2025-06-18') {
+            $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
+            if (!$headerVersion) {
+                throw new ProtocolException('MCP-Protocol-Version header required for version 2025-06-18', -32600);
+            }
+            if ($headerVersion !== $negotiatedVersion) {
+                throw new ProtocolException('MCP-Protocol-Version header must match negotiated version', -32600);
+            }
         }
 
-        // For POST requests, peek at initialize message
-        if ($request->getMethod() === 'POST') {
-            $body = (string) $request->getBody();
-            if (!empty($body)) {
-                $data = json_decode($body, true);
-                if (isset($data['method']) && $data['method'] === 'initialize' && isset($data['params']['protocolVersion'])) {
-                    return $data['params']['protocolVersion'];
-                }
+        return $negotiatedVersion;
+    }
+
+    /**
+     * Extract protocol version from initialize message (POST requests only)
+     */
+    private function extractProtocolFromInitialize(Request $request): ?string
+    {
+        if ($request->getMethod() !== 'POST') {
+            return null;
+        }
+
+        $body = (string) $request->getBody();
+        if (!empty($body)) {
+            $data = json_decode($body, true);
+            if (isset($data['method']) && $data['method'] === 'initialize' && isset($data['params']['protocolVersion'])) {
+                return $data['params']['protocolVersion'];
             }
         }
 
         return null;
+    }
+
+    /**
+     * Determine which transport to use based on protocol version
+     */
+    private function shouldUseStreamableHTTP(string $protocolVersion): bool
+    {
+        return in_array($protocolVersion, ['2025-03-26', '2025-06-18']);
     }
 
     /**
@@ -199,24 +242,35 @@ class MCPSaaSServer
     }
 
     /**
-     * Handle SSE connection for real-time message delivery
+     * Handle streaming connection using appropriate transport based on protocol version
      */
-    private function handleSSEConnection(Request $request, Response $response): Response
+    private function handleStreamConnection(Request $request, Response $response, string $protocolVersion): Response
     {
         $this->logger->info(
-            'SSE connection established',
+            'Stream connection established',
             [
             'session_id' => $this->sessionId,
+            'protocol_version' => $protocolVersion,
+            'transport' => $this->shouldUseStreamableHTTP($protocolVersion) ? 'streamable_http' : 'sse',
             'context' => $this->contextData
             ]
         );
 
-        return $this->sseTransport->handleConnection(
-            $request,
-            $response,
-            $this->sessionId,
-            $this->contextData
-        );
+        if ($this->shouldUseStreamableHTTP($protocolVersion)) {
+            return $this->streamableTransport->handleConnection(
+                $request,
+                $response,
+                $this->sessionId,
+                array_merge($this->contextData, ['protocol_version' => $protocolVersion])
+            );
+        } else {
+            return $this->sseTransport->handleConnection(
+                $request,
+                $response,
+                $this->sessionId,
+                $this->contextData
+            );
+        }
     }
 
     /**
@@ -393,17 +447,22 @@ class MCPSaaSServer
         'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
         'server_info' => [
             'name' => 'WaaSuP MCP SaaS Server',
-            'version' => '1.0.0'  // Bump version for new features
+            'version' => '1.0.0'
         ],
         'sse' => [
             'keepalive_interval' => 1,
             'max_connection_time' => 1800,
             'switch_interval_after' => 60
         ],
+        'streamable_http' => [
+            'keepalive_interval' => 2,
+            'max_connection_time' => 1800,
+            'switch_interval_after' => 60
+        ],
         'oauth' => [
             'resource_server' => true,
             'resource_indicators_supported' => true,
-            'resource_indicator' => null  // Set this to your server's resource URI
+            'resource_indicator' => null
         ]
         ];
     }
