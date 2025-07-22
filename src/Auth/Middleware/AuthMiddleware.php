@@ -60,7 +60,12 @@ class AuthMiddleware
 
             // OAuth Resource Server validation for 2025-06-18
             if ($protocolVersion === '2025-06-18') {
-                $this->validateResourceServerRequirements($request, $tokenData);
+                try {
+                    $this->validateResourceServerRequirements($request, $tokenData);
+                } catch (AuthenticationException $e) {
+                    // Return specific error for resource binding failures
+                    return $this->createErrorResponse($e->getMessage(), 401);
+                }
             }
 
             $request = $request->withAttribute(
@@ -120,7 +125,7 @@ class AuthMiddleware
 
     protected function createOAuthDiscoveryResponse(Request $request): Response
     {
-        $baseUrl = $this->config['base_url'] ?? $this->getBaseUrl($request);
+        $baseUrl = $this->getBaseUrl($request);
         $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
 
         $responseData = [
@@ -280,9 +285,22 @@ class AuthMiddleware
 
     protected function getBaseUrl(Request $request): string
     {
+        // First try to get from config (for tests and when explicitly set)
+        if (!empty($this->config['base_url'])) {
+            return $this->config['base_url'];
+        }
+
+        // Fall back to extracting from request URI
         $uri = $request->getUri();
-        return $uri->getScheme() . '://' . $uri->getHost() .
-               ($uri->getPort() ? ':' . $uri->getPort() : '');
+        $scheme = $uri->getScheme();
+        $host = $uri->getHost();
+
+        // If request doesn't have proper scheme/host, use default
+        if (empty($scheme) || empty($host)) {
+            return 'https://localhost';
+        }
+
+        return $scheme . '://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
     protected function getDefaultConfig(): array
@@ -291,7 +309,7 @@ class AuthMiddleware
             'context_types' => ['agency', 'user'],
             'validate_scope' => true,
             'required_scopes' => ['mcp:read'],
-            'base_url' => 'https://localhost',
+            'base_url' => '',
             'resource_server_metadata' => true,
             'require_resource_binding' => true
         ];
