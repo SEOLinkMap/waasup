@@ -49,7 +49,7 @@ class AudioContentHandler
             throw new \InvalidArgumentException('Audio data must be valid base64');
         }
 
-        // Check size limits - FIX: Handle base64_decode returning false
+        // Check size limits
         $decoded = base64_decode($audioData, true);
         if ($decoded === false) {
             throw new \InvalidArgumentException('Invalid base64 audio data');
@@ -86,7 +86,7 @@ class AudioContentHandler
             throw new \InvalidArgumentException("Cannot determine MIME type for: {$filePath}");
         }
 
-        // FIX: Handle file_get_contents returning false
+        // Handle file_get_contents returning false
         $audioData = file_get_contents($filePath);
         if ($audioData === false) {
             throw new \InvalidArgumentException("Cannot read audio file: {$filePath}");
@@ -145,7 +145,7 @@ class AudioContentHandler
      */
     private static function detectMimeType(string $filePath): ?string
     {
-        // FIX: Handle finfo_open returning false
+        // Handle finfo_open returning false
         if (function_exists('finfo_open')) {
             $finfo = finfo_open(FILEINFO_MIME_TYPE);
             if ($finfo === false) {
