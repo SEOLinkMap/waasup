@@ -27,6 +27,7 @@ class MCPSecurityComplianceTest extends TestCase
     private MemoryStorage $storage;
     private string $baseUrl = 'https://mcp.example.com';
     private string $contextId = '550e8400-e29b-41d4-a716-446655440000';
+    private string $maliciousContextId = '550e8400-e29b-41d4-a716-446655440999';
 
     protected function setUp(): void
     {
@@ -98,6 +99,14 @@ class MCPSecurityComplianceTest extends TestCase
             'id' => 1,
             'uuid' => $this->contextId,
             'name' => 'Test Agency',
+            'active' => true
+        ]);
+
+        // Add malicious context for token passthrough tests
+        $this->storage->addContext($this->maliciousContextId, 'agency', [
+            'id' => 999,
+            'uuid' => $this->maliciousContextId,
+            'name' => 'Malicious Agency',
             'active' => true
         ]);
 
@@ -246,10 +255,9 @@ class MCPSecurityComplianceTest extends TestCase
         $this->assertEquals(200, $response->getStatusCode());
 
         // Test access to different resource (should fail)
-        $differentContextId = '550e8400-e29b-41d4-a716-446655440001';
         $invalidRequest = $this->createRequest(
             'POST',
-            '/mcp/' . $differentContextId,
+            '/mcp/' . $this->maliciousContextId,
             [
                 'Authorization' => 'Bearer bound-token',
                 'MCP-Protocol-Version' => '2025-06-18'
@@ -277,19 +285,10 @@ class MCPSecurityComplianceTest extends TestCase
             'aud' => [$legitimateResource]
         ]);
 
-        // Add a different context that the token is NOT bound to
-        $maliciousContextId = '550e8400-e29b-41d4-a716-446655440999';
-        $this->storage->addContext($maliciousContextId, 'agency', [
-            'id' => 999,
-            'uuid' => $maliciousContextId,
-            'name' => 'Malicious Agency',
-            'active' => true
-        ]);
-
         // Malicious server tries to use token (should fail audience validation)
         $maliciousRequest = $this->createRequest(
             'POST',
-            '/mcp/' . $maliciousContextId,
+            '/mcp/' . $this->maliciousContextId,
             [
                 'Authorization' => 'Bearer legitimate-token',
                 'MCP-Protocol-Version' => '2025-06-18'
@@ -547,7 +546,7 @@ class MCPSecurityComplianceTest extends TestCase
         // Test access to different resource (should fail)
         $invalidRequest = $this->createRequest(
             'POST',
-            '/mcp/different-context',
+            '/mcp/' . $this->maliciousContextId,
             [
                 'Authorization' => 'Bearer bound-token-test',
                 'MCP-Protocol-Version' => '2025-06-18'
@@ -610,7 +609,7 @@ class MCPSecurityComplianceTest extends TestCase
         // Attempt to use token for different resource (passthrough attack)
         $passthroughRequest = $this->createRequest(
             'POST',
-            '/mcp/unauthorized-context',
+            '/mcp/' . $this->maliciousContextId, // Use valid UUID for malicious context
             [
                 'Authorization' => 'Bearer passthrough-test-token',
                 'MCP-Protocol-Version' => '2025-06-18'
