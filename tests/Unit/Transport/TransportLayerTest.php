@@ -15,7 +15,8 @@ use Seolinkmap\Waasup\Tests\TestCase;
  * 1. Shared storage instance between server and tests for session consistency
  * 2. Proper protocol version context management
  * 3. Session state management to avoid output buffer conflicts
- * 4. Focus on protocol compliance rather than streaming implementation details
+ * 4. Unique request IDs to prevent JSON-RPC duplicate ID errors
+ * 5. Focus on protocol compliance rather than streaming implementation details
  *
  * Note: These tests verify transport protocol behavior rather than streaming
  * implementation details, which are better suited for integration tests.
@@ -23,6 +24,7 @@ use Seolinkmap\Waasup\Tests\TestCase;
 class TransportLayerTest extends TestCase
 {
     private MCPSaaSServer $server;
+    private int $requestIdCounter = 1; // Track unique request IDs
 
     protected function setUp(): void
     {
@@ -48,6 +50,14 @@ class TransportLayerTest extends TestCase
                 'streamable_http' => ['test_mode' => true]
             ]
         );
+    }
+
+    /**
+     * Get next unique request ID for the session
+     */
+    private function getNextRequestId(): int
+    {
+        return ++$this->requestIdCounter;
     }
 
     // ========================================
@@ -134,7 +144,7 @@ class TransportLayerTest extends TestCase
             json_encode([
                 'jsonrpc' => '2.0',
                 'method' => 'tools/list',
-                'id' => 1
+                'id' => $this->getNextRequestId() // Use unique request ID
             ])
         );
         $messageRequest = $messageRequest->withAttribute('mcp_context', $this->createTestContext([
@@ -201,7 +211,7 @@ class TransportLayerTest extends TestCase
             json_encode([
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
-                'id' => 1
+                'id' => $this->getNextRequestId() // Use unique request ID
             ])
         );
         $postRequest = $postRequest->withAttribute('mcp_context', $this->createTestContext([
@@ -250,12 +260,12 @@ class TransportLayerTest extends TestCase
                 [
                     'jsonrpc' => '2.0',
                     'method' => 'ping',
-                    'id' => 1
+                    'id' => $this->getNextRequestId()
                 ],
                 [
                     'jsonrpc' => '2.0',
                     'method' => 'tools/list',
-                    'id' => 2
+                    'id' => $this->getNextRequestId()
                 ]
             ])
         );
@@ -276,6 +286,9 @@ class TransportLayerTest extends TestCase
      */
     public function testStreamableHttpSessionManagement(): void
     {
+        // Reset request ID counter for this test
+        $this->requestIdCounter = 0;
+
         // Initialize without existing session
         $initRequest = $this->createRequest(
             'POST',
@@ -287,7 +300,7 @@ class TransportLayerTest extends TestCase
                 'jsonrpc' => '2.0',
                 'method' => 'initialize',
                 'params' => ['protocolVersion' => '2025-03-26'],
-                'id' => 1
+                'id' => $this->getNextRequestId()
             ])
         );
         $initRequest = $initRequest->withAttribute('mcp_context', $this->createTestContext());
@@ -310,7 +323,7 @@ class TransportLayerTest extends TestCase
             json_encode([
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
-                'id' => 2
+                'id' => $this->getNextRequestId()
             ])
         );
         $followupRequest = $followupRequest->withAttribute('mcp_context', $this->createTestContext());
@@ -375,7 +388,7 @@ class TransportLayerTest extends TestCase
             json_encode([
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
-                'id' => 1
+                'id' => $this->getNextRequestId() // Use unique request ID
             ])
         );
         $context = $this->createTestContext(['protocol_version' => '2025-06-18']);
@@ -404,7 +417,7 @@ class TransportLayerTest extends TestCase
             json_encode([
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
-                'id' => 1
+                'id' => $this->getNextRequestId()
             ])
         );
         $context = $this->createTestContext(); // No protocol_version in context
@@ -436,7 +449,7 @@ class TransportLayerTest extends TestCase
             json_encode([
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
-                'id' => 1
+                'id' => $this->getNextRequestId()
             ])
         );
         $context = $this->createTestContext(['protocol_version' => 'invalid-version']);
@@ -493,6 +506,9 @@ class TransportLayerTest extends TestCase
         ];
 
         foreach ($versionTests as $version => $headerRequired) {
+            // Reset request ID counter for each version test
+            $this->requestIdCounter = 0;
+
             $headers = ['Content-Type' => 'application/json'];
             $context = $this->createTestContext();
 
@@ -509,7 +525,7 @@ class TransportLayerTest extends TestCase
                     'jsonrpc' => '2.0',
                     'method' => 'initialize',
                     'params' => ['protocolVersion' => $version],
-                    'id' => 1
+                    'id' => $this->getNextRequestId()
                 ])
             );
             $request = $request->withAttribute('mcp_context', $context);
@@ -517,7 +533,7 @@ class TransportLayerTest extends TestCase
             $response = $this->server->handle($request, $this->createResponse());
 
             $this->assertEquals(200, $response->getStatusCode(), "Failed for version {$version}");
-            $data = $this->assertJsonRpcSuccess($response, 1);
+            $data = $this->assertJsonRpcSuccess($response, $this->requestIdCounter);
             $this->assertEquals($version, $data['result']['protocolVersion']);
         }
     }
@@ -545,7 +561,7 @@ class TransportLayerTest extends TestCase
                 'jsonrpc' => '2.0',
                 'method' => 'initialize',
                 'params' => ['protocolVersion' => $protocolVersion],
-                'id' => 1
+                'id' => $this->getNextRequestId() // Use unique request ID
             ])
         );
         $initRequest = $initRequest->withAttribute('mcp_context', $context);
