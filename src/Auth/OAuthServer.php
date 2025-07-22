@@ -34,7 +34,7 @@ class OAuthServer
     }
 
     /**
-     * OAuth 2.1 Authorization Endpoint
+     * OAuth 2.1 Authorization Endpoint with RFC 8707 Resource Indicators
      */
     public function authorize(Request $request, Response $response): Response
     {
@@ -47,6 +47,7 @@ class OAuthServer
         $responseType = $params['response_type'] ?? null;
         $codeChallenge = $params['code_challenge'] ?? null;
         $codeChallengeMethod = $params['code_challenge_method'] ?? null;
+        $resource = $params['resource'] ?? null; // RFC 8707
 
         if (!$responseType) {
             return $this->errorResponse('invalid_request', 'Missing response_type parameter');
@@ -77,6 +78,25 @@ class OAuthServer
             return $this->errorResponse('invalid_request', 'Invalid redirect_uri');
         }
 
+        // RFC 8707 Resource Indicators validation for MCP 2025-06-18
+        $protocolVersion = $this->detectProtocolVersion($request);
+        if ($protocolVersion === '2025-06-18') {
+            if (empty($resource)) {
+                return $this->errorResponse('invalid_request', 'Resource parameter required for MCP 2025-06-18');
+            }
+
+            // Validate resource URL format
+            if (!filter_var($resource, FILTER_VALIDATE_URL)) {
+                return $this->errorResponse('invalid_request', 'Resource parameter must be a valid URL');
+            }
+
+            // Ensure resource is for this server
+            $baseUrl = $this->getBaseUrl($request);
+            if (!str_starts_with($resource, $baseUrl)) {
+                return $this->errorResponse('invalid_request', 'Resource parameter must be for this authorization server');
+            }
+        }
+
         // Handle direct MCP callback pattern
         $parsed = parse_url($redirectUri);
         $path = $parsed['path'] ?? '';
@@ -97,7 +117,8 @@ class OAuthServer
             'state' => $state,
             'code_challenge' => $codeChallenge,
             'code_challenge_method' => $codeChallengeMethod,
-            'client_name' => $clientData['client_name']
+            'client_name' => $clientData['client_name'],
+            'resource' => $resource
         ];
 
         // Check if user already authenticated
@@ -302,9 +323,8 @@ class OAuthServer
         if ($action === 'allow') {
             $authCode = bin2hex(random_bytes(32));
 
-            $this->storage->storeAuthorizationCode(
-                $authCode,
-                [
+            // Store authorization code with resource binding for 2025-06-18
+            $authCodeData = [
                 'client_id' => $oauthRequest['client_id'],
                 'redirect_uri' => $oauthRequest['redirect_uri'],
                 'scope' => $oauthRequest['scope'],
@@ -313,8 +333,14 @@ class OAuthServer
                 'code_challenge_method' => $oauthRequest['code_challenge_method'],
                 'agency_id' => $oauthUser['agency_id'],
                 'user_id' => $oauthUser['user_id']
-                ]
-            );
+            ];
+
+            // Add resource binding for 2025-06-18
+            if (isset($oauthRequest['resource'])) {
+                $authCodeData['resource'] = $oauthRequest['resource'];
+            }
+
+            $this->storage->storeAuthorizationCode($authCode, $authCodeData);
 
             $this->cleanupOAuthSession();
 
@@ -345,7 +371,7 @@ class OAuthServer
     }
 
     /**
-     * Token endpoint for exchanging auth code for access token
+     * Token endpoint with RFC 8707 Resource Indicators support
      */
     public function token(Request $request, Response $response): Response
     {
@@ -364,9 +390,9 @@ class OAuthServer
         $grantType = $data['grant_type'] ?? null;
 
         if ($grantType === 'authorization_code') {
-            return $this->handleAuthorizationCodeGrant($data);
+            return $this->handleAuthorizationCodeGrant($data, $request);
         } elseif ($grantType === 'refresh_token') {
-            return $this->handleRefreshTokenGrant($data);
+            return $this->handleRefreshTokenGrant($data, $request);
         }
 
         return $this->errorResponse('unsupported_grant_type', 'Unsupported grant type');
@@ -722,15 +748,16 @@ class OAuthServer
     }
 
     /**
-     * Handle authorization code grant for token exchange
+     * Handle authorization code grant with RFC 8707 Resource Indicators
      */
-    private function handleAuthorizationCodeGrant(array $data): Response
+    private function handleAuthorizationCodeGrant(array $data, Request $request): Response
     {
         $code = $data['code'] ?? null;
         $clientId = $data['client_id'] ?? null;
         $clientSecret = $data['client_secret'] ?? null;
         $redirectUri = $data['redirect_uri'] ?? null;
         $codeVerifier = $data['code_verifier'] ?? null;
+        $resource = $data['resource'] ?? null; // RFC 8707
 
         if (!$code || !$clientId) {
             return $this->errorResponse('invalid_request', 'Missing required parameters');
@@ -771,13 +798,26 @@ class OAuthServer
             return $this->errorResponse('invalid_grant', 'Invalid code_verifier');
         }
 
+        // RFC 8707 Resource Indicators validation for 2025-06-18
+        $protocolVersion = $this->detectProtocolVersion($request);
+        if ($protocolVersion === '2025-06-18') {
+            if (empty($resource)) {
+                return $this->errorResponse('invalid_request', 'Resource parameter required for MCP 2025-06-18');
+            }
+
+            // Resource must match the one from authorization code
+            if (isset($authCode['resource']) && $resource !== $authCode['resource']) {
+                return $this->errorResponse('invalid_grant', 'Resource parameter must match authorization request');
+            }
+        }
+
         $accessToken = bin2hex(random_bytes(32));
         $refreshToken = bin2hex(random_bytes(32));
 
         $this->storage->revokeAuthorizationCode($code);
 
-        $this->storage->storeAccessToken(
-            [
+        // Store access token with resource binding for 2025-06-18
+        $tokenData = [
             'client_id' => $clientId,
             'access_token' => $accessToken,
             'refresh_token' => $refreshToken,
@@ -785,8 +825,15 @@ class OAuthServer
             'expires_at' => time() + 3600,
             'agency_id' => $authCode['agency_id'],
             'user_id' => $authCode['user_id']
-            ]
-        );
+        ];
+
+        // Add resource binding for 2025-06-18
+        if ($resource) {
+            $tokenData['resource'] = $resource;
+            $tokenData['aud'] = [$resource]; // Audience claim for token validation
+        }
+
+        $this->storage->storeAccessToken($tokenData);
 
         $responseData = [
             'access_token' => $accessToken,
@@ -807,9 +854,9 @@ class OAuthServer
     }
 
     /**
-     * Handle refresh token grant
+     * Handle refresh token grant with resource binding preservation
      */
-    private function handleRefreshTokenGrant(array $data): Response
+    private function handleRefreshTokenGrant(array $data, Request $request): Response
     {
         $refreshToken = $data['refresh_token'] ?? null;
         $clientId = $data['client_id'] ?? null;
@@ -843,8 +890,8 @@ class OAuthServer
         $this->storage->revokeToken($tokenData['access_token']);
         $this->storage->revokeToken($refreshToken);
 
-        $this->storage->storeAccessToken(
-            [
+        // Preserve resource binding in new token for 2025-06-18
+        $newTokenData = [
             'client_id' => $clientId,
             'access_token' => $newAccessToken,
             'refresh_token' => $newRefreshToken,
@@ -852,8 +899,15 @@ class OAuthServer
             'expires_at' => time() + 3600,
             'agency_id' => $tokenData['agency_id'],
             'user_id' => $tokenData['user_id']
-            ]
-        );
+        ];
+
+        // Preserve resource binding if present
+        if (isset($tokenData['resource'])) {
+            $newTokenData['resource'] = $tokenData['resource'];
+            $newTokenData['aud'] = $tokenData['aud'] ?? [$tokenData['resource']];
+        }
+
+        $this->storage->storeAccessToken($newTokenData);
 
         $responseData = [
             'access_token' => $newAccessToken,
@@ -871,6 +925,38 @@ class OAuthServer
         return $this->responseFactory->createResponse(200)
             ->withBody($stream)
             ->withHeader('Content-Type', 'application/json');
+    }
+
+    /**
+     * Detect protocol version from request
+     */
+    private function detectProtocolVersion(Request $request): string
+    {
+        // Check MCP-Protocol-Version header first
+        $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
+        if ($headerVersion) {
+            return $headerVersion;
+        }
+
+        // Fallback to path detection or default
+        $path = $request->getUri()->getPath();
+        if (strpos($path, '2025-06-18') !== false) {
+            return '2025-06-18';
+        } elseif (strpos($path, '2025-03-26') !== false) {
+            return '2025-03-26';
+        }
+
+        return '2024-11-05';
+    }
+
+    /**
+     * Get base URL from request
+     */
+    private function getBaseUrl(Request $request): string
+    {
+        $uri = $request->getUri();
+        return $uri->getScheme() . '://' . $uri->getHost() .
+               ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
     /**
@@ -979,6 +1065,12 @@ class OAuthServer
         $scope = $oauthRequest['scope'];
         $error = $data['error'] ?? '';
 
+        // Show resource information for 2025-06-18
+        $resourceInfo = '';
+        if (isset($oauthRequest['resource'])) {
+            $resourceInfo = "<p><strong>Resource:</strong> {$oauthRequest['resource']}</p>";
+        }
+
         $html = "<!DOCTYPE html>
 <html>
 <head>
@@ -1008,6 +1100,7 @@ class OAuthServer
             <ul>
                 <li>Access your MCP server data ({$scope})</li>
             </ul>
+            {$resourceInfo}
         </div>
         <form method='POST' action='/oauth/consent'>
             <button type='submit' name='action' value='allow' class='btn allow'>Allow</button>
