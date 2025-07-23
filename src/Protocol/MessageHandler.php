@@ -75,7 +75,7 @@ class MessageHandler
             'structured_outputs' => true,
             'resource_links' => true,
             'progress_messages' => true,
-            'json_rpc_batching' => true,
+            'json_rpc_batching' => false,
             'oauth_resource_server' => true,
             'resource_indicators' => true
         ]
