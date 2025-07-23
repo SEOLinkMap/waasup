@@ -86,7 +86,8 @@ class MCPSecurityComplianceTest extends TestCase
     {
         // Add test client supporting 2025-06-18
         $this->storage->addOAuthClient(
-            'test-client-2025', [
+            'test-client-2025',
+            [
             'client_id' => 'test-client-2025',
             'client_secret' => null,
             'client_name' => 'MCP 2025-06-18 Test Client',
@@ -98,7 +99,9 @@ class MCPSecurityComplianceTest extends TestCase
 
         // Add test agency and user
         $this->storage->addContext(
-            $this->contextId, 'agency', [
+            $this->contextId,
+            'agency',
+            [
             'id' => 1,
             'uuid' => $this->contextId,
             'name' => 'Test Agency',
@@ -108,7 +111,9 @@ class MCPSecurityComplianceTest extends TestCase
 
         // Add malicious context for token passthrough tests
         $this->storage->addContext(
-            $this->maliciousContextId, 'agency', [
+            $this->maliciousContextId,
+            'agency',
+            [
             'id' => 999,
             'uuid' => $this->maliciousContextId,
             'name' => 'Malicious Agency',
@@ -117,7 +122,8 @@ class MCPSecurityComplianceTest extends TestCase
         );
 
         $this->storage->addUser(
-            1, [
+            1,
+            [
             'id' => 1,
             'name' => 'Test User',
             'email' => 'test@example.com',

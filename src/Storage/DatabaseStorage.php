@@ -88,16 +88,16 @@ class DatabaseStorage implements StorageInterface
     public function getContextData(string $identifier, string $type = 'agency'): ?array
     {
         switch ($type) {
-        case 'agency':
-            $sql = "SELECT * FROM `{$this->tablePrefix}agencies`
+            case 'agency':
+                $sql = "SELECT * FROM `{$this->tablePrefix}agencies`
                         WHERE `uuid` = :identifier AND `active` = 1 LIMIT 1";
-            break;
-        case 'user':
-            $sql = "SELECT * FROM `{$this->tablePrefix}users`
+                break;
+            case 'user':
+                $sql = "SELECT * FROM `{$this->tablePrefix}users`
                         WHERE `uuid` = :identifier LIMIT 1";
-            break;
-        default:
-            return null;
+                break;
+            default:
+                return null;
         }
 
         $stmt = $this->pdo->prepare($sql);
@@ -427,14 +427,14 @@ class DatabaseStorage implements StorageInterface
         $driver = $this->pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
 
         switch ($driver) {
-        case 'mysql':
-            return 'mysql';
-        case 'sqlite':
-            return 'sqlite';
-        case 'pgsql':
-            return 'postgresql';
-        default:
-            return 'generic';
+            case 'mysql':
+                return 'mysql';
+            case 'sqlite':
+                return 'sqlite';
+            case 'pgsql':
+                return 'postgresql';
+            default:
+                return 'generic';
         }
     }
 

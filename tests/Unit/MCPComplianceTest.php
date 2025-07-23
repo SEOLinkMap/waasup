@@ -166,7 +166,8 @@ class MCPComplianceTest extends TestCase
         $streamRequest = $this->createRequest('GET', '/mcp/550e8400-e29b-41d4-a716-446655440000')
             ->withHeader('Mcp-Session-Id', $modernSessionId);
         $streamRequest = $streamRequest->withAttribute(
-            'mcp_context', $this->createTestContext(
+            'mcp_context',
+            $this->createTestContext(
                 [
                 'protocol_version' => '2025-03-26'
                 ]
@@ -209,11 +210,13 @@ class MCPComplianceTest extends TestCase
 
         // Test tools/list without tool annotations (2024-11-05 behavior)
         $toolsRequest = $this->createSessionRequest(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'tools/list',
             'id' => $this->getNextRequestId()
-            ], '2024-11-05'
+            ],
+            '2024-11-05'
         );
 
         $response = $this->server->handle($toolsRequest, $this->createResponse());
@@ -235,7 +238,8 @@ class MCPComplianceTest extends TestCase
 
         // Test JSON-RPC batching (2025-03-26 only)
         $batchRequest = $this->createSessionRequest(
-            $sessionId2025, [
+            $sessionId2025,
+            [
             [
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
@@ -246,7 +250,8 @@ class MCPComplianceTest extends TestCase
                 'method' => 'tools/list',
                 'id' => $this->getNextRequestId()
             ]
-            ], '2025-03-26'
+            ],
+            '2025-03-26'
         );
 
         $batchResponse = $this->server->handle($batchRequest, $this->createResponse());
@@ -410,23 +415,23 @@ class MCPComplianceTest extends TestCase
         $this->assertArrayHasKey('resources', $capabilities);
 
         switch ($version) {
-        case '2024-11-05':
-            // 2024-11-05 should NOT have completions capability
-            $this->assertArrayNotHasKey('completions', $capabilities);
-            break;
+            case '2024-11-05':
+                // 2024-11-05 should NOT have completions capability
+                $this->assertArrayNotHasKey('completions', $capabilities);
+                break;
 
-        case '2025-03-26':
-            // 2025-03-26 should have completions capability
-            $this->assertArrayHasKey('completions', $capabilities);
-            // Should NOT have elicitation
-            $this->assertArrayNotHasKey('elicitation', $capabilities);
-            break;
+            case '2025-03-26':
+                // 2025-03-26 should have completions capability
+                $this->assertArrayHasKey('completions', $capabilities);
+                // Should NOT have elicitation
+                $this->assertArrayNotHasKey('elicitation', $capabilities);
+                break;
 
-        case '2025-06-18':
-            // 2025-06-18 should have both completions and elicitation
-            $this->assertArrayHasKey('completions', $capabilities);
-            $this->assertArrayHasKey('elicitation', $capabilities);
-            break;
+            case '2025-06-18':
+                // 2025-06-18 should have both completions and elicitation
+                $this->assertArrayHasKey('completions', $capabilities);
+                $this->assertArrayHasKey('elicitation', $capabilities);
+                break;
         }
     }
 }

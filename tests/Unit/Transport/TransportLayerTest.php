@@ -110,7 +110,8 @@ class TransportLayerTest extends TestCase
         $sseRequest = $this->createRequest('GET', '/mcp/550e8400-e29b-41d4-a716-446655440000')
             ->withHeader('Mcp-Session-Id', $sessionId);
         $sseRequest = $sseRequest->withAttribute(
-            'mcp_context', $this->createTestContext(
+            'mcp_context',
+            $this->createTestContext(
                 [
                 'base_url' => 'https://test.example.com',
                 'context_id' => '550e8400-e29b-41d4-a716-446655440000'
@@ -154,7 +155,8 @@ class TransportLayerTest extends TestCase
             )
         );
         $messageRequest = $messageRequest->withAttribute(
-            'mcp_context', $this->createTestContext(
+            'mcp_context',
+            $this->createTestContext(
                 [
                 'protocol_version' => '2024-11-05'
                 ]
@@ -227,7 +229,8 @@ class TransportLayerTest extends TestCase
             )
         );
         $postRequest = $postRequest->withAttribute(
-            'mcp_context', $this->createTestContext(
+            'mcp_context',
+            $this->createTestContext(
                 [
                 'protocol_version' => '2025-03-26'
                 ]
@@ -246,7 +249,8 @@ class TransportLayerTest extends TestCase
             ]
         );
         $getRequest = $getRequest->withAttribute(
-            'mcp_context', $this->createTestContext(
+            'mcp_context',
+            $this->createTestContext(
                 [
                 'protocol_version' => '2025-03-26'
                 ]
@@ -292,7 +296,8 @@ class TransportLayerTest extends TestCase
             )
         );
         $batchRequest = $batchRequest->withAttribute(
-            'mcp_context', $this->createTestContext(
+            'mcp_context',
+            $this->createTestContext(
                 [
                 'protocol_version' => '2025-03-26'
                 ]
@@ -384,7 +389,8 @@ class TransportLayerTest extends TestCase
             ]
         );
         $request2 = $request2->withAttribute(
-            'mcp_context', $this->createTestContext(
+            'mcp_context',
+            $this->createTestContext(
                 [
                 'protocol_version' => '2025-03-26'
                 ]

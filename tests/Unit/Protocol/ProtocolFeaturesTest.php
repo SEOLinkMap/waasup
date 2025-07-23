@@ -2,11 +2,9 @@
 
 namespace Seolinkmap\Waasup\Tests\Unit\Protocol;
 
-use Seolinkmap\Waasup\Exception\ProtocolException;
 use Seolinkmap\Waasup\Protocol\MessageHandler;
 use Seolinkmap\Waasup\Protocol\VersionNegotiator;
 use Seolinkmap\Waasup\Tests\TestCase;
-use Slim\Psr7\Response;
 
 class ProtocolFeaturesTest extends TestCase
 {
@@ -1347,7 +1345,8 @@ class ProtocolFeaturesTest extends TestCase
                 );
 
                 $this->assertEquals(
-                    202, $response->getStatusCode(),
+                    202,
+                    $response->getStatusCode(),
                     "Method {$method} should be supported in version {$version}"
                 );
             }
@@ -1370,7 +1369,8 @@ class ProtocolFeaturesTest extends TestCase
 
                 // Unsupported methods should still return 202 but with error queued
                 $this->assertEquals(
-                    202, $response->getStatusCode(),
+                    202,
+                    $response->getStatusCode(),
                     "Method {$method} should return 202 (queued error) in version {$version}"
                 );
             }
@@ -1380,23 +1380,23 @@ class ProtocolFeaturesTest extends TestCase
     private function getDefaultParamsForMethod(string $method): array
     {
         switch ($method) {
-        case 'elicitation/create':
-            return [
-                    'message' => 'Test message',
-                    'requestedSchema' => ['type' => 'string']
-                ];
-        case 'completions/complete':
-            return [
-                    'ref' => ['type' => 'ref/tool', 'name' => 'test_tool'],
-                    'argument' => 'test'
-                ];
-        case 'tools/call':
-            return [
-                    'name' => 'test_tool',
-                    'arguments' => []
-                ];
-        default:
-            return [];
+            case 'elicitation/create':
+                return [
+                        'message' => 'Test message',
+                        'requestedSchema' => ['type' => 'string']
+                    ];
+            case 'completions/complete':
+                return [
+                        'ref' => ['type' => 'ref/tool', 'name' => 'test_tool'],
+                        'argument' => 'test'
+                    ];
+            case 'tools/call':
+                return [
+                        'name' => 'test_tool',
+                        'arguments' => []
+                    ];
+            default:
+                return [];
         }
     }
 }

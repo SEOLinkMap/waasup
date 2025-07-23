@@ -154,7 +154,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'prompts/get',
             'params' => [
@@ -177,7 +178,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'prompts/list',
             'id' => $this->getNextRequestId()
@@ -200,7 +202,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'prompts/get',
             'params' => [
@@ -223,7 +226,8 @@ class CoreProtocolTest extends TestCase
 
         // Test missing required argument - should fail gracefully
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'prompts/get',
             'params' => [
@@ -245,7 +249,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'prompts/get',
             'params' => [
@@ -270,7 +275,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'resources/list',
             'id' => $this->getNextRequestId()
@@ -288,7 +294,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'resources/templates/list',
             'id' => $this->getNextRequestId()
@@ -305,7 +312,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'test://{id}'],
@@ -323,7 +331,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'test://resource'],
@@ -343,7 +352,8 @@ class CoreProtocolTest extends TestCase
 
         // Test protected resource with context
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'test://protected'],
@@ -363,7 +373,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'test://resource'],
@@ -381,7 +392,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'nonexistent://resource'],
@@ -631,7 +643,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'tools/list',
             'params' => ['cursor' => null],
@@ -649,7 +662,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'resources/list',
             'params' => ['cursor' => 'page_token'],
@@ -666,7 +680,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'prompts/list',
             'id' => $this->getNextRequestId()
@@ -685,7 +700,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'sampling/createMessage',
             'params' => [
@@ -707,7 +723,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'sampling/createMessage',
             'params' => [
@@ -728,7 +745,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'sampling/createMessage',
             'params' => [
@@ -752,7 +770,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'roots/list',
             'params' => [],
@@ -769,7 +788,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'roots/listDirectory',
             'params' => ['uri' => 'file:///'],
@@ -786,7 +806,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         $response = $this->sendRequestAndGetStoredResponse(
-            $sessionId, [
+            $sessionId,
+            [
             'jsonrpc' => '2.0',
             'method' => 'roots/read',
             'params' => ['uri' => 'file:///test.txt'],

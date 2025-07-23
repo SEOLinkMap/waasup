@@ -3,12 +3,12 @@
 namespace Seolinkmap\Waasup\Protocol;
 
 use Psr\Http\Message\ResponseInterface as Response;
+use Seolinkmap\Waasup\Content\AudioContentHandler;
 use Seolinkmap\Waasup\Exception\ProtocolException;
 use Seolinkmap\Waasup\Prompts\Registry\PromptRegistry;
 use Seolinkmap\Waasup\Resources\Registry\ResourceRegistry;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 use Seolinkmap\Waasup\Tools\Registry\ToolRegistry;
-use Seolinkmap\Waasup\Content\AudioContentHandler;
 
 class MessageHandler
 {
@@ -255,54 +255,54 @@ class MessageHandler
 
         try {
             switch ($method) {
-            case 'initialize':
-                return $this->handleInitialize($params, $id, $sessionId, $response);
+                case 'initialize':
+                    return $this->handleInitialize($params, $id, $sessionId, $response);
 
-            case 'ping':
-                return $this->handlePing($id, $sessionId, $context, $response);
+                case 'ping':
+                    return $this->handlePing($id, $sessionId, $context, $response);
 
-            case 'tools/list':
-                return $this->handleToolsList($id, $sessionId, $context, $response);
+                case 'tools/list':
+                    return $this->handleToolsList($id, $sessionId, $context, $response);
 
-            case 'tools/call':
-                return $this->handleToolsCall($params, $id, $sessionId, $context, $response);
+                case 'tools/call':
+                    return $this->handleToolsCall($params, $id, $sessionId, $context, $response);
 
-            case 'prompts/list':
-                return $this->handlePromptsList($id, $sessionId, $context, $response);
+                case 'prompts/list':
+                    return $this->handlePromptsList($id, $sessionId, $context, $response);
 
-            case 'prompts/get':
-                return $this->handlePromptsGet($params, $id, $sessionId, $context, $response);
+                case 'prompts/get':
+                    return $this->handlePromptsGet($params, $id, $sessionId, $context, $response);
 
-            case 'resources/list':
-                return $this->handleResourcesList($id, $sessionId, $context, $response);
+                case 'resources/list':
+                    return $this->handleResourcesList($id, $sessionId, $context, $response);
 
-            case 'resources/read':
-                return $this->handleResourcesRead($params, $id, $sessionId, $context, $response);
+                case 'resources/read':
+                    return $this->handleResourcesRead($params, $id, $sessionId, $context, $response);
 
-            case 'resources/templates/list':
-                return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
+                case 'resources/templates/list':
+                    return $this->handleResourceTemplatesList($id, $sessionId, $context, $response);
 
-            case 'completions/complete':
-                return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
+                case 'completions/complete':
+                    return $this->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
 
-            case 'elicitation/create':
-                return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
+                case 'elicitation/create':
+                    return $this->handleElicitationRequest($params, $id, $sessionId, $context, $response);
 
-            case 'sampling/createMessage':
-                return $this->handleSamplingResponse($params, $id, $sessionId, $context, $response);
+                case 'sampling/createMessage':
+                    return $this->handleSamplingResponse($params, $id, $sessionId, $context, $response);
 
-            case 'roots/list':
-                return $this->handleRootsListResponse($params, $id, $sessionId, $context, $response);
+                case 'roots/list':
+                    return $this->handleRootsListResponse($params, $id, $sessionId, $context, $response);
 
-            case 'roots/read':
-            case 'roots/listDirectory':
-                return $this->handleRootsReadResponse($params, $id, $sessionId, $context, $response);
+                case 'roots/read':
+                case 'roots/listDirectory':
+                    return $this->handleRootsReadResponse($params, $id, $sessionId, $context, $response);
 
-            default:
-                if (!$sessionId) {
-                    throw new ProtocolException('Session required', -32001);
-                }
-                return $this->storeErrorResponse($sessionId, -32601, 'Method not found', $id, $response);
+                default:
+                    if (!$sessionId) {
+                        throw new ProtocolException('Session required', -32001);
+                    }
+                    return $this->storeErrorResponse($sessionId, -32601, 'Method not found', $id, $response);
             }
         } catch (ProtocolException $e) {
             throw $e;
@@ -353,21 +353,21 @@ class MessageHandler
     private function processNotification(string $method, array $params, ?string $sessionId, string $protocolVersion): void
     {
         switch ($method) {
-        case 'initialized':
-        case 'notifications/initialized':
-            break;
+            case 'initialized':
+            case 'notifications/initialized':
+                break;
 
-        case 'notifications/cancelled':
-            if ($sessionId) {
-                $messages = $this->storage->getMessages($sessionId);
-                foreach ($messages as $message) {
-                    $this->storage->deleteMessage($message['id']);
+            case 'notifications/cancelled':
+                if ($sessionId) {
+                    $messages = $this->storage->getMessages($sessionId);
+                    foreach ($messages as $message) {
+                        $this->storage->deleteMessage($message['id']);
+                    }
                 }
-            }
-            break;
+                break;
 
-        case 'notifications/progress':
-            break;
+            case 'notifications/progress':
+                break;
         }
     }
 
@@ -480,35 +480,35 @@ class MessageHandler
             }
 
             switch ($item['type']) {
-            case 'text':
-                $processedContent[] = [
-                    'type' => 'text',
-                    'text' => $item['text'] ?? ''
-                ];
-                break;
+                case 'text':
+                    $processedContent[] = [
+                        'type' => 'text',
+                        'text' => $item['text'] ?? ''
+                    ];
+                    break;
 
-            case 'image':
-                $processedContent[] = [
-                    'type' => 'image',
-                    'data' => $item['data'] ?? '',
-                    'mimeType' => $item['mimeType'] ?? 'image/jpeg'
-                ];
-                break;
+                case 'image':
+                    $processedContent[] = [
+                        'type' => 'image',
+                        'data' => $item['data'] ?? '',
+                        'mimeType' => $item['mimeType'] ?? 'image/jpeg'
+                    ];
+                    break;
 
-            case 'audio':
-                if (!$this->isFeatureSupported('audio_content', $protocolVersion)) {
-                    throw new ProtocolException("Audio content not supported in version {$protocolVersion}", -32602);
-                }
+                case 'audio':
+                    if (!$this->isFeatureSupported('audio_content', $protocolVersion)) {
+                        throw new ProtocolException("Audio content not supported in version {$protocolVersion}", -32602);
+                    }
 
-                try {
-                    $processedContent[] = AudioContentHandler::processAudioContent($item);
-                } catch (\Exception $e) {
-                    throw new ProtocolException("Invalid audio content: " . $e->getMessage(), -32602);
-                }
-                break;
+                    try {
+                        $processedContent[] = AudioContentHandler::processAudioContent($item);
+                    } catch (\Exception $e) {
+                        throw new ProtocolException("Invalid audio content: " . $e->getMessage(), -32602);
+                    }
+                    break;
 
-            default:
-                throw new ProtocolException("Unsupported content type: {$item['type']}", -32602);
+                default:
+                    throw new ProtocolException("Unsupported content type: {$item['type']}", -32602);
             }
         }
 

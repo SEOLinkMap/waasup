@@ -194,23 +194,23 @@ class SocialAuthHandler
         $_SESSION['oauth_state'] = $state;
 
         switch ($provider) {
-        case 'google':
-            return $this->googleProvider ?
-                        $this->googleProvider->redirectResponse($response, $state) :
-                        $this->renderAuthForm($response, ['error' => 'Google authentication not configured']);
+            case 'google':
+                return $this->googleProvider ?
+                            $this->googleProvider->redirectResponse($response, $state) :
+                            $this->renderAuthForm($response, ['error' => 'Google authentication not configured']);
 
-        case 'linkedin':
-            return $this->linkedinProvider ?
-                        $this->linkedinProvider->redirectResponse($response, $state) :
-                        $this->renderAuthForm($response, ['error' => 'LinkedIn authentication not configured']);
+            case 'linkedin':
+                return $this->linkedinProvider ?
+                            $this->linkedinProvider->redirectResponse($response, $state) :
+                            $this->renderAuthForm($response, ['error' => 'LinkedIn authentication not configured']);
 
-        case 'github':
-            return $this->githubProvider ?
-                        $this->githubProvider->redirectResponse($response, $state) :
-                        $this->renderAuthForm($response, ['error' => 'GitHub authentication not configured']);
+            case 'github':
+                return $this->githubProvider ?
+                            $this->githubProvider->redirectResponse($response, $state) :
+                            $this->renderAuthForm($response, ['error' => 'GitHub authentication not configured']);
 
-        default:
-            return $this->renderAuthForm($response, ['error' => 'Invalid authentication provider']);
+            default:
+                return $this->renderAuthForm($response, ['error' => 'Invalid authentication provider']);
         }
     }
 
