@@ -1,6 +1,6 @@
 {
     "name": "seolinkmap/waasup",
-    "description": "Website as a Server unleashing Power (WaaSuP) - Production-ready SaaS Model Context Protocol (MCP) server for PHP",
+    "description": "Website as a Server using PHP (WaaSuP) - Production-ready SaaS Model Context Protocol (MCP) server for PHP",
     "type": "library",
     "require": {
         "php": "^8.1",

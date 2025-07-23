@@ -6,7 +6,8 @@ The MCP SaaS Server implements OAuth 2.1 with multi-tenant context-based authent
 
 The authentication system provides:
 
-- **OAuth 2.1 compliance** with authorization code flow
+- **OAuth 2.1 compliance** with authorization code flow and PKCE requirement
+- **RFC 8707 Resource Indicators** for token binding to specific MCP endpoints (2025-06-18)
 - **Multi-tenant architecture** with agency-based contexts
 - **Social provider integration** (Google, LinkedIn, GitHub)
 - **Discovery endpoints** for OAuth configuration
@@ -16,12 +17,12 @@ The authentication system provides:
 ### Authentication Flow
 
 1. Client discovers OAuth endpoints via `.well-known/oauth-authorization-server`
-2. Client redirects user to authorization endpoint
+2. Client redirects user to authorization endpoint with resource parameter (2025-06-18)
 3. User authenticates via email/password or social providers
 4. User grants consent for specific agency context
-5. Server returns authorization code
-6. Client exchanges code for access token
-7. Client uses token for MCP API requests with context
+5. Server returns authorization code with resource binding
+6. Client exchanges code for access token with resource validation
+7. Client uses token for MCP API requests with context and resource validation
 
 ## OAuth Server Implementation
 
@@ -66,21 +67,33 @@ $oauthServer = new OAuthServer(
 
 ### Authorization Endpoint
 
-The authorization endpoint handles user authentication and consent:
+The authorization endpoint handles user authentication and consent with RFC 8707 Resource Indicators:
 
 ```php
-// GET /oauth/authorize?response_type=code&client_id=...&redirect_uri=...&scope=...&state=...
+// GET /oauth/authorize?response_type=code&client_id=...&redirect_uri=...&scope=...&state=...&resource=...
 public function handleAuthorize(Request $request, Response $response): Response
 {
     return $this->oauthServer->authorize($request, $response);
 }
 ```
 
+**MCP 2025-06-18 requires resource parameter:**
+```
+https://server.com/oauth/authorize?
+  response_type=code&
+  client_id=your_client_id&
+  redirect_uri=https://your-app.com/callback&
+  scope=mcp:read+mcp:write&
+  state=random_state&
+  resource=https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000
+```
+
 This will:
-1. Validate the OAuth parameters
+1. Validate the OAuth parameters including resource URL
 2. Check if user is already authenticated
 3. Render authentication form with social provider options
 4. Handle consent after authentication
+5. Bind authorization code to specific resource
 
 ### Authentication Verification
 
@@ -92,6 +105,24 @@ public function handleVerify(Request $request, Response $response): Response
 {
     return $this->oauthServer->verify($request, $response);
 }
+```
+
+**Email/Password Authentication:**
+```html
+<form method="POST" action="/oauth/verify">
+    <input type="email" name="email" required>
+    <input type="password" name="password" required>
+    <button type="submit" name="provider" value="email">Sign In</button>
+</form>
+```
+
+**Social Authentication:**
+```html
+<form method="POST" action="/oauth/verify">
+    <button type="submit" name="provider" value="google">Continue with Google</button>
+    <button type="submit" name="provider" value="linkedin">Continue with LinkedIn</button>
+    <button type="submit" name="provider" value="github">Continue with GitHub</button>
+</form>
 ```
 
 ### Consent Handling
@@ -106,9 +137,15 @@ public function handleConsent(Request $request, Response $response): Response
 }
 ```
 
+The consent screen displays:
+- Application name requesting access
+- User information (name, email)
+- Requested permissions/scope
+- Resource being accessed (for 2025-06-18)
+
 ### Token Exchange
 
-Exchange authorization code for access token:
+Exchange authorization code for access token with resource binding:
 
 ```php
 // POST /oauth/token
@@ -118,7 +155,41 @@ public function handleToken(Request $request, Response $response): Response
 }
 ```
 
-Supports both authorization code grant and refresh token grant.
+**Authorization Code Grant (with RFC 8707):**
+```bash
+curl -X POST https://server.com/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code" \
+  -d "code=auth_code_here" \
+  -d "client_id=your_client_id" \
+  -d "redirect_uri=https://your-app.com/callback" \
+  -d "code_verifier=pkce_verifier" \
+  -d "resource=https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000"
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "def50200...",
+  "scope": "mcp:read mcp:write"
+}
+```
+
+The token includes resource binding in database:
+```sql
+INSERT INTO mcp_oauth_tokens (
+    access_token, resource, aud, agency_id, scope
+) VALUES (
+    'token...',
+    'https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000',
+    '["https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000"]',
+    1,
+    'mcp:read mcp:write'
+);
+```
 
 ### Social Provider Callbacks
 
@@ -146,7 +217,7 @@ public function handleGithubCallback(Request $request, Response $response): Resp
 
 ## Authentication Middleware
 
-The PSR-15 middleware handles request authentication automatically.
+The PSR-15 middleware handles request authentication automatically with RFC 8707 validation.
 
 ### Middleware Setup
 
@@ -159,7 +230,10 @@ $authMiddleware = new AuthMiddleware(
     $streamFactory,
     [
         'context_types' => ['agency'],
-        'base_url' => 'https://your-server.com'
+        'base_url' => 'https://your-server.com',
+        'resource_server_metadata' => true,        // OAuth Resource Server (2025-06-18)
+        'require_resource_binding' => true,        // RFC 8707 compliance
+        'audience_validation_required' => true     // Token audience validation
     ]
 );
 
@@ -173,16 +247,44 @@ The middleware:
 1. Extracts context identifier from route (agency UUID)
 2. Validates the context exists and is active
 3. Extracts Bearer token from Authorization header
-4. Validates token against storage
-5. Adds context data to request attributes
-6. Returns OAuth discovery response if authentication fails
+4. Validates token against storage with resource binding (2025-06-18)
+5. Validates audience claims and scope checking
+6. Adds context data to request attributes
+7. Returns OAuth discovery response if authentication fails
+
+### RFC 8707 Resource Indicators Validation (2025-06-18)
+
+For MCP 2025-06-18, the middleware performs strict resource validation:
+
+```php
+private function validateResourceServerRequirements(Request $request, array $tokenData): void
+{
+    $baseUrl = $this->getBaseUrl($request);
+    $contextId = $this->extractContextId($request);
+    $expectedResource = $baseUrl . '/mcp/' . $contextId;
+
+    // Token must be bound to this specific resource
+    if (!isset($tokenData['resource']) || $tokenData['resource'] !== $expectedResource) {
+        throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
+    }
+
+    // Audience validation prevents token mis-redemption
+    if (!isset($tokenData['aud']) || !in_array($expectedResource, (array)$tokenData['aud'])) {
+        throw new AuthenticationException('Token audience validation failed');
+    }
+
+    if (isset($tokenData['scope']) && !$this->validateTokenScope($tokenData['scope'])) {
+        throw new AuthenticationException('Token scope invalid for this resource server');
+    }
+}
+```
 
 ### Token Validation
 
 Token validation is handled directly through the storage interface:
 
 ```php
-// In your storage implementation
+// In DatabaseStorage implementation
 public function validateToken(string $accessToken, array $context = []): ?array
 {
     $sql = "SELECT * FROM `{$this->tablePrefix}oauth_tokens`
@@ -203,7 +305,7 @@ public function validateToken(string $accessToken, array $context = []): ?array
 
 ## Discovery Endpoints
 
-The `WellKnownProvider` implements OAuth discovery as per RFC 8414.
+The `WellKnownProvider` implements OAuth discovery as per RFC 8414 with MCP-specific extensions.
 
 ### OAuth Authorization Server Metadata
 
@@ -219,11 +321,58 @@ public function handleAuthDiscovery(Request $request, Response $response): Respo
 }
 ```
 
-Returns metadata including:
-- Authorization and token endpoints
-- Supported grant types and scopes
-- Authentication methods
-- PKCE support
+**Response for 2025-06-18:**
+```json
+{
+  "issuer": "https://server.com",
+  "authorization_endpoint": "https://server.com/oauth/authorize",
+  "token_endpoint": "https://server.com/oauth/token",
+  "grant_types_supported": ["authorization_code", "refresh_token"],
+  "response_types_supported": ["code"],
+  "token_endpoint_auth_methods_supported": ["client_secret_post", "private_key_jwt", "none"],
+  "code_challenge_methods_supported": ["S256"],
+  "response_modes_supported": ["query"],
+  "registration_endpoint": "https://server.com/oauth/register",
+  "scopes_supported": ["mcp:read", "mcp:write"],
+  "resource_indicators_supported": true,
+  "token_binding_methods_supported": ["resource_indicator"],
+  "require_resource_parameter": true,
+  "pkce_required": true,
+  "authorization_response_iss_parameter_supported": true
+}
+```
+
+### OAuth Protected Resource Metadata (2025-06-18)
+
+```php
+// GET /.well-known/oauth-protected-resource
+public function handleResourceDiscovery(Request $request, Response $response): Response
+{
+    return $wellKnownProvider->protectedResource($request, $response);
+}
+```
+
+**Response:**
+```json
+{
+  "resource": "https://server.com",
+  "authorization_servers": ["https://server.com"],
+  "bearer_methods_supported": ["header"],
+  "scopes_supported": ["mcp:read", "mcp:write"],
+  "resource_server": true,
+  "resource_indicators_supported": true,
+  "token_binding_supported": true,
+  "audience_validation_required": true,
+  "resource_indicator_endpoint": "https://server.com/oauth/resource",
+  "token_binding_methods_supported": ["resource_indicator"],
+  "content_types_supported": ["application/json", "text/event-stream"],
+  "mcp_features_supported": [
+    "tools", "prompts", "resources", "sampling", "roots", "ping",
+    "progress_notifications", "tool_annotations", "audio_content",
+    "completions", "elicitation", "structured_outputs", "resource_links"
+  ]
+}
+```
 
 ## Multi-Tenant Context
 
@@ -253,13 +402,83 @@ public function handleToolCall(Request $request): Response
 {
     $context = $request->getAttribute('mcp_context');
     $agencyData = $context['context_data'];
+    $tokenData = $context['token_data'];
 
     // Use agency data for business logic
     $agencyId = $agencyData['id'];
     $agencySettings = json_decode($agencyData['settings'], true);
 
+    // Resource validation for 2025-06-18
+    if ($context['protocol_version'] === '2025-06-18') {
+        $expectedResource = $context['base_url'] . '/mcp/' . $context['context_id'];
+        if ($tokenData['resource'] !== $expectedResource) {
+            throw new AuthenticationException('Token resource mismatch');
+        }
+    }
+
     // Implement agency-specific rate limiting, feature access, etc.
 }
+```
+
+## Social Authentication Providers
+
+The system includes built-in social authentication providers.
+
+### Google Provider
+
+```php
+use Seolinkmap\Waasup\Auth\Providers\GoogleProvider;
+
+$googleProvider = new GoogleProvider(
+    'your-google-client-id',
+    'your-google-client-secret',
+    'https://your-server.com/oauth/google/callback'
+);
+
+// Get authorization URL
+$authUrl = $googleProvider->getAuthUrl();
+
+// Handle callback
+$result = $googleProvider->handleCallback($authorizationCode);
+// Returns: ['provider' => 'google', 'provider_id' => '...', 'email' => '...', 'name' => '...']
+```
+
+### LinkedIn Provider
+
+```php
+use Seolinkmap\Waasup\Auth\Providers\LinkedinProvider;
+
+$linkedinProvider = new LinkedinProvider(
+    'your-linkedin-client-id',
+    'your-linkedin-client-secret',
+    'https://your-server.com/oauth/linkedin/callback'
+);
+
+// Get authorization URL with state
+$state = bin2hex(random_bytes(16));
+$authUrl = $linkedinProvider->getAuthUrl($state);
+
+// Handle callback
+$result = $linkedinProvider->handleCallback($authorizationCode, $state);
+```
+
+### GitHub Provider
+
+```php
+use Seolinkmap\Waasup\Auth\Providers\GithubProvider;
+
+$githubProvider = new GithubProvider(
+    'your-github-client-id',
+    'your-github-client-secret',
+    'https://your-server.com/oauth/github/callback'
+);
+
+// Get authorization URL with state
+$state = bin2hex(random_bytes(16));
+$authUrl = $githubProvider->getAuthUrl($state);
+
+// Handle callback
+$result = $githubProvider->handleCallback($authorizationCode, $state);
 ```
 
 ## Storage Interface
@@ -288,9 +507,14 @@ interface StorageInterface
     // User management
     public function verifyUserCredentials(string $email, string $password): ?array;
     public function findUserByEmail(string $email): ?array;
+
+    // Social auth (optional methods - checked with method_exists)
     public function findUserByGoogleId(string $googleId): ?array;
     public function findUserByLinkedinId(string $linkedinId): ?array;
     public function findUserByGithubId(string $githubId): ?array;
+    public function updateUserGoogleId(int $userId, string $googleId): bool;
+    public function updateUserLinkedinId(int $userId, string $linkedinId): bool;
+    public function updateUserGithubId(int $userId, string $githubId): bool;
 }
 ```
 
@@ -301,6 +525,7 @@ interface StorageInterface
 ```php
 use Slim\Factory\AppFactory;
 use Seolinkmap\Waasup\Integration\Slim\SlimMCPProvider;
+use Seolinkmap\Waasup\Auth\OAuthServer;
 
 $app = AppFactory::create();
 
@@ -315,15 +540,22 @@ $mcpProvider = new SlimMCPProvider(
     $config
 );
 
+// Create OAuth server
+$oauthServer = new OAuthServer($storage, $responseFactory, $streamFactory, $oauthConfig);
+
 // OAuth discovery endpoints
 $app->get('/.well-known/oauth-authorization-server',
     [$mcpProvider, 'handleAuthDiscovery']);
+$app->get('/.well-known/oauth-protected-resource',
+    [$mcpProvider, 'handleResourceDiscovery']);
 
 // OAuth endpoints
 $app->get('/oauth/authorize', [$oauthServer, 'authorize']);
 $app->post('/oauth/verify', [$oauthServer, 'verify']);
 $app->post('/oauth/consent', [$oauthServer, 'consent']);
 $app->post('/oauth/token', [$oauthServer, 'token']);
+$app->post('/oauth/revoke', [$oauthServer, 'revoke']);
+$app->post('/oauth/register', [$oauthServer, 'register']);
 
 // Social provider callbacks
 $app->get('/oauth/google/callback', [$oauthServer, 'handleGoogleCallback']);
@@ -339,7 +571,7 @@ $app->map(['GET', 'POST'], '/mcp/{agencyUuid}[/{sessID}]',
 ### Client-Side Integration
 
 ```javascript
-// OAuth flow in client application
+// OAuth 2.1 flow with RFC 8707 Resource Indicators
 class MCPClient {
     constructor(config) {
         this.config = config;
@@ -347,7 +579,16 @@ class MCPClient {
         this.refreshToken = null;
     }
 
-    async authenticate(agencyId) {
+    async authenticate(agencyId, protocolVersion = '2025-06-18') {
+        const resource = `${this.config.mcpEndpoint}/${agencyId}`;
+
+        // Generate PKCE parameters
+        const codeVerifier = this.generateCodeVerifier();
+        const codeChallenge = await this.generateCodeChallenge(codeVerifier);
+
+        // Store for token exchange
+        sessionStorage.setItem('code_verifier', codeVerifier);
+
         // Redirect to authorization endpoint
         const authUrl = new URL(this.config.authorizationEndpoint);
         authUrl.searchParams.set('response_type', 'code');
@@ -355,22 +596,44 @@ class MCPClient {
         authUrl.searchParams.set('redirect_uri', this.config.redirectUri);
         authUrl.searchParams.set('scope', 'mcp:read mcp:write');
         authUrl.searchParams.set('state', this.generateState());
+        authUrl.searchParams.set('code_challenge', codeChallenge);
+        authUrl.searchParams.set('code_challenge_method', 'S256');
+
+        // RFC 8707 Resource Indicators (required for 2025-06-18)
+        if (protocolVersion === '2025-06-18') {
+            authUrl.searchParams.set('resource', resource);
+        }
 
         window.location.href = authUrl.toString();
     }
 
-    async exchangeCodeForToken(code) {
+    async exchangeCodeForToken(code, agencyId, protocolVersion = '2025-06-18') {
+        const codeVerifier = sessionStorage.getItem('code_verifier');
+        sessionStorage.removeItem('code_verifier');
+
+        const body = new URLSearchParams({
+            grant_type: 'authorization_code',
+            code: code,
+            client_id: this.config.clientId,
+            redirect_uri: this.config.redirectUri,
+            code_verifier: codeVerifier
+        });
+
+        // Add resource parameter for 2025-06-18
+        if (protocolVersion === '2025-06-18') {
+            const resource = `${this.config.mcpEndpoint}/${agencyId}`;
+            body.append('resource', resource);
+        }
+
         const response = await fetch(this.config.tokenEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                grant_type: 'authorization_code',
-                code: code,
-                client_id: this.config.clientId,
-                client_secret: this.config.clientSecret,
-                redirect_uri: this.config.redirectUri
-            })
+            body: body
         });
+
+        if (!response.ok) {
+            throw new Error(`Token exchange failed: ${response.status}`);
+        }
 
         const tokens = await response.json();
         this.accessToken = tokens.access_token;
@@ -378,13 +641,20 @@ class MCPClient {
         return tokens;
     }
 
-    async callMCP(agencyId, method, params = {}) {
+    async callMCP(agencyId, method, params = {}, protocolVersion = '2025-06-18') {
+        const headers = {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json'
+        };
+
+        // Add protocol version header for 2025-06-18
+        if (protocolVersion === '2025-06-18') {
+            headers['MCP-Protocol-Version'] = protocolVersion;
+        }
+
         const response = await fetch(`${this.config.mcpEndpoint}/${agencyId}`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.accessToken}`,
-                'Content-Type': 'application/json'
-            },
+            headers: headers,
             body: JSON.stringify({
                 jsonrpc: '2.0',
                 method: method,
@@ -393,19 +663,47 @@ class MCPClient {
             })
         });
 
+        if (response.status === 401) {
+            // Handle resource binding errors
+            const error = await response.json();
+            if (error.error?.message?.includes('resource')) {
+                throw new Error('Token not bound to this resource - re-authenticate required');
+            }
+        }
+
         return response.json();
+    }
+
+    generateCodeVerifier() {
+        const array = new Uint8Array(32);
+        crypto.getRandomValues(array);
+        return btoa(String.fromCharCode.apply(null, array))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+    }
+
+    async generateCodeChallenge(verifier) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(verifier);
+        const digest = await crypto.subtle.digest('SHA-256', data);
+        return btoa(String.fromCharCode.apply(null, new Uint8Array(digest)))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+    }
+
+    generateState() {
+        const array = new Uint8Array(16);
+        crypto.getRandomValues(array);
+        return btoa(String.fromCharCode.apply(null, array));
     }
 }
 ```
 
 ## Public/Authless MCP Servers
 
-For public MCP servers serving publicly available data, you can bypass authentication entirely. This is ideal for:
-
-- **Repository exploration servers** (browsing GitHub repos, documentation)
-- **Public API wrappers** (weather data, news feeds, public databases)
-- **Educational demos** (showcasing MCP capabilities)
-- **Website-as-a-MCP** (making websites MCP-accessible)
+For public MCP servers serving publicly available data, you can bypass authentication entirely.
 
 ### Authless Server Setup
 
@@ -476,303 +774,64 @@ class PublicStorage implements StorageInterface
     }
 
     // Implement other required methods as no-ops or defaults
-    public function storeMessage(string $sessionId, array $messageData, array $context = []): bool
-    {
-        // Store in memory or database as needed
+    // ...
+}
+```
+
+## Security Considerations
+
+When implementing authentication:
+
+### 1. Token Security
+- **Use HTTPS only** for all OAuth endpoints
+- **Implement token rotation** with refresh tokens
+- **Set appropriate token expiration** (1 hour for access tokens)
+- **Store tokens securely** with encryption at rest
+
+### 2. PKCE Requirements
+- **Always require PKCE** for OAuth 2.1 compliance
+- **Use S256 code challenge method** only
+- **Validate code verifier** on token exchange
+
+### 3. Resource Binding (2025-06-18)
+- **Validate resource parameter** in authorization requests
+- **Bind tokens to specific resources** using RFC 8707
+- **Validate audience claims** on token usage
+- **Prevent token misuse** across different resources
+
+### 4. Rate Limiting
+```php
+// Implement rate limiting for auth endpoints
+class RateLimiter {
+    public static function checkAuthLimit($ip, $endpoint): bool {
+        $key = "auth_limit:{$endpoint}:{$ip}";
+        $attempts = cache_get($key) ?? 0;
+
+        if ($attempts >= 5) {
+            return false; // Rate limited
+        }
+
+        cache_set($key, $attempts + 1, 3600); // 1 hour window
         return true;
     }
+}
 
-    // ... other methods return appropriate defaults
+// Use in OAuth endpoints
+if (!RateLimiter::checkAuthLimit($ip, 'token')) {
+    return $this->errorResponse('rate_limited', 'Too many token requests');
 }
 ```
 
-#### Option 3: Public Route with Custom Context
+### 5. Session Security
+- **Use cryptographically secure session IDs**
+- **Implement session timeout**
+- **Clear sensitive session data** after OAuth flow
+- **Prevent session fixation** attacks
 
-```php
-// Mix authenticated and public routes
-$app = AppFactory::create();
+### 6. Input Validation
+- **Validate all OAuth parameters** against specs
+- **Sanitize redirect URIs** to prevent open redirects
+- **Validate state parameters** to prevent CSRF
+- **Check client credentials** securely
 
-// Protected routes with full auth
-$app->group('/mcp/{agencyUuid}', function ($group) {
-    $group->map(['GET', 'POST'], '[/{sessID}]', [$mcpProvider, 'handleMCP']);
-})->add($mcpProvider->getAuthMiddleware());
-
-// Public routes without auth
-$app->map(['GET', 'POST'], '/public/mcp[/{sessID}]', function (Request $request, Response $response) use ($mcpProvider) {
-    // Add public context to request
-    $request = $request->withAttribute('mcp_context', [
-        'context_data' => ['id' => 1, 'name' => 'Public', 'active' => true],
-        'token_data' => ['user_id' => 1, 'scope' => 'mcp:read'],
-        'context_id' => 'public',
-        'base_url' => 'https://your-server.com'
-    ]);
-
-    return $mcpProvider->getServer()->handle($request, $response);
-});
-```
-
-### Public Server Use Cases
-
-#### Repository Explorer Server
-
-```php
-// Add tools for exploring your repository
-$toolRegistry->register('browse_repository', function($params, $context) {
-    $path = $params['path'] ?? '';
-    $basePath = __DIR__ . '/';
-
-    // Security: ensure within repo bounds
-    $fullPath = realpath($basePath . $path);
-    if (!str_starts_with($fullPath, realpath($basePath))) {
-        return ['error' => 'Path outside repository'];
-    }
-
-    if (is_dir($fullPath)) {
-        $items = [];
-        foreach (scandir($fullPath) as $item) {
-            if ($item[0] === '.') continue;
-            $itemPath = $fullPath . '/' . $item;
-            $items[] = [
-                'name' => $item,
-                'type' => is_dir($itemPath) ? 'directory' : 'file',
-                'path' => ltrim($path . '/' . $item, '/'),
-                'size' => is_file($itemPath) ? filesize($itemPath) : null
-            ];
-        }
-        return ['path' => $path ?: 'root', 'items' => $items];
-    }
-
-    return ['error' => 'Not a directory'];
-}, [
-    'description' => 'Browse repository directory structure',
-    'inputSchema' => [
-        'type' => 'object',
-        'properties' => [
-            'path' => ['type' => 'string', 'description' => 'Directory path to browse']
-        ]
-    ]
-]);
-
-$toolRegistry->register('read_file', function($params, $context) {
-    $path = $params['path'];
-    $basePath = __DIR__ . '/';
-    $fullPath = realpath($basePath . $path);
-
-    // Security validation
-    if (!str_starts_with($fullPath, realpath($basePath)) ||
-        !file_exists($fullPath) ||
-        !is_file($fullPath)) {
-        return ['error' => 'File not found or access denied'];
-    }
-
-    // Size limit for browser display
-    if (filesize($fullPath) > 500000) {
-        return ['error' => 'File too large to display'];
-    }
-
-    return [
-        'path' => $path,
-        'content' => file_get_contents($fullPath),
-        'size' => filesize($fullPath),
-        'modified' => date('Y-m-d H:i:s', filemtime($fullPath))
-    ];
-}, [
-    'description' => 'Read contents of a repository file',
-    'inputSchema' => [
-        'type' => 'object',
-        'properties' => [
-            'path' => ['type' => 'string', 'description' => 'File path to read']
-        ],
-        'required' => ['path']
-    ]
-]);
-```
-
-#### Public API Wrapper
-
-```php
-// Weather data MCP server
-$toolRegistry->register('get_weather', function($params, $context) {
-    $city = $params['city'];
-    $apiKey = $_ENV['WEATHER_API_KEY']; // Your API key, not user's
-
-    $url = "https://api.openweathermap.org/data/2.5/weather?q={$city}&appid={$apiKey}&units=metric";
-    $response = file_get_contents($url);
-    $data = json_decode($response, true);
-
-    return [
-        'city' => $data['name'],
-        'temperature' => $data['main']['temp'],
-        'description' => $data['weather'][0]['description'],
-        'humidity' => $data['main']['humidity'],
-        'wind_speed' => $data['wind']['speed']
-    ];
-}, [
-    'description' => 'Get current weather for any city',
-    'inputSchema' => [
-        'type' => 'object',
-        'properties' => [
-            'city' => ['type' => 'string', 'description' => 'City name']
-        ],
-        'required' => ['city']
-    ]
-]);
-```
-
-### Security Considerations for Public Servers
-
-When running authless MCP servers:
-
-1. **Rate Limiting**: Implement rate limiting to prevent abuse
-```php
-// Simple in-memory rate limiting
-class RateLimiter {
-    private static $requests = [];
-
-    public static function checkLimit($ip, $limit = 100, $window = 3600): bool {
-        $now = time();
-        $key = $ip . ':' . floor($now / $window);
-
-        if (!isset(self::$requests[$key])) {
-            self::$requests[$key] = 0;
-        }
-
-        self::$requests[$key]++;
-        return self::$requests[$key] <= $limit;
-    }
-}
-
-// Use in middleware
-$app->add(function (Request $request, RequestHandler $handler) {
-    $ip = $request->getServerParams()['REMOTE_ADDR'];
-    if (!RateLimiter::checkLimit($ip)) {
-        return new Response(429); // Too Many Requests
-    }
-    return $handler->handle($request);
-});
-```
-
-2. **Input Validation**: Strictly validate all inputs
-```php
-$toolRegistry->register('search_files', function($params, $context) {
-    $query = $params['query'] ?? '';
-
-    // Validate input
-    if (empty($query) || strlen($query) < 2) {
-        return ['error' => 'Query must be at least 2 characters'];
-    }
-
-    if (preg_match('/[^\w\s\-\.]/', $query)) {
-        return ['error' => 'Invalid characters in query'];
-    }
-
-    // ... safe search implementation
-});
-```
-
-3. **Resource Limits**: Prevent resource exhaustion
-```php
-// Limit file sizes, result counts, processing time
-set_time_limit(30); // 30 second max execution
-ini_set('memory_limit', '128M'); // Reasonable memory limit
-```
-
-4. **CORS Configuration**: Enable appropriate CORS for web clients
-```php
-$app->add(function (Request $request, RequestHandler $handler) {
-    $response = $handler->handle($request);
-    return $response
-        ->withHeader('Access-Control-Allow-Origin', '*')
-        ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        ->withHeader('Access-Control-Allow-Headers', 'Content-Type');
-});
-```
-
-### Complete Public Server Example
-
-```php
-<?php
-// examples/public-server/server.php
-
-require_once __DIR__ . '/../../vendor/autoload.php';
-
-use Slim\Factory\AppFactory;
-use Seolinkmap\Waasup\Integration\Slim\SlimMCPProvider;
-use Seolinkmap\Waasup\Storage\MemoryStorage;
-use Seolinkmap\Waasup\Tools\Registry\ToolRegistry;
-
-// Create public storage
-$storage = new MemoryStorage();
-$storage->addContext('public', 'agency', ['id' => 1, 'name' => 'Public Server', 'active' => true]);
-
-// Register public tools
-$toolRegistry = new ToolRegistry();
-$toolRegistry->register('get_server_info', function($params, $context) {
-    return [
-        'server' => 'Public MCP Repository Explorer',
-        'version' => '1.0.0',
-        'description' => 'Explore this repository through MCP',
-        'endpoints' => [
-            'browse_repository' => 'Browse directory structure',
-            'read_file' => 'Read file contents',
-            'search_files' => 'Search for files'
-        ]
-    ];
-}, ['description' => 'Get information about this public MCP server']);
-
-// Add repository exploration tools here...
-
-$config = [
-    'server_info' => [
-        'name' => 'Public Repository Explorer',
-        'version' => '1.0.0'
-    ]
-];
-
-$mcpProvider = new SlimMCPProvider(
-    $storage,
-    $toolRegistry,
-    new PromptRegistry(),
-    new ResourceRegistry(),
-    $responseFactory,
-    $streamFactory,
-    $config
-);
-
-$app = AppFactory::create();
-
-// Rate limiting middleware
-$app->add(function (Request $request, RequestHandler $handler) {
-    $ip = $request->getServerParams()['REMOTE_ADDR'] ?? 'unknown';
-    // Implement rate limiting logic
-    return $handler->handle($request);
-});
-
-// CORS middleware
-$app->add(function (Request $request, RequestHandler $handler) {
-    $response = $handler->handle($request);
-    return $response
-        ->withHeader('Access-Control-Allow-Origin', '*')
-        ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        ->withHeader('Access-Control-Allow-Headers', 'Content-Type');
-});
-
-// Public MCP endpoint - no authentication required
-$app->map(['GET', 'POST', 'OPTIONS'], '/mcp/public[/{sessID}]', function (Request $request, Response $response) use ($mcpProvider) {
-    // Add public context
-    $request = $request->withAttribute('mcp_context', [
-        'context_data' => ['id' => 1, 'name' => 'Public', 'active' => true],
-        'token_data' => ['user_id' => 1, 'scope' => 'mcp:read'],
-        'context_id' => 'public',
-        'base_url' => $request->getUri()->getScheme() . '://' . $request->getUri()->getHost()
-    ]);
-
-    return $mcpProvider->getServer()->handle($request, $response);
-});
-
-$app->run();
-```
-
-Public MCP servers enable powerful use cases like interactive documentation, public data exploration, and educational demonstrations while maintaining the same MCP protocol compatibility as authenticated servers.
-
-This authentication system provides enterprise-grade security with OAuth 2.1 compliance, multi-tenant isolation, social provider support, and flexible integration options, while also supporting public/authless configurations for open data and demonstration use cases.
+This authentication system provides enterprise-grade security with OAuth 2.1 compliance, RFC 8707 Resource Indicators support, multi-tenant isolation, social provider integration, and flexible deployment options for both authenticated and public MCP servers.

@@ -10,6 +10,7 @@ Tools are executable functions that clients can call through the MCP server. Thi
 - [Creating Tools](#creating-tools)
 - [Tool Registry](#tool-registry)
 - [Tool Annotations](#tool-annotations)
+- [Audio Content Tools](#audio-content-tools)
 - [Best Practices](#best-practices)
 - [Examples](#examples)
 
@@ -21,7 +22,7 @@ Tools in the MCP server allow clients to perform actions and retrieve data. Each
 - **Description**: Human-readable description
 - **Input Schema**: JSON schema defining expected parameters
 - **Handler**: Function that executes the tool logic
-- **Annotations**: Hints about tool behavior (optional)
+- **Annotations**: Hints about tool behavior (2025-03-26+)
 
 ### Tool Execution Flow
 
@@ -29,7 +30,7 @@ Tools in the MCP server allow clients to perform actions and retrieve data. Each
 2. Client calls `tools/call` with tool name and parameters
 3. Server validates parameters against schema
 4. Server executes tool handler with parameters and context
-5. Server wraps result in MCP content format and returns via SSE
+5. Server wraps result in MCP content format and returns via streaming
 
 ## Tool Response Format
 
@@ -107,7 +108,7 @@ $toolRegistry->registerTool(new PingTool());
 ]
 ```
 
-**Client Receives (via SSE):**
+**Client Receives (via Streaming):**
 ```json
 {
   "jsonrpc": "2.0",
@@ -185,10 +186,11 @@ $toolRegistry->register('get_time', function($params, $context) {
             ]
         ]
     ],
-    'annotations' => [
+    'annotations' => [  // Tool annotations (2025-03-26+)
         'readOnlyHint' => true,
         'destructiveHint' => false,
-        'idempotentHint' => true
+        'idempotentHint' => true,
+        'openWorldHint' => false
     ]
 ]);
 ```
@@ -228,10 +230,11 @@ class WeatherTool extends AbstractTool
                 ],
                 'required' => ['location']
             ],
-            [
+            [  // Tool annotations (2025-03-26+)
                 'readOnlyHint' => true,
                 'destructiveHint' => false,
-                'idempotentHint' => false // Weather data can change
+                'idempotentHint' => false, // Weather data can change
+                'openWorldHint' => true   // Accesses external API
             ]
         );
     }
@@ -251,6 +254,10 @@ class WeatherTool extends AbstractTool
             ]);
 
             $response = file_get_contents($url);
+            if ($response === false) {
+                throw new \Exception('Failed to fetch weather data');
+            }
+
             $data = json_decode($response, true);
 
             if (!$data || isset($data['cod']) && $data['cod'] !== 200) {
@@ -280,7 +287,7 @@ class WeatherTool extends AbstractTool
 }
 
 // Register the tool
-$toolRegistry->registerTool(new WeatherTool($apiKey));
+$toolRegistry->registerTool(new WeatherTool($_ENV['WEATHER_API_KEY']));
 ```
 
 ### Database Tool Example
@@ -326,7 +333,8 @@ class DatabaseQueryTool extends AbstractTool
             ],
             [
                 'readOnlyHint' => true,
-                'destructiveHint' => false
+                'destructiveHint' => false,
+                'openWorldHint' => false
             ]
         );
     }
@@ -426,8 +434,8 @@ if ($toolRegistry->hasTool('tool_name')) {
     $result = $toolRegistry->execute('tool_name', $parameters, $context);
 }
 
-// Get all tools for tools/list
-$toolsList = $toolRegistry->getToolsList();
+// Get all tools for tools/list (protocol version aware)
+$toolsList = $toolRegistry->getToolsList('2025-03-26');
 
 // Get tool names only
 $names = $toolRegistry->getToolNames();
@@ -435,7 +443,7 @@ $names = $toolRegistry->getToolNames();
 
 ## Tool Annotations
 
-Annotations provide hints about tool behavior to help clients make informed decisions.
+Annotations provide hints about tool behavior to help clients make informed decisions. **Available in protocol versions 2025-03-26 and 2025-06-18.**
 
 ### Available Annotations
 
@@ -445,6 +453,9 @@ Annotations provide hints about tool behavior to help clients make informed deci
 | `destructiveHint` | boolean | `false` | Tool may cause irreversible changes |
 | `idempotentHint` | boolean | `true` | Multiple calls with same params produce same result |
 | `openWorldHint` | boolean | `false` | Tool may access external resources |
+| `experimental` | boolean | `false` | Tool is experimental/unstable |
+| `requiresUserConfirmation` | boolean | `false` | Tool should prompt user before execution |
+| `sensitive` | boolean | `false` | Tool handles sensitive data |
 
 ### Setting Annotations
 
@@ -456,7 +467,8 @@ $toolRegistry->register('delete_file', $handler, [
     'annotations' => [
         'readOnlyHint' => false,
         'destructiveHint' => true,
-        'idempotentHint' => false
+        'idempotentHint' => false,
+        'requiresUserConfirmation' => true
     ]
 ]);
 
@@ -469,9 +481,184 @@ class FileTool extends AbstractTool
             'readOnlyHint' => false,
             'destructiveHint' => true,
             'idempotentHint' => false,
-            'openWorldHint' => true
+            'openWorldHint' => true,
+            'requiresUserConfirmation' => true
         ];
     }
+}
+```
+
+### Protocol Version Handling
+
+Tool annotations are automatically included/excluded based on protocol version:
+
+```php
+// 2024-11-05 response (no annotations)
+{
+  "tools": [
+    {
+      "name": "echo",
+      "description": "Echo a message",
+      "inputSchema": {...}
+    }
+  ]
+}
+
+// 2025-03-26+ response (with annotations)
+{
+  "tools": [
+    {
+      "name": "echo",
+      "description": "Echo a message",
+      "inputSchema": {...},
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}
+```
+
+## Audio Content Tools
+
+**Available in protocol versions 2025-03-26 and 2025-06-18.**
+
+Tools can return audio content using the `AudioContentHandler`:
+
+```php
+use Seolinkmap\Waasup\Content\AudioContentHandler;
+
+$toolRegistry->register('text_to_speech', function($params, $context) {
+    $text = $params['text'] ?? '';
+
+    if (empty($text)) {
+        return ['error' => 'No text provided'];
+    }
+
+    // Generate audio file (replace with your TTS implementation)
+    $audioPath = generateSpeechFile($text);
+
+    if (!file_exists($audioPath)) {
+        return ['error' => 'Audio generation failed'];
+    }
+
+    // Return mixed content with audio
+    return [
+        'content' => [
+            ['type' => 'text', 'text' => 'Generated speech audio:'],
+            AudioContentHandler::createFromFile($audioPath, 'speech.mp3')
+        ]
+    ];
+}, [
+    'description' => 'Convert text to speech audio',
+    'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+            'text' => ['type' => 'string', 'description' => 'Text to convert to speech']
+        ],
+        'required' => ['text']
+    ],
+    'annotations' => [
+        'readOnlyHint' => false,
+        'openWorldHint' => true,
+        'experimental' => true
+    ]
+]);
+```
+
+### Audio Content in Class-based Tools
+
+```php
+class AudioProcessingTool extends AbstractTool
+{
+    public function __construct()
+    {
+        parent::__construct(
+            'process_audio',
+            'Process audio files',
+            [
+                'properties' => [
+                    'audio_data' => [
+                        'type' => 'object',
+                        'description' => 'Audio content to process'
+                    ],
+                    'operation' => [
+                        'type' => 'string',
+                        'enum' => ['normalize', 'amplify', 'filter'],
+                        'description' => 'Processing operation'
+                    ]
+                ],
+                'required' => ['audio_data', 'operation']
+            ]
+        );
+    }
+
+    public function execute(array $parameters, array $context = []): array
+    {
+        $this->validateParameters($parameters);
+
+        // Validate audio parameter
+        $this->validateAudioParameter($parameters, 'audio_data');
+
+        $audioData = $parameters['audio_data'];
+        $operation = $parameters['operation'];
+
+        try {
+            // Extract audio to temporary file
+            $tempFile = AudioContentHandler::extractToFile($audioData);
+
+            // Process the audio file
+            $processedFile = $this->processAudioFile($tempFile, $operation);
+
+            // Return processed audio
+            return $this->createAudioResponse(
+                $processedFile,
+                "Audio processed with operation: {$operation}",
+                'processed_audio.mp3'
+            );
+        } catch (Exception $e) {
+            return [
+                'error' => 'Audio processing failed',
+                'message' => $e->getMessage()
+            ];
+        }
+    }
+
+    private function processAudioFile(string $inputFile, string $operation): string
+    {
+        $outputFile = tempnam(sys_get_temp_dir(), 'processed_') . '.mp3';
+
+        // Example processing using ffmpeg
+        switch ($operation) {
+            case 'normalize':
+                exec("ffmpeg -i '{$inputFile}' -filter:a loudnorm '{$outputFile}'");
+                break;
+            case 'amplify':
+                exec("ffmpeg -i '{$inputFile}' -filter:a 'volume=2.0' '{$outputFile}'");
+                break;
+            case 'filter':
+                exec("ffmpeg -i '{$inputFile}' -filter:a 'highpass=f=200' '{$outputFile}'");
+                break;
+        }
+
+        return $outputFile;
+    }
+}
+```
+
+### Supported Audio Formats
+
+```php
+// Supported MIME types
+$supportedTypes = AudioContentHandler::getSupportedMimeTypes();
+// Returns: ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/webm', 'audio/flac', 'audio/aac']
+
+// Check if format is supported
+if (AudioContentHandler::isSupportedMimeType('audio/mpeg')) {
+    // Process MP3 audio
 }
 ```
 
@@ -536,7 +723,8 @@ function contextAwareTool($params, $context) {
 
     return [
         'agency' => $agencyName,
-        'data' => $data
+        'data' => $data,
+        'context_id' => $context['context_id'] ?? 'unknown'
     ];
 }
 ```
@@ -572,71 +760,11 @@ function performantTool($params, $context) {
 - **Limit resource access** through allowlists
 - **Implement rate limiting** for expensive operations
 - **Log security events** for audit trails
-
-## Client Integration
-
-### JavaScript Example
-
-```javascript
-// Handle tool response from SSE
-eventSource.addEventListener('message', (event) => {
-    const response = JSON.parse(event.data);
-
-    if (response.result && response.result.content) {
-        // Extract tool result from text content
-        const textContent = response.result.content[0].text;
-        const toolResult = JSON.parse(textContent);
-
-        console.log('Tool result:', toolResult);
-        // toolResult contains your actual tool data
-    }
-});
-
-// Call a tool
-async function callTool(toolName, arguments) {
-    const response = await fetch(mcpUrl, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Mcp-Session-Id': sessionId,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'tools/call',
-            params: { name: toolName, arguments },
-            id: Math.random()
-        })
-    });
-
-    // Returns {"status": "queued"}
-    // Actual result comes via SSE
-}
-```
-
-### PHP Client Example
-
-```php
-// When receiving SSE message
-function handleToolResponse($sseData) {
-    $message = json_decode($sseData, true);
-
-    if (isset($message['result']['content'][0]['text'])) {
-        $toolResult = json_decode($message['result']['content'][0]['text'], true);
-
-        // Process tool result
-        if (isset($toolResult['error'])) {
-            echo "Tool error: " . $toolResult['error'];
-        } else {
-            echo "Tool result: " . print_r($toolResult, true);
-        }
-    }
-}
-```
+- **Never execute raw user input** as code or SQL
 
 ## Examples
 
-### File Operations Tool
+### Complete File Operations Tool
 
 ```php
 class FileOperationsTool extends AbstractTool
@@ -668,7 +796,8 @@ class FileOperationsTool extends AbstractTool
             ],
             [
                 'readOnlyHint' => true,
-                'openWorldHint' => false
+                'openWorldHint' => false,
+                'requiresUserConfirmation' => false
             ]
         );
     }
@@ -736,7 +865,7 @@ class FileOperationsTool extends AbstractTool
             'path' => basename($path),
             'size' => strlen($content),
             'content' => $content,
-            'mime_type' => mime_content_type($path)
+            'mime_type' => mime_content_type($path) ?: 'application/octet-stream'
         ];
     }
 
@@ -780,8 +909,6 @@ class FileOperationsTool extends AbstractTool
             'type' => is_dir($path) ? 'directory' : 'file',
             'size' => $stat['size'],
             'permissions' => substr(sprintf('%o', fileperms($path)), -4),
-            'owner' => posix_getpwuid($stat['uid'])['name'] ?? $stat['uid'],
-            'group' => posix_getgrgid($stat['gid'])['name'] ?? $stat['gid'],
             'created' => date('c', $stat['ctime']),
             'modified' => date('c', $stat['mtime']),
             'accessed' => date('c', $stat['atime'])
@@ -891,6 +1018,28 @@ class ToolTest extends TestCase
 
         $this->assertEquals(['message' => 'test'], $result);
     }
+
+    public function testToolAnnotations()
+    {
+        $toolRegistry = new ToolRegistry();
+
+        $toolRegistry->register('test_tool', function($params, $context) {
+            return ['success' => true];
+        }, [
+            'annotations' => [
+                'readOnlyHint' => false,
+                'destructiveHint' => true
+            ]
+        ]);
+
+        // Test with 2025-03-26 protocol version
+        $toolsList = $toolRegistry->getToolsList('2025-03-26');
+        $tool = $toolsList['tools'][0];
+
+        $this->assertArrayHasKey('annotations', $tool);
+        $this->assertFalse($tool['annotations']['readOnlyHint']);
+        $this->assertTrue($tool['annotations']['destructiveHint']);
+    }
 }
 ```
 
@@ -920,7 +1069,9 @@ Tools are the core functionality of your MCP server. Key points to remember:
 1. **Tool functions return arrays/objects** (as shown in examples)
 2. **Server wraps results as JSON text content** for clients
 3. **Clients must parse JSON text** to get structured data
-4. Start with simple callable tools, advance to class-based tools
-5. Always prioritize security, validation, and error handling
+4. **Tool annotations** are available in 2025-03-26+ protocol versions
+5. **Audio content** is supported in 2025-03-26+ versions
+6. Start with simple callable tools, advance to class-based tools
+7. Always prioritize security, validation, and error handling
 
-The response format wrapping ensures MCP protocol compliance while allowing flexible tool result structures.
+The response format wrapping ensures MCP protocol compliance while allowing flexible tool result structures across all supported protocol versions.

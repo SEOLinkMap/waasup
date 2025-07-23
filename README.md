@@ -18,14 +18,19 @@ Want to see WaaSuP in action? **Try our live demo at seolinkmap.com/mcp-repo** w
 
 ## ✨ Features
 
-- 🔐 **OAuth 2.1 Authentication** - Complete OAuth flow with token validation and scope management
-- ⚡ **Real-time SSE Transport** - Server-Sent Events for instant message delivery
+- 🔐 **OAuth 2.1 Authentication** - Complete OAuth flow with RFC 8707 Resource Indicators support for MCP 2025-06-18
+- ⚡ **Multi-Transport Support** - Server-Sent Events (SSE) and Streamable HTTP for real-time message delivery
 - 🛠️ **Flexible Tool System** - Easy tool registration with both class-based and callable approaches
 - 🏢 **Multi-tenant Architecture** - Agency/user context isolation for SaaS applications
 - 📊 **Production Ready** - Comprehensive logging, error handling, and session management
-- 🔌 **Framework Agnostic** - PSR-compliant with Slim Framework integration included
+- 🔌 **Framework Agnostic** - PSR-compliant with Slim Framework and Laravel integration included
 - 💾 **Database & Memory Storage** - Multiple storage backends for different deployment scenarios
 - 🌐 **CORS Support** - Full cross-origin resource sharing configuration
+- 🎵 **Audio Content Support** - Handle audio content in tools and prompts (MCP 2025-03-26+)
+- 📝 **Structured User Input** - Elicitation support for collecting structured data (MCP 2025-06-18)
+- 🔄 **Progress Notifications** - Real-time progress updates with version-aware messaging
+- 🏷️ **Tool Annotations** - Rich tool metadata for better LLM understanding (MCP 2025-03-26+)
+- 📦 **JSON-RPC Batching** - Efficient batch request processing (MCP 2025-03-26)
 
 ## Requirements
 
@@ -33,7 +38,11 @@ Want to see WaaSuP in action? **Try our live demo at seolinkmap.com/mcp-repo** w
 - Composer
 - Database (MySQL/PostgreSQL recommended for production)
 
-## **Feature Matrix Summary**
+## MCP Protocol Compliance
+
+WaaSuP implements the complete MCP specification across multiple protocol versions with automatic feature gating:
+
+### **Feature Matrix Summary**
 
 | Feature | 2024-11-05 | 2025-03-26 | 2025-06-18 |
 |---------|------------|------------|------------|
@@ -43,16 +52,16 @@ Want to see WaaSuP in action? **Try our live demo at seolinkmap.com/mcp-repo** w
 | Sampling | ✅ | ✅ | ✅ |
 | Roots | ✅ | ✅ | ✅ |
 | Ping | ✅ | ✅ | ✅ |
-| Progress Notifications | ❌ | ✅ | ✅ |
+| Progress Notifications | ✅ | ✅ | ✅ |
 | Tool Annotations | ❌ | ✅ | ✅ |
 | Audio Content | ❌ | ✅ | ✅ |
 | Completions | ❌ | ✅ | ✅ |
-| OAuth 2.1 | ❌ | ✅ | ✅ |
+| JSON-RPC Batching | ❌ | ✅ | ❌ |
+| OAuth 2.1 | ❌ | ❌ | ✅ |
 | Elicitation | ❌ | ❌ | ✅ |
 | Structured Outputs | ❌ | ❌ | ✅ |
 | Resource Links | ❌ | ❌ | ✅ |
-| Resource Indicators | ❌ | ❌ | ✅ (Required) |
-
+| Resource Indicators (RFC 8707) | ❌ | ❌ | ✅ (Required) |
 
 ## Installation
 
@@ -73,7 +82,7 @@ composer require slim/slim slim/psr7
 mysql -u your_user -p your_database < vendor/seolinkmap/waasup/examples/database/database-schema.sql
 ```
 
-2. Create your first agency (or configure your existing database):
+2. Create your first agency:
 ```sql
 INSERT INTO mcp_agencies (uuid, name, active)
 VALUES ('550e8400-e29b-41d4-a716-446655440000', 'My Company', 1);
@@ -135,13 +144,8 @@ $config = [
 
 // Create MCP provider
 $mcpProvider = new SlimMCPProvider(
-    $storage,
-    $toolRegistry,
-    $promptRegistry,
-    $resourceRegistry,
-    $responseFactory,
-    $streamFactory,
-    $config
+    $storage, $toolRegistry, $promptRegistry, $resourceRegistry,
+    $responseFactory, $streamFactory, $config
 );
 
 // Setup Slim app
@@ -162,192 +166,84 @@ $app->run();
 
 ### Adding Tools
 
-#### Built-in Tools
-
-The server includes several built-in tools that you can register:
-
-```php
-use Seolinkmap\Waasup\Tools\Built\{PingTool, ServerInfoTool};
-
-// Register built-in tools
-$toolRegistry->registerTool(new PingTool());
-$toolRegistry->registerTool(new ServerInfoTool($config));
-```
-
-- **`ping`** - Test connectivity and response times
-- **`server_info`** - Get server information and capabilities
-
-#### Callable Tool (Simple)
-
+#### Simple Callable Tool
 ```php
 $toolRegistry->register('get_weather', function($params, $context) {
     $location = $params['location'] ?? 'Unknown';
-
-    // Your weather API logic here
     return [
         'location' => $location,
         'temperature' => '22°C',
-        'condition' => 'Sunny',
-        'timestamp' => date('c')
+        'condition' => 'Sunny'
     ];
 }, [
     'description' => 'Get weather information for a location',
     'inputSchema' => [
         'type' => 'object',
         'properties' => [
-            'location' => [
-                'type' => 'string',
-                'description' => 'Location to get weather for'
-            ]
+            'location' => ['type' => 'string', 'description' => 'Location name']
         ],
         'required' => ['location']
     ]
 ]);
 ```
 
-#### Class-based Tool (Advanced)
-
+#### Built-in Tools
 ```php
-use Seolinkmap\Waasup\Tools\AbstractTool;
+use Seolinkmap\Waasup\Tools\Built\{PingTool, ServerInfoTool};
 
-class DatabaseQueryTool extends AbstractTool
-{
-    private PDO $pdo;
-
-    public function __construct(PDO $pdo)
-    {
-        $this->pdo = $pdo;
-        parent::__construct(
-            'db_query',
-            'Execute safe database queries',
-            [
-                'properties' => [
-                    'query' => ['type' => 'string'],
-                    'params' => ['type' => 'array']
-                ],
-                'required' => ['query']
-            ]
-        );
-    }
-
-    public function execute(array $parameters, array $context = []): array
-    {
-        $this->validateParameters($parameters);
-
-        // Implement your database query logic
-        // with proper security checks
-        return ['result' => 'Query executed successfully'];
-    }
-}
-
-// Register the tool
-$toolRegistry->registerTool(new DatabaseQueryTool($pdo));
+$toolRegistry->registerTool(new PingTool());
+$toolRegistry->registerTool(new ServerInfoTool($config));
 ```
 
-### Adding Prompts
+### Adding Prompts and Resources
 
 ```php
+// Register a prompt
 $promptRegistry->register('greeting', function($arguments, $context) {
     $name = $arguments['name'] ?? 'there';
     return [
         'description' => 'A friendly greeting prompt',
-        'messages' => [
-            [
-                'role' => 'user',
-                'content' => [
-                    'type' => 'text',
-                    'text' => "Please greet {$name} in a friendly way."
-                ]
-            ]
-        ]
+        'messages' => [[
+            'role' => 'user',
+            'content' => [['type' => 'text', 'text' => "Please greet {$name}."]]
+        ]]
     ];
-}, [
-    'description' => 'Generate a friendly greeting prompt',
-    'inputSchema' => [
-        'type' => 'object',
-        'properties' => [
-            'name' => [
-                'type' => 'string',
-                'description' => 'Name of the person to greet'
-            ]
-        ]
-    ]
-]);
-```
+});
 
-### Adding Resources
-
-```php
+// Register a resource
 $resourceRegistry->register('server://status', function($uri, $context) {
     return [
-        'contents' => [
-            [
-                'uri' => $uri,
-                'mimeType' => 'application/json',
-                'text' => json_encode([
-                    'status' => 'healthy',
-                    'timestamp' => date('c'),
-                    'uptime' => time() - $_SERVER['REQUEST_TIME']
-                ])
-            ]
-        ]
+        'contents' => [[
+            'uri' => $uri,
+            'mimeType' => 'application/json',
+            'text' => json_encode(['status' => 'healthy', 'timestamp' => date('c')])
+        ]]
     ];
-}, [
-    'name' => 'Server Status',
-    'description' => 'Current server status and health information',
-    'mimeType' => 'application/json'
-]);
+});
 ```
 
-## OAuth 2.1 Flow
+## Framework Integration
 
-### Discovery
+### Laravel Integration
 
-1. Client discovers endpoints:
-```http
-GET /.well-known/oauth-authorization-server
+Add the service provider to your Laravel application:
+
+```php
+// config/app.php
+'providers' => [
+    Seolinkmap\Waasup\Integration\Laravel\LaravelServiceProvider::class,
+],
 ```
 
-2. Client requests authorization:
-```http
-GET /oauth/authorize?response_type=code&client_id=YOUR_CLIENT&redirect_uri=YOUR_CALLBACK
-```
+Register routes and use the provided controller pattern. See the full Laravel integration example in the `/examples` directory.
 
-3. Client exchanges code for token:
-```http
-POST /oauth/token
-Content-Type: application/x-www-form-urlencoded
+### Standalone (PSR-7)
 
-grant_type=authorization_code&code=AUTH_CODE&client_id=YOUR_CLIENT
-```
+```php
+use Seolinkmap\Waasup\MCPSaaSServer;
 
-## MCP Protocol Usage
-
-### SSE Connection & Requests
-
-```bash
-# Establish SSE connection
-GET /mcp/550e8400-e29b-41d4-a716-446655440000
-Authorization: Bearer your-access-token
-
-# Send MCP requests
-POST /mcp/550e8400-e29b-41d4-a716-446655440000
-Authorization: Bearer your-access-token
-Content-Type: application/json
-
-{
-  "jsonrpc": "2.0",
-  "method": "initialize",
-  "params": {
-    "protocolVersion": "2024-11-05",
-    "capabilities": {},
-    "clientInfo": {
-      "name": "My MCP Client",
-      "version": "1.0.0"
-    }
-  },
-  "id": 1
-}
+$server = new MCPSaaSServer($storage, $toolRegistry, $promptRegistry, $resourceRegistry, $config, $logger);
+$response = $server->handle($request, $response);
 ```
 
 ## Configuration
@@ -368,327 +264,109 @@ $config = [
         'base_url' => 'https://your-domain.com'
     ],
     'sse' => [
-        'keepalive_interval' => 1,      // seconds
-        'max_connection_time' => 1800,  // 30 minutes
-        'switch_interval_after' => 60   // switch to longer intervals
+        'keepalive_interval' => 1,
+        'max_connection_time' => 1800,
+        'switch_interval_after' => 60
     ]
 ];
 ```
 
-### Database Storage
+### Storage Options
 
+**Database Storage (Production)**
 ```php
 $storage = new DatabaseStorage($pdo, [
     'table_prefix' => 'mcp_',
-    'cleanup_interval' => 3600 // Clean expired data every hour
+    'cleanup_interval' => 3600
 ]);
 ```
 
-### Memory Storage (Development/Testing)
-
+**Memory Storage (Development/Testing)**
 ```php
-use Seolinkmap\Waasup\Storage\MemoryStorage;
-
 $storage = new MemoryStorage();
-
 // Add test data
 $storage->addContext('550e8400-e29b-41d4-a716-446655440000', 'agency', [
-    'id' => 1,
-    'name' => 'Test Agency',
-    'active' => true
-]);
-
-$storage->addToken('test-token', [
-    'agency_id' => 1,
-    'scope' => 'mcp:read mcp:write',
-    'expires_at' => time() + 3600,
-    'revoked' => false
+    'id' => 1, 'name' => 'Test Agency', 'active' => true
 ]);
 ```
 
-## Logging
+## OAuth 2.1 & Authentication
 
-### With Monolog
+WaaSuP implements complete OAuth 2.1 with RFC 8707 Resource Indicators for MCP 2025-06-18:
+
+- **Authorization Code Flow** with PKCE (required)
+- **Resource Indicators** for token binding to specific MCP endpoints
+- **Social Authentication** via Google, LinkedIn, and GitHub
+- **Token Validation** with audience claims and scope checking
+- **Discovery Endpoints** for client configuration
+
+Social authentication can be configured for each provider:
 
 ```php
-use Monolog\Logger;
-use Monolog\Handler\StreamHandler;
+$config['google'] = [
+    'client_id' => 'your-google-client-id',
+    'client_secret' => 'your-google-client-secret',
+    'redirect_uri' => 'https://your-domain.com/oauth/google/callback'
+];
+```
 
-$logger = new Logger('mcp-server');
-$logger->pushHandler(new StreamHandler('/var/log/mcp-server.log', Logger::INFO));
+## Advanced Features
 
-$mcpProvider = new SlimMCPProvider(
-    $storage,
-    $toolRegistry,
-    $promptRegistry,
-    $resourceRegistry,
-    $responseFactory,
-    $streamFactory,
-    $config,
-    $logger // Pass logger here
+### Audio Content Handling (MCP 2025-03-26+)
+
+```php
+use Seolinkmap\Waasup\Content\AudioContentHandler;
+
+// In your tool
+return [
+    'content' => [
+        ['type' => 'text', 'text' => 'Here is the audio file:'],
+        AudioContentHandler::createFromFile('/path/to/audio.mp3', 'example.mp3')
+    ]
+];
+```
+
+### Structured User Input (MCP 2025-06-18)
+
+```php
+// Request structured input from user
+$requestId = $server->requestElicitation(
+    $sessionId,
+    'Please provide your contact information',
+    [
+        'type' => 'object',
+        'properties' => [
+            'name' => ['type' => 'string'],
+            'email' => ['type' => 'string', 'format' => 'email']
+        ]
+    ]
 );
 ```
 
-### Custom Logger
+### Progress Notifications
 
 ```php
-class CustomLogger implements Psr\Log\LoggerInterface
-{
-    public function info($message, array $context = []): void
-    {
-        // Your custom logging logic
-        file_put_contents('/tmp/mcp.log',
-            date('Y-m-d H:i:s') . " [INFO] $message " . json_encode($context) . "\n",
-            FILE_APPEND
-        );
-    }
-
-    // Implement other LoggerInterface methods...
-}
-```
-
-## Framework Integration
-
-### Laravel
-
-#### Service Provider Registration
-
-Add the service provider to your Laravel application:
-
-```php
-// Add to config/app.php providers array
-'providers' => [
-    // ...
-    Seolinkmap\Waasup\Integration\Laravel\LaravelServiceProvider::class,
-],
-```
-
-#### Creating an MCP Controller
-
-```php
-<?php
-
-namespace App\Http\Controllers;
-
-use Illuminate\Http\Request;
-use Illuminate\Http\Response;
-use Illuminate\Support\Facades\DB;
-use Seolinkmap\Waasup\MCPSaaSServer;
-use Seolinkmap\Waasup\Storage\DatabaseStorage;
-use Seolinkmap\Waasup\Tools\Registry\ToolRegistry;
-use Seolinkmap\Waasup\Prompts\Registry\PromptRegistry;
-use Seolinkmap\Waasup\Resources\Registry\ResourceRegistry;
-use Seolinkmap\Waasup\Integration\Laravel\LaravelMCPProvider;
-
-class MCPController extends Controller
-{
-    public function handleMCP(Request $request, string $agencyUuid, ?string $sessID = null): Response
-    {
-        // Initialize storage with Laravel's database connection
-        $storage = new DatabaseStorage(DB::connection()->getPdo(), ['table_prefix' => 'mcp_']);
-
-        // Initialize registries
-        $toolRegistry = new ToolRegistry();
-        $promptRegistry = new PromptRegistry();
-        $resourceRegistry = new ResourceRegistry();
-
-        // Register your tools
-        $toolRegistry->register('get_user_count', function($params, $context) {
-            return ['user_count' => \App\Models\User::count()];
-        }, [
-            'description' => 'Get total user count',
-            'inputSchema' => ['type' => 'object']
-        ]);
-
-        // Configuration
-        $config = [
-            'server_info' => [
-                'name' => config('app.name') . ' MCP Server',
-                'version' => '1.0.0'
-            ],
-            'auth' => [
-                'context_types' => ['agency'],
-                'base_url' => config('app.url')
-            ]
-        ];
-
-        // Create and use the Laravel MCP provider
-        $mcpProvider = app(LaravelMCPProvider::class);
-
-        return $mcpProvider->handleMCP($request);
-    }
-
-    public function handleAuthDiscovery(Request $request): Response
-    {
-        $mcpProvider = app(LaravelMCPProvider::class);
-        return $mcpProvider->handleAuthDiscovery($request);
-    }
-}
-```
-
-#### Route Registration
-
-```php
-// In routes/web.php or routes/api.php
-use App\Http\Controllers\MCPController;
-
-// OAuth discovery endpoints
-Route::get('/.well-known/oauth-authorization-server', [MCPController::class, 'handleAuthDiscovery']);
-
-// MCP endpoints with authentication middleware
-Route::group(['middleware' => ['mcp.auth']], function () {
-    Route::match(['GET', 'POST'], '/mcp/{agencyUuid}/{sessID?}', [MCPController::class, 'handleMCP']);
-});
-```
-
-#### Advanced Laravel Integration
-
-```php
-// Create a dedicated MCP service
-<?php
-
-namespace App\Services;
-
-use Seolinkmap\Waasup\MCPSaaSServer;
-use Seolinkmap\Waasup\Storage\DatabaseStorage;
-use Seolinkmap\Waasup\Tools\Registry\ToolRegistry;
-
-class MCPService
-{
-    private MCPSaaSServer $server;
-
-    public function __construct()
-    {
-        $storage = new DatabaseStorage(\DB::connection()->getPdo());
-        $toolRegistry = new ToolRegistry();
-
-        // Register Laravel-specific tools
-        $this->registerLaravelTools($toolRegistry);
-
-        $config = [
-            'server_info' => [
-                'name' => config('app.name') . ' MCP API',
-                'version' => config('app.version', '1.0.0')
-            ],
-            'auth' => [
-                'base_url' => config('app.url')
-            ]
-        ];
-
-        $this->server = new MCPSaaSServer($storage, $toolRegistry, /*...*/, $config);
-    }
-
-    private function registerLaravelTools(ToolRegistry $registry): void
-    {
-        // Register tools that use Laravel features
-        $registry->register('get_models', function($params, $context) {
-            return [
-                'users' => \App\Models\User::count(),
-                'posts' => \App\Models\Post::count(),
-            ];
-        });
-
-        $registry->register('send_notification', function($params, $context) {
-            // Use Laravel's notification system
-            \Notification::send($user, new \App\Notifications\MCPNotification($params));
-            return ['status' => 'sent'];
-        });
-    }
-
-    public function getServer(): MCPSaaSServer
-    {
-        return $this->server;
-    }
-}
-```
-
-### Standalone (PSR-7)
-
-```php
-use Seolinkmap\Waasup\MCPSaaSServer;
-
-$server = new MCPSaaSServer($storage, $toolRegistry, $promptRegistry, $resourceRegistry, $config, $logger);
-
-// Handle PSR-7 request
-$response = $server->handle($request, $response);
-```
-
-## Advanced Usage
-
-### Custom Authentication
-
-```php
-class CustomAuthMiddleware extends AuthMiddleware
-{
-    protected function extractContextId(Request $request): ?string
-    {
-        // Custom logic to extract context from request
-        $customHeader = $request->getHeaderLine('X-Custom-Context');
-        return $customHeader ?: parent::extractContextId($request);
-    }
-}
-```
-
-### Tool Annotations
-
-```php
-$toolRegistry->register('dangerous_operation', $handler, [
-    'description' => 'Performs a dangerous operation',
-    'annotations' => [
-        'readOnlyHint' => false,
-        'destructiveHint' => true,
-        'idempotentHint' => false
-    ]
-]);
-```
-
-### Session Management
-
-```php
-// Custom session handling
-$server->addTool('get_session', function($params, $context) {
-    $sessionData = $context['session_data'] ?? [];
-    return ['session' => $sessionData];
-});
-```
-
-## Built-in Tools
-
-The server includes several built-in tools for testing and basic functionality that you can register:
-
-### Ping Tool
-```php
-use Seolinkmap\Waasup\Tools\Built\PingTool;
-
-// Register the ping tool
-$toolRegistry->registerTool(new PingTool());
-// Tests connectivity and returns server timestamp
-```
-
-### Server Info Tool
-```php
-use Seolinkmap\Waasup\Tools\Built\ServerInfoTool;
-
-// Register the server info tool
-$toolRegistry->registerTool(new ServerInfoTool($config));
-// Returns server configuration and capabilities
+// Send progress updates during long-running operations
+$server->sendProgressNotification($sessionId, 50, 'Processing data...');
 ```
 
 ## API Reference
 
 ### MCP Methods
 
-| Method | Description |
-|--------|-------------|
-| `tools/list` | List all available tools |
-| `tools/call` | Execute a specific tool |
-| `prompts/list` | List all available prompts |
-| `prompts/get` | Get a specific prompt |
-| `resources/list` | List all available resources |
-| `resources/read` | Read a specific resource |
-| `resources/templates/list` | List resource templates |
-| `initialize` | Initialize MCP session |
-| `ping` | Health check endpoint |
+| Method | Description | Supported Versions |
+|--------|-------------|-------------------|
+| `initialize` | Initialize MCP session | All |
+| `tools/list` | List available tools | All |
+| `tools/call` | Execute a tool | All |
+| `prompts/list` | List available prompts | All |
+| `prompts/get` | Get a prompt | All |
+| `resources/list` | List available resources | All |
+| `resources/read` | Read a resource | All |
+| `completions/complete` | Get completions | 2025-03-26+ |
+| `elicitation/create` | Request user input | 2025-06-18 |
+| `sampling/createMessage` | Request LLM sampling | All |
+| `ping` | Health check | All |
 
 ### Error Codes
 
@@ -715,36 +393,14 @@ composer analyse
 composer format
 ```
 
-### Example Test
-
-```php
-use PHPUnit\Framework\TestCase;
-use Seolinkmap\Waasup\Storage\MemoryStorage;
-
-class MCPServerTest extends TestCase
-{
-    public function testToolExecution()
-    {
-        $storage = new MemoryStorage();
-        $toolRegistry = new ToolRegistry();
-
-        $toolRegistry->register('test_tool', function($params) {
-            return ['result' => 'success'];
-        });
-
-        $result = $toolRegistry->execute('test_tool', []);
-        $this->assertEquals(['result' => 'success'], $result);
-    }
-}
-```
-
 ## Security
 
-- **Token Validation**: All requests require valid OAuth tokens
-- **Scope Checking**: Configurable scope validation for fine-grained access
-- **SQL Injection**: All database queries use prepared statements
+- **Token Validation**: All requests require valid OAuth tokens with proper audience validation
+- **Scope Checking**: Configurable scope validation for fine-grained access control
+- **SQL Injection Protection**: All database queries use prepared statements
 - **Session Security**: Cryptographically secure session ID generation
-- **CORS**: Configurable CORS policies for cross-origin requests
+- **CORS Configuration**: Configurable CORS policies for cross-origin requests
+- **DNS Rebinding Protection**: Origin header validation for localhost endpoints
 
 ## Deployment
 
@@ -752,14 +408,10 @@ class MCPServerTest extends TestCase
 
 ```dockerfile
 FROM php:8.1-fpm-alpine
-
 RUN docker-php-ext-install pdo pdo_mysql
-
 COPY . /var/www/html
 WORKDIR /var/www/html
-
 RUN composer install --no-dev --optimize-autoloader
-
 EXPOSE 9000
 CMD ["php-fpm"]
 ```

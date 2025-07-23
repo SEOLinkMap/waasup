@@ -15,7 +15,7 @@ This guide will help you set up and run the MCP SaaS Server in your environment.
 
 ```bash
 # Install the package
-composer require seolinkmap/wassup
+composer require seolinkmap/waasup
 
 # Install PSR-17 factories (required)
 composer require slim/psr7
@@ -29,14 +29,14 @@ composer require slim/slim
 
 ### 2. Database Setup
 
-Create your database and import the schema:
+Create your database and tables:
 
 ```bash
 # Create database
 mysql -u root -p -e "CREATE DATABASE mcp_server"
 
-# Import schema
-mysql -u root -p mcp_server < vendor/seolinkmap/wassup/examples/database/database-schema.sql
+# Create required tables - see database-schema.md for complete SQL
+# You must manually create the required tables before using DatabaseStorage
 ```
 
 ### 3. Create Your First Agency
@@ -107,8 +107,9 @@ $toolRegistry->register('echo', function($params, $context) {
     ]
 ]);
 
-// Configuration (no environment variables used)
+// Configuration
 $config = [
+    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
     'server_info' => [
         'name' => 'My MCP Server',
         'version' => '1.0.0'
@@ -183,7 +184,7 @@ This server implements **asynchronous responses** using the MCP protocol:
 
 1. **POST** to MCP URL with `initialize` → **Direct JSON response** with session ID in header
 2. **POST** to MCP URL with other commands → Returns `{"status": "queued"}`
-3. **GET** to **same MCP URL** → Establishes **SSE connection** that delivers actual responses
+3. **GET** to **same MCP URL** → Establishes **SSE connection** (2024-11-05) or **Streamable HTTP** (2025-03-26+) that delivers actual responses
 
 ## Testing Your Setup
 
@@ -219,7 +220,7 @@ curl -i -X POST http://localhost:8080/mcp/550e8400-e29b-41d4-a716-446655440000 \
     "jsonrpc": "2.0",
     "method": "initialize",
     "params": {
-      "protocolVersion": "2024-11-05",
+      "protocolVersion": "2025-03-26",
       "capabilities": {},
       "clientInfo": {
         "name": "Test Client",
@@ -239,11 +240,12 @@ Content-Type: application/json
 {
   "jsonrpc": "2.0",
   "result": {
-    "protocolVersion": "2024-11-05",
+    "protocolVersion": "2025-03-26",
     "capabilities": {
       "tools": {"listChanged": true},
       "prompts": {"listChanged": true},
-      "resources": {"subscribe": false, "listChanged": true}
+      "resources": {"subscribe": false, "listChanged": true},
+      "completions": true
     },
     "serverInfo": {
       "name": "My MCP Server",
@@ -271,19 +273,23 @@ curl -X POST http://localhost:8080/mcp/550e8400-e29b-41d4-a716-446655440000 \
 # Response: {"status": "queued"}
 ```
 
-**Step 2: Establish SSE Connection (GET to same URL)**
+**Step 2: Establish Streaming Connection (GET to same URL)**
 ```bash
 # In a separate terminal, connect to same URL with GET
 curl -N http://localhost:8080/mcp/550e8400-e29b-41d4-a716-446655440000 \
   -H "Authorization: Bearer test-token-12345" \
   -G -d "session_id=sess_1234567890abcdef"
 
-# Will output:
+# Will output (SSE format for 2024-11-05):
 # event: endpoint
 # data: http://localhost:8080/mcp/550e8400-e29b-41d4-a716-446655440000/sess_1234567890abcdef
 #
 # event: message
 # data: {"jsonrpc":"2.0","result":{"tools":[...]},"id":2}
+
+# Or for 2025-03-26+ (Streamable HTTP format):
+# {"jsonrpc":"2.0","method":"notifications/connection","params":{"status":"connected"}}
+# {"jsonrpc":"2.0","result":{"tools":[...]},"id":2}
 ```
 
 ### 4. Call a Tool
@@ -307,9 +313,8 @@ curl -X POST http://localhost:8080/mcp/550e8400-e29b-41d4-a716-446655440000 \
   }'
 
 # Returns: {"status": "queued"}
-# Response appears in SSE connection:
-# event: message
-# data: {"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"message\":\"Hello from MCP!\",\"timestamp\":\"...\"}"}]},"id":3}
+# Response appears in streaming connection:
+# {"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"message\":\"Hello from MCP!\",\"timestamp\":\"...\"}"}]},"id":3}
 ```
 
 ## Development Workflow
@@ -349,6 +354,12 @@ $toolRegistry->register('get_weather', function($params, $context) {
             'location' => ['type' => 'string', 'description' => 'Location name']
         ],
         'required' => ['location']
+    ],
+    'annotations' => [  // Tool annotations (2025-03-26+)
+        'readOnlyHint' => true,
+        'destructiveHint' => false,
+        'idempotentHint' => true,
+        'openWorldHint' => true
     ]
 ]);
 ```
@@ -399,7 +410,55 @@ class DatabaseTool extends AbstractTool
 $toolRegistry->registerTool(new DatabaseTool($pdo));
 ```
 
-### 3. Add Prompts
+### 3. Audio Content Tools (2025-03-26+)
+
+```php
+use Seolinkmap\Waasup\Content\AudioContentHandler;
+
+$toolRegistry->register('text_to_speech', function($params, $context) {
+    $text = $params['text'] ?? '';
+
+    if (empty($text)) {
+        return ['error' => 'No text provided'];
+    }
+
+    // Example: Generate audio file (replace with your TTS implementation)
+    $audioPath = generateSpeechFile($text);
+
+    if (!file_exists($audioPath)) {
+        return ['error' => 'Audio generation failed'];
+    }
+
+    return [
+        'content' => [
+            ['type' => 'text', 'text' => 'Generated speech audio:'],
+            AudioContentHandler::createFromFile($audioPath, 'speech.mp3')
+        ]
+    ];
+}, [
+    'description' => 'Convert text to speech audio',
+    'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+            'text' => ['type' => 'string', 'description' => 'Text to convert to speech']
+        ],
+        'required' => ['text']
+    ]
+]);
+
+// Helper function (implement your TTS logic)
+function generateSpeechFile(string $text): string {
+    // This is a placeholder - implement your actual TTS logic
+    $tempFile = tempnam(sys_get_temp_dir(), 'tts_') . '.mp3';
+
+    // Example using system TTS (Linux)
+    // exec("espeak '{$text}' --stdout | lame -r -s 22050 -m m - '{$tempFile}'");
+
+    return $tempFile;
+}
+```
+
+### 4. Add Prompts
 
 ```php
 $promptRegistry->register('code_review', function($arguments, $context) {
@@ -433,7 +492,7 @@ $promptRegistry->register('code_review', function($arguments, $context) {
 ]);
 ```
 
-### 4. Add Resources
+### 5. Add Resources
 
 ```php
 $resourceRegistry->register('server://health', function($uri, $context) {
@@ -478,13 +537,51 @@ $resourceRegistry->registerTemplate('file://{path}', function($uri, $context) {
 ]);
 ```
 
+### 6. Elicitation (User Input) - 2025-06-18
+
+```php
+// Example tool that requests structured user input
+$toolRegistry->register('collect_user_info', function($params, $context) use ($mcpProvider) {
+    $sessionId = $context['session_id'] ?? null;
+
+    if (!$sessionId) {
+        return ['error' => 'Session required for elicitation'];
+    }
+
+    // Request structured input from user
+    $requestId = $mcpProvider->getServer()->requestElicitation(
+        $sessionId,
+        'Please provide your contact information',
+        [
+            'type' => 'object',
+            'properties' => [
+                'name' => ['type' => 'string'],
+                'email' => ['type' => 'string', 'format' => 'email'],
+                'phone' => ['type' => 'string']
+            ],
+            'required' => ['name', 'email']
+        ]
+    );
+
+    return [
+        'message' => 'User input requested',
+        'request_id' => $requestId,
+        'status' => 'waiting_for_input'
+    ];
+}, [
+    'description' => 'Collect structured user information via elicitation',
+    'inputSchema' => ['type' => 'object']
+]);
+```
+
 ## JavaScript Client Example
 
 ```javascript
 class MCPClient {
-    constructor(baseUrl, accessToken) {
+    constructor(baseUrl, accessToken, protocolVersion = '2025-03-26') {
         this.baseUrl = baseUrl;
         this.accessToken = accessToken;
+        this.protocolVersion = protocolVersion;
         this.sessionId = null;
         this.eventSource = null;
         this.pendingRequests = new Map();
@@ -492,17 +589,24 @@ class MCPClient {
     }
 
     async initialize(agencyId) {
+        const headers = {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json'
+        };
+
+        // Add protocol version header for 2025-06-18
+        if (this.protocolVersion === '2025-06-18') {
+            headers['MCP-Protocol-Version'] = this.protocolVersion;
+        }
+
         const response = await fetch(`${this.baseUrl}/mcp/${agencyId}`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.accessToken}`,
-                'Content-Type': 'application/json'
-            },
+            headers: headers,
             body: JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'initialize',
                 params: {
-                    protocolVersion: '2024-11-05',
+                    protocolVersion: this.protocolVersion,
                     capabilities: {},
                     clientInfo: { name: 'JS Client', version: '1.0.0' }
                 },
@@ -510,29 +614,98 @@ class MCPClient {
             })
         });
 
+        if (!response.ok) {
+            if (response.status === 401) {
+                const error = await response.json();
+                if (error.error?.data?.oauth) {
+                    console.log('OAuth endpoints available:', error.error.data.oauth);
+                    throw new Error('Authentication required - use OAuth flow');
+                }
+            }
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
         this.sessionId = response.headers.get('Mcp-Session-Id');
         return response.json();
     }
 
-    connectSSE(agencyId) {
-        // GET request to same URL with session_id parameter
+    connectStreaming(agencyId) {
         const url = `${this.baseUrl}/mcp/${agencyId}?session_id=${this.sessionId}`;
 
-        this.eventSource = new EventSource(url, {
-            headers: {
-                'Authorization': `Bearer ${this.accessToken}`
-            }
-        });
+        const headers = {
+            'Authorization': `Bearer ${this.accessToken}`
+        };
+
+        // Add protocol version header for 2025-06-18
+        if (this.protocolVersion === '2025-06-18') {
+            headers['MCP-Protocol-Version'] = this.protocolVersion;
+        }
+
+        // Use appropriate transport based on protocol version
+        if (this.shouldUseStreamableHTTP()) {
+            return this.connectStreamableHTTP(url, headers);
+        } else {
+            return this.connectSSE(url, headers);
+        }
+    }
+
+    shouldUseStreamableHTTP() {
+        return ['2025-03-26', '2025-06-18'].includes(this.protocolVersion);
+    }
+
+    connectSSE(url, headers) {
+        this.eventSource = new EventSource(url, { headers });
 
         this.eventSource.addEventListener('message', (event) => {
             const data = JSON.parse(event.data);
-
-            if (data.id && this.pendingRequests.has(data.id)) {
-                const { resolve } = this.pendingRequests.get(data.id);
-                this.pendingRequests.delete(data.id);
-                resolve(data);
-            }
+            this.handleResponse(data);
         });
+
+        this.eventSource.addEventListener('error', (event) => {
+            console.error('SSE connection error:', event);
+        });
+    }
+
+    connectStreamableHTTP(url, headers) {
+        fetch(url, {
+            method: 'GET',
+            headers: headers
+        }).then(response => {
+            const reader = response.body.getReader();
+
+            const processStream = async () => {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const text = new TextDecoder().decode(value);
+                    const lines = text.split('\n');
+
+                    for (const line of lines) {
+                        if (line.trim()) {
+                            try {
+                                const data = JSON.parse(line);
+                                this.handleResponse(data);
+                            } catch (e) {
+                                // Ignore parse errors for partial chunks
+                            }
+                        }
+                    }
+                }
+            };
+
+            processStream();
+        });
+    }
+
+    handleResponse(data) {
+        if (data.id && this.pendingRequests.has(data.id)) {
+            const { resolve } = this.pendingRequests.get(data.id);
+            this.pendingRequests.delete(data.id);
+            resolve(data);
+        } else if (data.method === 'notifications/progress') {
+            console.log('Progress:', data.params);
+        }
     }
 
     async call(agencyId, method, params = {}) {
@@ -549,14 +722,21 @@ class MCPClient {
             }, 30000);
         });
 
+        const headers = {
+            'Authorization': `Bearer ${this.accessToken}`,
+            'Mcp-Session-Id': this.sessionId,
+            'Content-Type': 'application/json'
+        };
+
+        // Add protocol version header for 2025-06-18
+        if (this.protocolVersion === '2025-06-18') {
+            headers['MCP-Protocol-Version'] = this.protocolVersion;
+        }
+
         // POST request returns {"status": "queued"}
         await fetch(`${this.baseUrl}/mcp/${agencyId}`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.accessToken}`,
-                'Mcp-Session-Id': this.sessionId,
-                'Content-Type': 'application/json'
-            },
+            headers: headers,
             body: JSON.stringify({
                 jsonrpc: '2.0',
                 method,
@@ -565,14 +745,14 @@ class MCPClient {
             })
         });
 
-        return promise; // Resolves when response comes via SSE
+        return promise; // Resolves when response comes via streaming
     }
 }
 
 // Usage
-const client = new MCPClient('http://localhost:8080', 'test-token-12345');
+const client = new MCPClient('http://localhost:8080', 'test-token-12345', '2025-03-26');
 await client.initialize('550e8400-e29b-41d4-a716-446655440000');
-client.connectSSE('550e8400-e29b-41d4-a716-446655440000');
+client.connectStreaming('550e8400-e29b-41d4-a716-446655440000');
 
 const toolsList = await client.call('550e8400-e29b-41d4-a716-446655440000', 'tools/list');
 console.log(toolsList.result.tools);
@@ -594,10 +774,17 @@ console.log(toolsList.result.tools);
 - Verify your agency UUID exists in the database
 - Check the agency is marked as active
 
-**SSE Connection Issues**
+**Streaming Connection Issues**
 - Ensure you're using GET request to the same MCP URL
 - Include session_id as query parameter
 - Verify Authorization header is included
+- For 2025-06-18, ensure MCP-Protocol-Version header matches
+
+**Protocol Version Errors**
+- Check that requested features are supported in your protocol version
+- Tool annotations only available in 2025-03-26+
+- Audio content only available in 2025-03-26+
+- Elicitation only available in 2025-06-18
 
 ### Debug Mode
 
@@ -623,9 +810,13 @@ $mcpProvider = new SlimMCPProvider(
 2. **Authentication**: Set up OAuth providers for social login
 3. **Framework Integration**: Use Laravel service provider for Laravel projects
 4. **Custom Tools**: Build domain-specific tools for your use case
-5. **Client Libraries**: Implement proper MCP client with SSE support
+5. **Client Libraries**: Implement proper MCP client with streaming support
+6. **Database Schema**: See [database-schema.md](database-schema.md) for complete table definitions
 
 ## Resources
 
-- **Source Code**: [GitHub Repository](https://github.com/seolinkmap/wassup)
+- **Source Code**: [GitHub Repository](https://github.com/seolinkmap/waasup)
 - **MCP Protocol**: [Anthropic MCP Specification](https://spec.modelcontextprotocol.io/)
+- **Database Schema**: [database-schema.md](database-schema.md)
+- **Configuration**: [configuration.md](configuration.md)
+- **API Reference**: [api-reference.md](api-reference.md)

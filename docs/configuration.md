@@ -20,7 +20,7 @@ This document covers the actual configuration options available in the MCP SaaS 
 use Seolinkmap\Waasup\MCPSaaSServer;
 
 $config = [
-    'supported_versions' => ['2025-06-18', '2025-03-18', '2024-11-05'],
+    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
     'server_info' => [
         'name' => 'My MCP Server',
         'version' => '1.0.0'
@@ -48,13 +48,13 @@ $server = new MCPSaaSServer(
 ```php
 // Configure which MCP protocol versions to support
 $config['supported_versions'] = [
-    '2025-06-18',  // Latest
-    '2025-03-26',  // Stable
-    '2024-11-05'   // Deprecated, but still used
+    '2025-06-18',  // Latest with OAuth Resource Server + Elicitation
+    '2025-03-26',  // Stable with Tool Annotations + Audio Content
+    '2024-11-05'   // Base version
 ];
 ```
 
-**Note**: The server does NOT use environment variables. All configuration must be passed directly to the constructors.
+**Note**: The server configuration itself does not use environment variables. All configuration must be passed directly to the constructors. However, individual tools may use environment variables for external API keys and services.
 
 ## Database Configuration
 
@@ -83,14 +83,22 @@ $storage = new DatabaseStorage($pdo, [
 
 The software expects these tables to exist (you must create them manually):
 
+**Core Tables:**
 - `mcp_messages` - Stores queued messages for SSE delivery
-- `mcp_sessions` - Stores session data
+- `mcp_sessions` - Stores session data with protocol versions
+- `mcp_agencies` - Stores agency/context data
+- `mcp_users` - Stores user data (optional for social auth)
+
+**OAuth Tables:**
 - `mcp_oauth_tokens` - Stores access tokens for validation
 - `mcp_oauth_clients` - Stores OAuth client registrations
-- `mcp_agencies` - Stores agency/context data
-- `mcp_users` - Stores user data (optional)
 
-See [Database Schema](#database-schema) section for table structures.
+**Response Storage Tables (for async operations):**
+- `mcp_sampling_responses` - Stores LLM sampling responses
+- `mcp_roots_responses` - Stores client filesystem responses
+- `mcp_elicitation_responses` - Stores user input responses (2025-06-18)
+
+See [Database Schema](#database-schema) section for complete table structures.
 
 ## Authentication Configuration
 
@@ -101,7 +109,9 @@ $config['auth'] = [
     'context_types' => ['agency'],      // Default: ['agency', 'user']
     'validate_scope' => false,          // Default: false
     'required_scopes' => [],            // Default: []
-    'base_url' => 'https://your-domain.com'  // Default: 'https://localhost'
+    'base_url' => 'https://your-domain.com',  // Default: 'https://localhost'
+    'resource_server_metadata' => true,       // OAuth Resource Server (2025-06-18)
+    'require_resource_binding' => true        // RFC 8707 Resource Indicators
 ];
 ```
 
@@ -138,6 +148,23 @@ $authMiddleware = new AuthMiddleware(
 );
 ```
 
+### OAuth 2.1 Configuration (2025-06-18)
+
+For full OAuth 2.1 with RFC 8707 Resource Indicators:
+
+```php
+$config['auth'] = [
+    'context_types' => ['agency'],
+    'validate_scope' => true,
+    'required_scopes' => ['mcp:read'],
+    'base_url' => 'https://your-domain.com',
+    'resource_server_metadata' => true,
+    'require_resource_binding' => true,  // RFC 8707 compliance
+    'token_endpoint_auth_methods_supported' => ['client_secret_post', 'private_key_jwt', 'none'],
+    'audience_validation_required' => true
+];
+```
+
 ## Transport Configuration
 
 ### Server-Sent Events (SSE)
@@ -151,7 +178,18 @@ $config['sse'] = [
 ];
 ```
 
-**Important**: In production, set `test_mode => false`. In testing, set `test_mode => true` to avoid long-running SSE connections.
+### Streamable HTTP (2025-03-26+)
+
+```php
+$config['streamable_http'] = [
+    'keepalive_interval' => 2,      // Seconds between keepalive (longer than SSE)
+    'max_connection_time' => 1800,  // 30 minutes max connection time
+    'switch_interval_after' => 60,  // Switch to longer intervals after 1 minute
+    'test_mode' => false            // Set true for testing
+];
+```
+
+**Important**: In production, set `test_mode => false`. In testing, set `test_mode => true` to avoid long-running connections.
 
 ## Storage Configuration
 
@@ -160,6 +198,7 @@ $config['sse'] = [
 ```php
 use Seolinkmap\Waasup\Storage\MemoryStorage;
 
+// WARNING: MemoryStorage blocks production use
 $storage = new MemoryStorage();
 
 // Add test data manually
@@ -274,11 +313,38 @@ $toolRegistry->register('echo', function($params, $context) {
         ],
         'required' => ['message']
     ],
-    'annotations' => [
+    'annotations' => [  // Tool annotations (2025-03-26+)
         'readOnlyHint' => true,
         'destructiveHint' => false,
         'idempotentHint' => true,
         'openWorldHint' => false
+    ]
+]);
+```
+
+### Tool Environment Variable Usage
+
+Tools can use environment variables for external services:
+
+```php
+$toolRegistry->register('get_weather', function($params, $context) {
+    // Tools CAN use environment variables for API keys
+    $apiKey = $_ENV['WEATHER_API_KEY'] ?? null;
+
+    if (!$apiKey) {
+        return ['error' => 'Weather API key not configured'];
+    }
+
+    // Use $apiKey to call external weather API
+    return ['weather' => 'sunny', 'temp' => '22°C'];
+}, [
+    'description' => 'Get weather data from external API',
+    'inputSchema' => [
+        'type' => 'object',
+        'properties' => [
+            'location' => ['type' => 'string', 'description' => 'Location name']
+        ],
+        'required' => ['location']
     ]
 ]);
 ```
@@ -371,92 +437,28 @@ $resourceRegistry->registerTemplate('file://{path}', function($uri, $context) {
 
 ## Database Schema
 
-### Required Tables
+### Required Tables Overview
 
-You must create these tables manually. Here are example schemas:
+The `DatabaseStorage` implementation requires these tables to exist:
 
-```sql
--- Messages for SSE delivery
-CREATE TABLE mcp_messages (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    session_id VARCHAR(255) NOT NULL,
-    message_data TEXT NOT NULL,
-    context_data TEXT,
-    created_at DATETIME NOT NULL,
-    INDEX idx_session_id (session_id),
-    INDEX idx_created_at (created_at)
-);
+**Core Tables:**
+- `mcp_messages` - Queued messages for async delivery
+- `mcp_sessions` - Session data with protocol versions
+- `mcp_agencies` - Agency/tenant context data
+- `mcp_users` - User data (optional, for social auth)
 
--- Session storage
-CREATE TABLE mcp_sessions (
-    session_id VARCHAR(255) PRIMARY KEY,
-    session_data TEXT NOT NULL,
-    expires_at DATETIME NOT NULL,
-    created_at DATETIME NOT NULL,
-    INDEX idx_expires_at (expires_at)
-);
+**OAuth Tables:**
+- `mcp_oauth_tokens` - Access tokens with RFC 8707 support
+- `mcp_oauth_clients` - OAuth client registrations
 
--- OAuth tokens
-CREATE TABLE mcp_oauth_tokens (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_id VARCHAR(255),
-    access_token VARCHAR(255) UNIQUE,
-    refresh_token VARCHAR(255),
-    token_type VARCHAR(50) DEFAULT 'Bearer',
-    scope TEXT,
-    expires_at DATETIME,
-    revoked BOOLEAN DEFAULT FALSE,
-    code_challenge VARCHAR(255),
-    code_challenge_method VARCHAR(10),
-    agency_id INT,
-    user_id INT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_access_token (access_token),
-    INDEX idx_refresh_token (refresh_token),
-    INDEX idx_expires_at (expires_at)
-);
+**Response Storage Tables:**
+- `mcp_sampling_responses` - LLM sampling responses
+- `mcp_roots_responses` - Client filesystem responses
+- `mcp_elicitation_responses` - User input responses (2025-06-18)
 
--- OAuth clients
-CREATE TABLE mcp_oauth_clients (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_id VARCHAR(255) UNIQUE NOT NULL,
-    client_secret VARCHAR(255),
-    client_name VARCHAR(255) NOT NULL,
-    redirect_uris TEXT,
-    grant_types TEXT,
-    response_types TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+**⚠️ Important:** You must create these tables manually before using `DatabaseStorage`.
 
--- Agency contexts
-CREATE TABLE mcp_agencies (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    uuid VARCHAR(36) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    active BOOLEAN DEFAULT TRUE,
-    settings TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_uuid (uuid),
-    INDEX idx_active (active)
-);
-
--- User contexts (optional)
-CREATE TABLE mcp_users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    agency_id INT NOT NULL,
-    uuid VARCHAR(36) UNIQUE,
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password VARCHAR(255),
-    google_id VARCHAR(255),
-    linkedin_id VARCHAR(255),
-    github_id VARCHAR(255),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (agency_id) REFERENCES mcp_agencies(id),
-    INDEX idx_email (email),
-    INDEX idx_uuid (uuid)
-);
-```
+📖 **See the [Database Schema Documentation](database-schema.md) for complete CREATE TABLE statements, field descriptions, and database-specific variations.**
 
 ## Complete Working Example
 
@@ -512,6 +514,7 @@ $resourceRegistry->register('test://status', function($uri, $context) {
 
 // Configuration
 $config = [
+    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
     'server_info' => [
         'name' => 'Test MCP Server',
         'version' => '1.0.0'
@@ -565,5 +568,5 @@ curl http://localhost:8080/.well-known/oauth-authorization-server
 curl -X POST http://localhost:8080/mcp/550e8400-e29b-41d4-a716-446655440000 \
   -H "Authorization: Bearer test-token" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"Test"}},"id":1}'
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"Test"}},"id":1}'
 ```
