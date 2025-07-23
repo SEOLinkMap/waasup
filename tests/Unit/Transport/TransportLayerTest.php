@@ -109,10 +109,14 @@ class TransportLayerTest extends TestCase
 
         $sseRequest = $this->createRequest('GET', '/mcp/550e8400-e29b-41d4-a716-446655440000')
             ->withHeader('Mcp-Session-Id', $sessionId);
-        $sseRequest = $sseRequest->withAttribute('mcp_context', $this->createTestContext([
-            'base_url' => 'https://test.example.com',
-            'context_id' => '550e8400-e29b-41d4-a716-446655440000'
-        ]));
+        $sseRequest = $sseRequest->withAttribute(
+            'mcp_context', $this->createTestContext(
+                [
+                'base_url' => 'https://test.example.com',
+                'context_id' => '550e8400-e29b-41d4-a716-446655440000'
+                ]
+            )
+        );
 
         $response = $this->server->handle($sseRequest, $this->createResponse());
 
@@ -141,15 +145,21 @@ class TransportLayerTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'tools/list',
                 'id' => $this->getNextRequestId() // Use unique request ID
-            ])
+                ]
+            )
         );
-        $messageRequest = $messageRequest->withAttribute('mcp_context', $this->createTestContext([
-            'protocol_version' => '2024-11-05'
-        ]));
+        $messageRequest = $messageRequest->withAttribute(
+            'mcp_context', $this->createTestContext(
+                [
+                'protocol_version' => '2024-11-05'
+                ]
+            )
+        );
 
         $response = $this->server->handle($messageRequest, $this->createResponse());
 
@@ -208,15 +218,21 @@ class TransportLayerTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
                 'id' => $this->getNextRequestId() // Use unique request ID
-            ])
+                ]
+            )
         );
-        $postRequest = $postRequest->withAttribute('mcp_context', $this->createTestContext([
-            'protocol_version' => '2025-03-26'
-        ]));
+        $postRequest = $postRequest->withAttribute(
+            'mcp_context', $this->createTestContext(
+                [
+                'protocol_version' => '2025-03-26'
+                ]
+            )
+        );
 
         $postResponse = $this->server->handle($postRequest, $this->createResponse());
         $this->assertEquals(202, $postResponse->getStatusCode());
@@ -229,9 +245,13 @@ class TransportLayerTest extends TestCase
                 'Mcp-Session-Id' => $sessionId
             ]
         );
-        $getRequest = $getRequest->withAttribute('mcp_context', $this->createTestContext([
-            'protocol_version' => '2025-03-26'
-        ]));
+        $getRequest = $getRequest->withAttribute(
+            'mcp_context', $this->createTestContext(
+                [
+                'protocol_version' => '2025-03-26'
+                ]
+            )
+        );
 
         $getResponse = $this->server->handle($getRequest, $this->createResponse());
 
@@ -256,7 +276,8 @@ class TransportLayerTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 [
                     'jsonrpc' => '2.0',
                     'method' => 'ping',
@@ -267,11 +288,16 @@ class TransportLayerTest extends TestCase
                     'method' => 'tools/list',
                     'id' => $this->getNextRequestId()
                 ]
-            ])
+                ]
+            )
         );
-        $batchRequest = $batchRequest->withAttribute('mcp_context', $this->createTestContext([
-            'protocol_version' => '2025-03-26'
-        ]));
+        $batchRequest = $batchRequest->withAttribute(
+            'mcp_context', $this->createTestContext(
+                [
+                'protocol_version' => '2025-03-26'
+                ]
+            )
+        );
 
         $response = $this->server->handle($batchRequest, $this->createResponse());
 
@@ -296,12 +322,14 @@ class TransportLayerTest extends TestCase
             [
                 'Content-Type' => 'application/json'
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'initialize',
                 'params' => ['protocolVersion' => '2025-03-26'],
                 'id' => $this->getNextRequestId()
-            ])
+                ]
+            )
         );
         $initRequest = $initRequest->withAttribute('mcp_context', $this->createTestContext());
 
@@ -320,11 +348,13 @@ class TransportLayerTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
                 'id' => $this->getNextRequestId()
-            ])
+                ]
+            )
         );
         $followupRequest = $followupRequest->withAttribute('mcp_context', $this->createTestContext());
 
@@ -353,9 +383,13 @@ class TransportLayerTest extends TestCase
                 'Mcp-Session-Id' => $sessionId
             ]
         );
-        $request2 = $request2->withAttribute('mcp_context', $this->createTestContext([
-            'protocol_version' => '2025-03-26'
-        ]));
+        $request2 = $request2->withAttribute(
+            'mcp_context', $this->createTestContext(
+                [
+                'protocol_version' => '2025-03-26'
+                ]
+            )
+        );
 
         $response2 = $this->server->handle($request2, $this->createResponse());
 
@@ -385,11 +419,13 @@ class TransportLayerTest extends TestCase
                 'MCP-Protocol-Version' => '2025-06-18',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
                 'id' => $this->getNextRequestId() // Use unique request ID
-            ])
+                ]
+            )
         );
         $context = $this->createTestContext(['protocol_version' => '2025-06-18']);
         $requestWithHeader = $requestWithHeader->withAttribute('mcp_context', $context);
@@ -414,11 +450,13 @@ class TransportLayerTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
                 'id' => $this->getNextRequestId()
-            ])
+                ]
+            )
         );
         $context = $this->createTestContext(); // No protocol_version in context
         $requestWithoutHeader = $requestWithoutHeader->withAttribute('mcp_context', $context);
@@ -446,11 +484,13 @@ class TransportLayerTest extends TestCase
                 'MCP-Protocol-Version' => 'invalid-version',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
                 'id' => $this->getNextRequestId()
-            ])
+                ]
+            )
         );
         $context = $this->createTestContext(['protocol_version' => 'invalid-version']);
         $requestWithInvalidHeader = $requestWithInvalidHeader->withAttribute('mcp_context', $context);
@@ -521,12 +561,14 @@ class TransportLayerTest extends TestCase
                 'POST',
                 '/mcp/550e8400-e29b-41d4-a716-446655440000',
                 $headers,
-                json_encode([
+                json_encode(
+                    [
                     'jsonrpc' => '2.0',
                     'method' => 'initialize',
                     'params' => ['protocolVersion' => $version],
                     'id' => $this->getNextRequestId()
-                ])
+                    ]
+                )
             );
             $request = $request->withAttribute('mcp_context', $context);
 
@@ -557,12 +599,14 @@ class TransportLayerTest extends TestCase
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             $headers,
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'initialize',
                 'params' => ['protocolVersion' => $protocolVersion],
                 'id' => $this->getNextRequestId() // Use unique request ID
-            ])
+                ]
+            )
         );
         $initRequest = $initRequest->withAttribute('mcp_context', $context);
 

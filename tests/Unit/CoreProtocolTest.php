@@ -107,12 +107,14 @@ class CoreProtocolTest extends TestCase
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             ['Content-Type' => 'application/json'],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'initialize',
                 'params' => ['protocolVersion' => '2024-11-05'],
                 'id' => 1
-            ])
+                ]
+            )
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -151,7 +153,8 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'prompts/get',
             'params' => [
@@ -159,7 +162,8 @@ class CoreProtocolTest extends TestCase
                 'arguments' => ['name' => 'Alice', 'topic' => 'MCP testing']
             ],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -172,11 +176,13 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'prompts/list',
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -193,7 +199,8 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'prompts/get',
             'params' => [
@@ -201,7 +208,8 @@ class CoreProtocolTest extends TestCase
                 'arguments' => ['topic' => 'testing']
             ],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -214,7 +222,8 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         // Test missing required argument - should fail gracefully
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'prompts/get',
             'params' => [
@@ -222,7 +231,8 @@ class CoreProtocolTest extends TestCase
                 'arguments' => ['topic' => 'test'] // missing required 'name'
             ],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         // Should return error result in wrapped form, not crash
@@ -234,7 +244,8 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'prompts/get',
             'params' => [
@@ -242,7 +253,8 @@ class CoreProtocolTest extends TestCase
                 'arguments' => ['name' => 'Bob', 'topic' => 'protocols']
             ],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -257,11 +269,13 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'resources/list',
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -273,11 +287,13 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'resources/templates/list',
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -288,12 +304,14 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'test://{id}'],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -304,12 +322,14 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'test://resource'],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -322,12 +342,14 @@ class CoreProtocolTest extends TestCase
         $sessionId = $this->initializeAndGetSession();
 
         // Test protected resource with context
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'test://protected'],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -340,12 +362,14 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'test://resource'],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -356,12 +380,14 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'resources/read',
             'params' => ['uri' => 'nonexistent://resource'],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         // Should return wrapped error content, not crash
@@ -383,11 +409,13 @@ class CoreProtocolTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'notifications/cancelled',
                 'params' => ['requestId' => 123]
-            ])
+                ]
+            )
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -410,11 +438,13 @@ class CoreProtocolTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'notifications/cancelled',
                 'params' => ['requestId' => 456]
-            ])
+                ]
+            )
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -433,11 +463,13 @@ class CoreProtocolTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'notifications/cancelled',
                 'params' => ['requestId' => 789]
-            ])
+                ]
+            )
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -462,11 +494,13 @@ class CoreProtocolTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'notifications/cancelled',
                 'params' => ['requestId' => 999]
-            ])
+                ]
+            )
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -491,12 +525,14 @@ class CoreProtocolTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'logging/setLevel',
                 'params' => ['level' => 'info'],
                 'id' => $this->getNextRequestId()
-            ])
+                ]
+            )
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -516,12 +552,14 @@ class CoreProtocolTest extends TestCase
                     'Content-Type' => 'application/json',
                     'Mcp-Session-Id' => $sessionId
                 ],
-                json_encode([
+                json_encode(
+                    [
                     'jsonrpc' => '2.0',
                     'method' => 'logging/setLevel',
                     'params' => ['level' => $level],
                     'id' => $this->getNextRequestId()
-                ])
+                    ]
+                )
             );
             $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -541,14 +579,16 @@ class CoreProtocolTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'notifications/message',
                 'params' => [
                     'level' => 'info',
                     'data' => 'Test log message'
                 ]
-            ])
+                ]
+            )
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -567,14 +607,16 @@ class CoreProtocolTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'notifications/message',
                 'params' => [
                     'level' => 'debug',
                     'data' => 'Debug message'
                 ]
-            ])
+                ]
+            )
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -588,12 +630,14 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'tools/list',
             'params' => ['cursor' => null],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -604,12 +648,14 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'resources/list',
             'params' => ['cursor' => 'page_token'],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -619,11 +665,13 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'prompts/list',
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -636,7 +684,8 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'sampling/createMessage',
             'params' => [
@@ -645,7 +694,8 @@ class CoreProtocolTest extends TestCase
                 ]
             ],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -656,7 +706,8 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'sampling/createMessage',
             'params' => [
@@ -665,7 +716,8 @@ class CoreProtocolTest extends TestCase
                 ]
             ],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -675,7 +727,8 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'sampling/createMessage',
             'params' => [
@@ -685,7 +738,8 @@ class CoreProtocolTest extends TestCase
                 'includeContext' => 'thisServer'
             ],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -697,12 +751,14 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'roots/list',
             'params' => [],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -712,12 +768,14 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'roots/listDirectory',
             'params' => ['uri' => 'file:///'],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
@@ -727,12 +785,14 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        $response = $this->sendRequestAndGetStoredResponse($sessionId, [
+        $response = $this->sendRequestAndGetStoredResponse(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'roots/read',
             'params' => ['uri' => 'file:///test.txt'],
             'id' => $this->getNextRequestId()
-        ]);
+            ]
+        );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);

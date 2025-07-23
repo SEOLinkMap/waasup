@@ -85,38 +85,46 @@ class MCPSecurityComplianceTest extends TestCase
     private function setupTestData(): void
     {
         // Add test client supporting 2025-06-18
-        $this->storage->addOAuthClient('test-client-2025', [
+        $this->storage->addOAuthClient(
+            'test-client-2025', [
             'client_id' => 'test-client-2025',
             'client_secret' => null,
             'client_name' => 'MCP 2025-06-18 Test Client',
             'redirect_uris' => ['https://client.example.com/callback'],
             'grant_types' => ['authorization_code', 'refresh_token'],
             'response_types' => ['code']
-        ]);
+            ]
+        );
 
         // Add test agency and user
-        $this->storage->addContext($this->contextId, 'agency', [
+        $this->storage->addContext(
+            $this->contextId, 'agency', [
             'id' => 1,
             'uuid' => $this->contextId,
             'name' => 'Test Agency',
             'active' => true
-        ]);
+            ]
+        );
 
         // Add malicious context for token passthrough tests
-        $this->storage->addContext($this->maliciousContextId, 'agency', [
+        $this->storage->addContext(
+            $this->maliciousContextId, 'agency', [
             'id' => 999,
             'uuid' => $this->maliciousContextId,
             'name' => 'Malicious Agency',
             'active' => true
-        ]);
+            ]
+        );
 
-        $this->storage->addUser(1, [
+        $this->storage->addUser(
+            1, [
             'id' => 1,
             'name' => 'Test User',
             'email' => 'test@example.com',
             'password' => password_hash('password123', PASSWORD_BCRYPT),
             'agency_id' => 1
-        ]);
+            ]
+        );
     }
 
     // Override createRequest to include proper URI with scheme and host
@@ -167,7 +175,8 @@ class MCPSecurityComplianceTest extends TestCase
         // 1. Authorization request WITHOUT resource parameter should fail for 2025-06-18
         $authRequestWithoutResource = $this->createRequest(
             'GET',
-            '/oauth/authorize?' . http_build_query([
+            '/oauth/authorize?' . http_build_query(
+                [
                 'response_type' => 'code',
                 'client_id' => 'test-client-2025',
                 'redirect_uri' => 'https://client.example.com/callback',
@@ -175,7 +184,8 @@ class MCPSecurityComplianceTest extends TestCase
                 'code_challenge' => $codeChallenge,
                 'code_challenge_method' => 'S256'
                 // Missing 'resource' parameter
-            ])
+                ]
+            )
         );
         $authRequestWithoutResource = $authRequestWithoutResource->withHeader('MCP-Protocol-Version', '2025-06-18');
 
@@ -206,14 +216,16 @@ class MCPSecurityComplianceTest extends TestCase
 
         // Token exchange WITH resource parameter
         $tokenRequest = $this->createRequest('POST', '/oauth/token')
-            ->withParsedBody([
+            ->withParsedBody(
+                [
                 'grant_type' => 'authorization_code',
                 'code' => $authCode,
                 'client_id' => 'test-client-2025',
                 'redirect_uri' => 'https://client.example.com/callback',
                 'code_verifier' => $codeVerifier,
                 'resource' => $expectedResource
-            ])
+                ]
+            )
             ->withHeader('MCP-Protocol-Version', '2025-06-18');
 
         $tokenResponse = $this->oauthServer->token($tokenRequest, $this->createResponse());
@@ -229,7 +241,8 @@ class MCPSecurityComplianceTest extends TestCase
     {
         // Create token bound to specific resource
         $boundResource = $this->baseUrl . '/mcp/' . $this->contextId;
-        $this->storage->storeAccessToken([
+        $this->storage->storeAccessToken(
+            [
             'client_id' => 'test-client-2025',
             'access_token' => 'bound-token',
             'scope' => 'mcp:read',
@@ -238,7 +251,8 @@ class MCPSecurityComplianceTest extends TestCase
             'user_id' => 1,
             'resource' => $boundResource,
             'aud' => [$boundResource]
-        ]);
+            ]
+        );
 
         // Test access to correct resource (should succeed)
         $validRequest = $this->createRequest(
@@ -274,7 +288,8 @@ class MCPSecurityComplianceTest extends TestCase
         $legitimateResource = $this->baseUrl . '/mcp/' . $this->contextId;
 
         // Create token bound to legitimate resource
-        $this->storage->storeAccessToken([
+        $this->storage->storeAccessToken(
+            [
             'client_id' => 'test-client-2025',
             'access_token' => 'legitimate-token',
             'scope' => 'mcp:read mcp:write',
@@ -283,7 +298,8 @@ class MCPSecurityComplianceTest extends TestCase
             'user_id' => 1,
             'resource' => $legitimateResource,
             'aud' => [$legitimateResource]
-        ]);
+            ]
+        );
 
         // Malicious server tries to use token (should fail audience validation)
         $maliciousRequest = $this->createRequest(
@@ -318,7 +334,8 @@ class MCPSecurityComplianceTest extends TestCase
 
         $authRequest = $this->createRequest(
             'GET',
-            '/oauth/authorize?' . http_build_query([
+            '/oauth/authorize?' . http_build_query(
+                [
                 'response_type' => 'code',
                 'client_id' => 'test-client-2025',
                 'redirect_uri' => 'https://client.example.com/callback',
@@ -326,7 +343,8 @@ class MCPSecurityComplianceTest extends TestCase
                 'resource' => $multipleResources, // Array should be rejected
                 'code_challenge' => $codeChallenge,
                 'code_challenge_method' => 'S256'
-            ])
+                ]
+            )
         );
         $authRequest = $authRequest->withHeader('MCP-Protocol-Version', '2025-06-18');
 
@@ -351,7 +369,8 @@ class MCPSecurityComplianceTest extends TestCase
 
         $authRequest = $this->createRequest(
             'GET',
-            '/oauth/authorize?' . http_build_query([
+            '/oauth/authorize?' . http_build_query(
+                [
                 'response_type' => 'code',
                 'client_id' => 'test-client-2025',
                 'redirect_uri' => 'https://client.example.com/callback',
@@ -359,7 +378,8 @@ class MCPSecurityComplianceTest extends TestCase
                 'resource' => $invalidResource,
                 'code_challenge' => $codeChallenge,
                 'code_challenge_method' => 'S256'
-            ])
+                ]
+            )
         );
         $authRequest = $authRequest->withHeader('MCP-Protocol-Version', '2025-06-18');
 
@@ -516,7 +536,8 @@ class MCPSecurityComplianceTest extends TestCase
         $resource1 = $this->baseUrl . '/mcp/' . $this->contextId;
 
         // Create token bound to resource1
-        $this->storage->storeAccessToken([
+        $this->storage->storeAccessToken(
+            [
             'client_id' => 'test-client-2025',
             'access_token' => 'bound-token-test',
             'scope' => 'mcp:read mcp:write',
@@ -525,7 +546,8 @@ class MCPSecurityComplianceTest extends TestCase
             'user_id' => 1,
             'resource' => $resource1,
             'aud' => [$resource1]
-        ]);
+            ]
+        );
 
         // Test access to bound resource (should succeed)
         $validRequest = $this->createRequest(
@@ -563,7 +585,8 @@ class MCPSecurityComplianceTest extends TestCase
         $legitimateResource = $this->baseUrl . '/mcp/' . $this->contextId;
 
         // Create token with specific resource binding
-        $this->storage->storeAccessToken([
+        $this->storage->storeAccessToken(
+            [
             'client_id' => 'legitimate-client',
             'access_token' => 'deputy-test-token',
             'scope' => 'mcp:read',
@@ -572,7 +595,8 @@ class MCPSecurityComplianceTest extends TestCase
             'user_id' => 1,
             'resource' => $legitimateResource,
             'aud' => [$legitimateResource]
-        ]);
+            ]
+        );
 
         // Test with valid resource binding
         $validRequest = $this->createRequest(
@@ -595,7 +619,8 @@ class MCPSecurityComplianceTest extends TestCase
         // Test that tokens cannot be passed through to unintended services
         $originalResource = $this->baseUrl . '/mcp/' . $this->contextId;
 
-        $this->storage->storeAccessToken([
+        $this->storage->storeAccessToken(
+            [
             'client_id' => 'test-client-2025',
             'access_token' => 'passthrough-test-token',
             'scope' => 'mcp:read mcp:write',
@@ -604,7 +629,8 @@ class MCPSecurityComplianceTest extends TestCase
             'user_id' => 1,
             'resource' => $originalResource,
             'aud' => [$originalResource]
-        ]);
+            ]
+        );
 
         // Attempt to use token for different resource (passthrough attack)
         $passthroughRequest = $this->createRequest(
@@ -636,7 +662,8 @@ class MCPSecurityComplianceTest extends TestCase
         // Test that requests through proxies maintain security properties
         $resource = $this->baseUrl . '/mcp/' . $this->contextId;
 
-        $this->storage->storeAccessToken([
+        $this->storage->storeAccessToken(
+            [
             'client_id' => 'test-client-2025',
             'access_token' => 'proxy-test-token',
             'scope' => 'mcp:read',
@@ -645,7 +672,8 @@ class MCPSecurityComplianceTest extends TestCase
             'user_id' => 1,
             'resource' => $resource,
             'aud' => [$resource]
-        ]);
+            ]
+        );
 
         // Test valid resource access
         $validRequest = $this->createRequest(
@@ -691,7 +719,8 @@ class MCPSecurityComplianceTest extends TestCase
         // Authorization request
         $authRequest = $this->createRequest(
             'GET',
-            '/oauth/authorize?' . http_build_query([
+            '/oauth/authorize?' . http_build_query(
+                [
                 'response_type' => 'code',
                 'client_id' => 'test-client-2025',
                 'redirect_uri' => 'https://client.example.com/callback',
@@ -699,7 +728,8 @@ class MCPSecurityComplianceTest extends TestCase
                 'resource' => $resource,
                 'code_challenge' => $codeChallenge,
                 'code_challenge_method' => 'S256'
-            ])
+                ]
+            )
         );
         $authRequest = $authRequest->withHeader('MCP-Protocol-Version', '2025-06-18');
 

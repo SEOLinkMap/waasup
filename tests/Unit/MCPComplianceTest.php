@@ -165,9 +165,13 @@ class MCPComplianceTest extends TestCase
         // Test GET request for Streamable HTTP connection
         $streamRequest = $this->createRequest('GET', '/mcp/550e8400-e29b-41d4-a716-446655440000')
             ->withHeader('Mcp-Session-Id', $modernSessionId);
-        $streamRequest = $streamRequest->withAttribute('mcp_context', $this->createTestContext([
-            'protocol_version' => '2025-03-26'
-        ]));
+        $streamRequest = $streamRequest->withAttribute(
+            'mcp_context', $this->createTestContext(
+                [
+                'protocol_version' => '2025-03-26'
+                ]
+            )
+        );
 
         $streamResponse = $this->server->handle($streamRequest, $this->createResponse());
         $this->assertEquals(200, $streamResponse->getStatusCode());
@@ -204,11 +208,13 @@ class MCPComplianceTest extends TestCase
         $sessionId = $this->initializeSessionWithVersion('2024-11-05');
 
         // Test tools/list without tool annotations (2024-11-05 behavior)
-        $toolsRequest = $this->createSessionRequest($sessionId, [
+        $toolsRequest = $this->createSessionRequest(
+            $sessionId, [
             'jsonrpc' => '2.0',
             'method' => 'tools/list',
             'id' => $this->getNextRequestId()
-        ], '2024-11-05');
+            ], '2024-11-05'
+        );
 
         $response = $this->server->handle($toolsRequest, $this->createResponse());
         $this->assertEquals(202, $response->getStatusCode());
@@ -228,7 +234,8 @@ class MCPComplianceTest extends TestCase
         $sessionId2025 = $this->initializeSessionWithVersion('2025-03-26');
 
         // Test JSON-RPC batching (2025-03-26 only)
-        $batchRequest = $this->createSessionRequest($sessionId2025, [
+        $batchRequest = $this->createSessionRequest(
+            $sessionId2025, [
             [
                 'jsonrpc' => '2.0',
                 'method' => 'ping',
@@ -239,7 +246,8 @@ class MCPComplianceTest extends TestCase
                 'method' => 'tools/list',
                 'id' => $this->getNextRequestId()
             ]
-        ], '2025-03-26');
+            ], '2025-03-26'
+        );
 
         $batchResponse = $this->server->handle($batchRequest, $this->createResponse());
         $this->assertContains($batchResponse->getStatusCode(), [200, 202]); // Both are valid for batching
@@ -283,11 +291,17 @@ class MCPComplianceTest extends TestCase
         $requestWithoutHeader = $this->createRequest('POST', '/mcp/550e8400-e29b-41d4-a716-446655440000')
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Mcp-Session-Id', $sessionId)
-            ->withBody($this->streamFactory->createStream(json_encode([
-                'jsonrpc' => '2.0',
-                'method' => 'ping',
-                'id' => $this->getNextRequestId()
-            ])));
+            ->withBody(
+                $this->streamFactory->createStream(
+                    json_encode(
+                        [
+                        'jsonrpc' => '2.0',
+                        'method' => 'ping',
+                        'id' => $this->getNextRequestId()
+                        ]
+                    )
+                )
+            );
 
         // Context without protocol_version should cause validation error
         $context = $this->createTestContext();
@@ -323,7 +337,8 @@ class MCPComplianceTest extends TestCase
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             $headers,
-            json_encode([
+            json_encode(
+                [
                 'jsonrpc' => '2.0',
                 'method' => 'initialize',
                 'params' => [
@@ -335,7 +350,8 @@ class MCPComplianceTest extends TestCase
                     ]
                 ],
                 'id' => $this->getNextRequestId()
-            ])
+                ]
+            )
         );
 
         return $request->withAttribute('mcp_context', $context);
@@ -394,23 +410,23 @@ class MCPComplianceTest extends TestCase
         $this->assertArrayHasKey('resources', $capabilities);
 
         switch ($version) {
-            case '2024-11-05':
-                // 2024-11-05 should NOT have completions capability
-                $this->assertArrayNotHasKey('completions', $capabilities);
-                break;
+        case '2024-11-05':
+            // 2024-11-05 should NOT have completions capability
+            $this->assertArrayNotHasKey('completions', $capabilities);
+            break;
 
-            case '2025-03-26':
-                // 2025-03-26 should have completions capability
-                $this->assertArrayHasKey('completions', $capabilities);
-                // Should NOT have elicitation
-                $this->assertArrayNotHasKey('elicitation', $capabilities);
-                break;
+        case '2025-03-26':
+            // 2025-03-26 should have completions capability
+            $this->assertArrayHasKey('completions', $capabilities);
+            // Should NOT have elicitation
+            $this->assertArrayNotHasKey('elicitation', $capabilities);
+            break;
 
-            case '2025-06-18':
-                // 2025-06-18 should have both completions and elicitation
-                $this->assertArrayHasKey('completions', $capabilities);
-                $this->assertArrayHasKey('elicitation', $capabilities);
-                break;
+        case '2025-06-18':
+            // 2025-06-18 should have both completions and elicitation
+            $this->assertArrayHasKey('completions', $capabilities);
+            $this->assertArrayHasKey('elicitation', $capabilities);
+            break;
         }
     }
 }

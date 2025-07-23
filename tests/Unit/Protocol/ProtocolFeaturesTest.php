@@ -153,9 +153,11 @@ class ProtocolFeaturesTest extends TestCase
             'id' => 1
         ];
 
-        $context = $this->createTestContext([
+        $context = $this->createTestContext(
+            [
             'protocol_version' => $version
-        ]);
+            ]
+        );
 
         $response = $this->messageHandler->processMessage(
             $initMessage,
@@ -1344,8 +1346,10 @@ class ProtocolFeaturesTest extends TestCase
                     $this->createResponse()
                 );
 
-                $this->assertEquals(202, $response->getStatusCode(),
-                    "Method {$method} should be supported in version {$version}");
+                $this->assertEquals(
+                    202, $response->getStatusCode(),
+                    "Method {$method} should be supported in version {$version}"
+                );
             }
 
             // Test unsupported features
@@ -1365,8 +1369,10 @@ class ProtocolFeaturesTest extends TestCase
                 );
 
                 // Unsupported methods should still return 202 but with error queued
-                $this->assertEquals(202, $response->getStatusCode(),
-                    "Method {$method} should return 202 (queued error) in version {$version}");
+                $this->assertEquals(
+                    202, $response->getStatusCode(),
+                    "Method {$method} should return 202 (queued error) in version {$version}"
+                );
             }
         }
     }
@@ -1374,23 +1380,23 @@ class ProtocolFeaturesTest extends TestCase
     private function getDefaultParamsForMethod(string $method): array
     {
         switch ($method) {
-            case 'elicitation/create':
-                return [
+        case 'elicitation/create':
+            return [
                     'message' => 'Test message',
                     'requestedSchema' => ['type' => 'string']
                 ];
-            case 'completions/complete':
-                return [
+        case 'completions/complete':
+            return [
                     'ref' => ['type' => 'ref/tool', 'name' => 'test_tool'],
                     'argument' => 'test'
                 ];
-            case 'tools/call':
-                return [
+        case 'tools/call':
+            return [
                     'name' => 'test_tool',
                     'arguments' => []
                 ];
-            default:
-                return [];
+        default:
+            return [];
         }
     }
 }

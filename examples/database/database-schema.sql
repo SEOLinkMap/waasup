@@ -131,7 +131,7 @@ CREATE TABLE `mcp_roots_responses` (
     KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE mcprepo_elicitation_responses (
+CREATE TABLE mcp_elicitation_responses (
     id INT AUTO_INCREMENT PRIMARY KEY,
     session_id VARCHAR(255) NOT NULL,
     elicitation_id VARCHAR(255) NOT NULL,
