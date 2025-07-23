@@ -86,7 +86,7 @@ class MCPSaaSServer
                 }
 
                 // THEN check authentication
-                if (empty($this->contextData)) {
+                if (empty($this->contextData) && !($this->config['authless'] ?? false)) {
                     throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
                 }
 
