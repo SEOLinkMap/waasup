@@ -32,6 +32,10 @@ class AuthMiddleware
     public function __invoke(Request $request, RequestHandler $handler): Response
     {
         try {
+            if ($this->config['authless'] ?? false) {
+                return $this->handleAuthlessRequest($request, $handler);
+            }
+
             $contextId = $this->extractContextId($request);
 
             if (!$contextId) {
@@ -85,6 +89,43 @@ class AuthMiddleware
         } catch (\Exception $e) {
             return $this->createErrorResponse('Internal authentication error', 500);
         }
+    }
+
+    /**
+     * Handle authless requests by injecting default context
+     */
+    private function handleAuthlessRequest(Request $request, RequestHandler $handler): Response
+    {
+        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
+        $contextId = $this->extractContextId($request) ?? $this->config['authless_context_id'] ?? 'public';
+
+        $contextData = $this->config['authless_context_data'] ?? [
+            'id' => 1,
+            'name' => 'Public Access',
+            'active' => true,
+            'type' => 'public'
+        ];
+
+        $tokenData = $this->config['authless_token_data'] ?? [
+            'user_id' => 1,
+            'scope' => 'mcp:read mcp:write',
+            'access_token' => 'authless-access',
+            'expires_at' => time() + 86400
+        ];
+
+        $request = $request->withAttribute(
+            'mcp_context',
+            [
+                'context_data' => $contextData,
+                'token_data' => $tokenData,
+                'context_id' => $contextId,
+                'base_url' => $this->getBaseUrl($request),
+                'protocol_version' => $protocolVersion,
+                'authless' => true
+            ]
+        );
+
+        return $handler->handle($request);
     }
 
     // RFC 8707 Resource Indicators validation for 2025-06-18
@@ -311,7 +352,20 @@ class AuthMiddleware
             'required_scopes' => ['mcp:read'],
             'base_url' => '',
             'resource_server_metadata' => true,
-            'require_resource_binding' => true
+            'require_resource_binding' => true,
+            'authless' => false,
+            'authless_context_id' => 'public',
+            'authless_context_data' => [
+                'id' => 1,
+                'name' => 'Public Access',
+                'active' => true,
+                'type' => 'public'
+            ],
+            'authless_token_data' => [
+                'user_id' => 1,
+                'scope' => 'mcp:read mcp:write',
+                'access_token' => 'authless-access'
+            ]
         ];
     }
 }

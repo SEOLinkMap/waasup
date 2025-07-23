@@ -104,7 +104,7 @@ class MCPSaaSServer
             }
 
             if ($request->getMethod() === 'GET') {
-                if (empty($this->contextData)) {
+                if (empty($this->contextData) && !($this->config['authless'] ?? false)) {
                     throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
                 }
                 $this->sessionId = $this->negotiateSessionId($request);
