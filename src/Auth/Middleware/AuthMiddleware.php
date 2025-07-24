@@ -60,6 +60,7 @@ class AuthMiddleware
                 return $this->createOAuthDiscoveryResponse($request);
             }
 
+            // @todo main server sets the protocol version during initialize. This is breaking the repo
             $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
 
             // OAuth Resource Server validation for 2025-06-18
@@ -96,6 +97,7 @@ class AuthMiddleware
      */
     private function handleAuthlessRequest(Request $request, RequestHandler $handler): Response
     {
+        // @todo main server sets the protocol version during initialize. This is breaking the repo
         $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
         $contextId = $this->extractContextId($request) ?? $this->config['authless_context_id'] ?? 'public';
 
@@ -167,6 +169,7 @@ class AuthMiddleware
     protected function createOAuthDiscoveryResponse(Request $request): Response
     {
         $baseUrl = $this->getBaseUrl($request);
+        // @todo main server sets the protocol version during initialize. This is breaking the repo
         $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
 
         $responseData = [

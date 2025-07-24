@@ -98,9 +98,19 @@ class MCPSaaSServer
 
                 $this->sessionId = $this->negotiateSessionId($request, $data);
 
-                // Extract and store protocol version for initialize requests
                 if (($data['method'] ?? '') === 'initialize') {
-                    $protocolVersion = $this->extractProtocolFromInitialize($request, $data);
+                    // negotiate the protocol
+                    $clientProtocolVersion = $data['params']['protocolVersion'] ?? null;
+                    if (!$clientProtocolVersion) {
+                        throw new ProtocolException('Invalid params: protocolVersion required', -32602);
+                    }
+
+                    // This is where we negotiate the protocol
+                    $protocolVersion = $this->versionNegotiator->negotiate($clientProtocolVersion);
+
+                    // Create the combined sessionID with protocol version
+                    $this->sessionId = $protocolVersion . '_' . $this->sessionId;
+
                     if ($protocolVersion && $this->sessionId) {
                         $sessionData = [
                             'protocol_version' => $protocolVersion,
@@ -108,6 +118,7 @@ class MCPSaaSServer
                             'authless' => $isAuthless
                         ];
 
+                        // Store the sessionId
                         $stored = $this->storage->storeSession($this->sessionId, $sessionData);
 
                         $this->logger->info(
@@ -129,6 +140,50 @@ class MCPSaaSServer
                             ]);
                         }
                     }
+
+                    // Initialize is the one command we return immediately
+                    // Use the proper initialization from MessageHandler
+                    $serverInfo = $this->config['server_info'] ?? [
+                        'name' => 'WaaSuP MCP SaaS Server',
+                        'version' => '1.1.0'
+                    ];
+
+                    $capabilities = [];
+
+                    // Build capabilities based on protocol version
+                    $capabilities['tools'] = ['listChanged' => true];
+                    $capabilities['prompts'] = ['listChanged' => true];
+                    $capabilities['resources'] = ['subscribe' => false, 'listChanged' => true];
+
+                    if (in_array($protocolVersion, ['2025-03-26', '2025-06-18'])) {
+                        $capabilities['completions'] = true;
+                    }
+                    if ($protocolVersion === '2025-06-18') {
+                        $capabilities['elicitation'] = true;
+                    }
+                    $capabilities['sampling'] = [];
+                    $capabilities['roots'] = ['listChanged' => true];
+
+                    $result = [
+                        'protocolVersion' => $protocolVersion,
+                        'capabilities' => $capabilities,
+                        'serverInfo' => $serverInfo
+                    ];
+
+                    $responseData = [
+                        'jsonrpc' => '2.0',
+                        'result' => $result,
+                        'id' => $data['id']
+                    ];
+
+                    $response->getBody()->write(json_encode($responseData));
+                    return $response
+                        ->withHeader('Content-Type', 'application/json')
+                        ->withHeader('Mcp-Session-Id', $this->sessionId)
+                        ->withHeader('Access-Control-Allow-Origin', '*')
+                        ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version')
+                        ->withHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+                        ->withStatus(200);
                 }
 
                 return $this->handleMCPRequest($request, $response, $data);
@@ -144,7 +199,6 @@ class MCPSaaSServer
                     throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
                 }
 
-                $this->sessionId = $this->negotiateSessionId($request);
                 $protocolVersion = $this->getSessionProtocolVersion($request);
                 return $this->handleStreamConnection($request, $response, $protocolVersion);
             }
@@ -201,7 +255,6 @@ class MCPSaaSServer
             ],
             'context_id' => 'authless-public',
             'base_url' => $this->getBaseUrl($request),
-            'protocol_version' => '2025-06-18',
             'authless' => true
         ];
     }
@@ -230,7 +283,7 @@ class MCPSaaSServer
                 throw new ProtocolException('Session ID required for GET requests', -32001);
             }
 
-            // Verify session exists in storage
+            // Verify session exists in storage (using full protocolVersion_sessionId)
             $sessionData = $this->storage->getSession($existingSessionId);
             if (!$sessionData) {
                 throw new ProtocolException('Invalid or expired session ID', -32001);
@@ -242,6 +295,7 @@ class MCPSaaSServer
         if ($method === 'POST') {
             // Check if this is an initialize request first
             if (($data['method'] ?? '') === 'initialize') {
+                // Generate just the numeric session ID - protocol gets added later in initialize
                 $newSessionId = $this->generateSessionId();
                 $this->logger->info('New MCP session created', [
                     'session_id' => $newSessionId,
@@ -260,7 +314,7 @@ class MCPSaaSServer
                 throw new ProtocolException('Session ID required for non-initialize requests', -32001);
             }
 
-            // Verify session exists in storage
+            // Verify session exists in storage (using full protocolVersion_sessionId)
             $sessionData = $this->storage->getSession($existingSessionId);
             if (!$sessionData) {
                 $this->logger->warning('Session not found in storage', [
@@ -286,10 +340,10 @@ class MCPSaaSServer
      */
     private function extractSessionIdFromRequest(Request $request): ?string
     {
-        // Check headers first (case-insensitive)
+        // Check headers first (case-insensitive) - expect protocolVersion_sessionId format
         foreach ($request->getHeaders() as $name => $values) {
             if (strtolower($name) === 'mcp-session-id') {
-                return $values[0];
+                return $values[0]; // Return the full protocolVersion_sessionId
             }
         }
 
@@ -308,10 +362,17 @@ class MCPSaaSServer
             return $routeArgs['sessID'];
         }
 
-        // Check URI path directly as fallback
+        // Generic URI path extraction - look for protocolVersion_sessionId format
         $path = $request->getUri()->getPath();
-        if (preg_match('#/mcp-repo/([a-zA-Z0-9]+)#', $path, $matches)) {
-            return $matches[1];
+        $pathSegments = explode('/', trim($path, '/'));
+
+        // Look for session ID in path segments (handle protocolVersion_sessionId format)
+        foreach ($pathSegments as $segment) {
+            if (preg_match('/^[a-zA-Z0-9.-]+_[a-zA-Z0-9]+$/', $segment)) {
+                return $segment; // Return full protocolVersion_sessionId
+            } elseif (preg_match('/^[a-zA-Z0-9]{16,}$/', $segment)) {
+                return $segment; // Handle standalone session ID (for backwards compatibility)
+            }
         }
 
         return null;
@@ -357,6 +418,10 @@ class MCPSaaSServer
             $body = (string) $request->getBody();
             if (!empty($body)) {
                 $data = json_decode($body, true);
+                // Rewind the stream for future reads
+                if ($request->getBody()->isSeekable()) {
+                    $request->getBody()->rewind();
+                }
             }
         }
 
@@ -369,13 +434,28 @@ class MCPSaaSServer
 
     /**
      * Get protocol version for streaming connections (GET requests)
-     * Spec-compliant: only check headers for versions that require them
+     * Extract from the stored session or parse from sessionId
      */
     private function getSessionProtocolVersion(Request $request): string
     {
-        // First get the negotiated version from session
+        // Get the negotiated version from session - NO DEFAULT SETTING
         $sessionData = $this->storage->getSession($this->sessionId);
-        $negotiatedVersion = $sessionData['protocol_version'] ?? '2024-11-05';
+        if (!$sessionData || !isset($sessionData['protocol_version'])) {
+            // Try to extract from sessionId if it's in protocolVersion_sessionId format
+            if ($this->sessionId && strpos($this->sessionId, '_') !== false) {
+                $parts = explode('_', $this->sessionId, 2);
+                if (count($parts) === 2) {
+                    $protocolFromSessionId = $parts[0];
+                    // Validate it's a known protocol version
+                    if (in_array($protocolFromSessionId, $this->config['supported_versions'])) {
+                        return $protocolFromSessionId;
+                    }
+                }
+            }
+            throw new ProtocolException('No protocol version found in session', -32001);
+        }
+
+        $negotiatedVersion = $sessionData['protocol_version'];
 
         // Only check MCP-Protocol-Version header for 2025-06-18 (spec requirement)
         if ($negotiatedVersion === '2025-06-18') {
@@ -519,7 +599,7 @@ class MCPSaaSServer
             'id' => $id
         ];
 
-        $response->getBody()->write(json_encode($errorResponse));
+        $response->getBody()->write(json_encode($responseData));
 
         return $response
             ->withHeader('Content-Type', 'application/json')

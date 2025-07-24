@@ -112,6 +112,11 @@ class DatabaseStorage implements StorageInterface
         $expiresAt = $this->getTimestampWithOffset($ttl);
         $createdAt = $this->getCurrentTimestamp();
 
+        // 1% of set sessions trigger garbage collection
+        if (random_int(0, 99) < 1) {
+            $this->cleanup();
+        }
+
         if ($this->databaseType === 'mysql') {
             $sql = "INSERT INTO `{$this->tablePrefix}sessions`
                     (`session_id`, `session_data`, `expires_at`, `created_at`)
@@ -160,13 +165,6 @@ class DatabaseStorage implements StorageInterface
     {
         $cleaned = 0;
         $currentTime = $this->getCurrentTimestamp();
-        $oneHourAgo = $this->getTimestampWithOffset(-3600);
-
-        $sql = "DELETE FROM `{$this->tablePrefix}messages`
-                WHERE `created_at` < :one_hour_ago";
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([':one_hour_ago' => $oneHourAgo]);
-        $cleaned += $stmt->rowCount();
 
         $sql = "DELETE FROM `{$this->tablePrefix}sessions`
                 WHERE `expires_at` < :current_time";
@@ -440,9 +438,6 @@ class DatabaseStorage implements StorageInterface
 
     private function getCurrentTimestamp(): string
     {
-        if ($this->databaseType === 'sqlite') {
-            return date('Y-m-d H:i:s');
-        }
         return date('Y-m-d H:i:s');
     }
 

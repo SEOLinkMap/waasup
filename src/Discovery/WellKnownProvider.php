@@ -65,6 +65,7 @@ class WellKnownProvider
     public function authorizationServer(Request $request, Response $response): Response
     {
         $baseUrl = $this->getBaseUrl($request);
+        // @todo main server sets the protocol version during initialize. This is breaking the repo
         $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
 
         $discovery = [
@@ -107,6 +108,7 @@ class WellKnownProvider
     }
 
     // Detect protocol version from request path or default
+    // @todo main server sets the protocol version during initialize. This is breaking the repo
     private function detectProtocolFromPath(Request $request): string
     {
         $path = $request->getUri()->getPath();

@@ -640,6 +640,7 @@ class MessageHandler
         return $this->storeSuccessResponse($sessionId, ['received' => true], $id, $response);
     }
 
+    // @todo the main server sets protocol_version. This does not set protocol version. This is breaking the repo
     private function getSessionVersion(?string $sessionId): string
     {
         if (!$sessionId) {

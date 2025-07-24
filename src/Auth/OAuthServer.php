@@ -930,6 +930,7 @@ class OAuthServer
     /**
      * Detect protocol version from request
      */
+    // @todo main server sets the protocol version during initialize. This is breaking the repo
     private function detectProtocolVersion(Request $request): string
     {
         // Check MCP-Protocol-Version header first
