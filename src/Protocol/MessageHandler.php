@@ -105,8 +105,8 @@ class MessageHandler
     ): Response {
         $protocolVersion = $this->getSessionVersion($sessionId);
 
-        // MCP 2025-06-18 requires protocol version header validation
-        if ($protocolVersion === '2025-06-18') {
+        // MCP 2025-06-18 requires protocol version header validation (skip for authless)
+        if ($protocolVersion === '2025-06-18' && !($context['authless'] ?? false)) {
             if (!isset($context['protocol_version']) || $context['protocol_version'] !== $protocolVersion) {
                 throw new ProtocolException('MCP-Protocol-Version header required and must match negotiated version for 2025-06-18', -32600);
             }
