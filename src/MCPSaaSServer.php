@@ -60,6 +60,7 @@ class MCPSaaSServer
     {
         try {
             $this->contextData = $request->getAttribute('mcp_context') ?? [];
+            $isAuthless = $this->config['authless'] ?? false;
 
             if ($request->getMethod() === 'OPTIONS') {
                 return $this->handleCorsPreflightRequest($response);
@@ -68,7 +69,7 @@ class MCPSaaSServer
             $this->validateOriginHeader($request);
 
             if ($request->getMethod() === 'POST') {
-                // Parse JSON FIRST to catch parse errors
+                // Parse JSON FIRST to catch parse errors and avoid multiple body reads
                 $body = (string) $request->getBody();
                 $data = null;
 
@@ -83,10 +84,15 @@ class MCPSaaSServer
                         );
                         throw new ProtocolException('Parse error', -32700);
                     }
+
+                    // Ensure we have an array
+                    if ($data !== null && !is_array($data)) {
+                        throw new ProtocolException('Request must be JSON object', -32600);
+                    }
                 }
 
-                // THEN check authentication
-                if (empty($this->contextData) && !($this->config['authless'] ?? false)) {
+                // THEN check authentication (skip for authless mode)
+                if (empty($this->contextData) && !$isAuthless) {
                     throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
                 }
 
@@ -94,9 +100,34 @@ class MCPSaaSServer
 
                 // Extract and store protocol version for initialize requests
                 if (($data['method'] ?? '') === 'initialize') {
-                    $protocolVersion = $this->extractProtocolFromInitialize($request);
+                    $protocolVersion = $this->extractProtocolFromInitialize($request, $data);
                     if ($protocolVersion && $this->sessionId) {
-                        $this->storage->storeSession($this->sessionId, ['protocol_version' => $protocolVersion]);
+                        $sessionData = [
+                            'protocol_version' => $protocolVersion,
+                            'initialized_at' => time(),
+                            'authless' => $isAuthless
+                        ];
+
+                        $stored = $this->storage->storeSession($this->sessionId, $sessionData);
+
+                        $this->logger->info(
+                            'MCP session initialized and stored',
+                            [
+                                'session_id' => $this->sessionId,
+                                'protocol_version' => $protocolVersion,
+                                'authless' => $isAuthless,
+                                'storage_success' => $stored,
+                                'session_data' => $sessionData
+                            ]
+                        );
+
+                        // Verify storage worked
+                        $retrieved = $this->storage->getSession($this->sessionId);
+                        if (!$retrieved) {
+                            $this->logger->error('Session storage failed - could not retrieve immediately after storing', [
+                                'session_id' => $this->sessionId
+                            ]);
+                        }
                     }
                 }
 
@@ -104,9 +135,15 @@ class MCPSaaSServer
             }
 
             if ($request->getMethod() === 'GET') {
-                if (empty($this->contextData) && !($this->config['authless'] ?? false)) {
+                // For authless mode, ensure we have minimal context
+                if ($isAuthless && empty($this->contextData)) {
+                    $this->contextData = $this->getDefaultAuthlessContext($request);
+                }
+
+                if (empty($this->contextData) && !$isAuthless) {
                     throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
                 }
+
                 $this->sessionId = $this->negotiateSessionId($request);
                 $protocolVersion = $this->getSessionProtocolVersion($request);
                 return $this->handleStreamConnection($request, $response, $protocolVersion);
@@ -127,7 +164,8 @@ class MCPSaaSServer
                 'Protocol error',
                 [
                 'code' => $e->getCode(),
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
+                'session_id' => $this->sessionId
                 ]
             );
             return $this->createErrorResponse($response, $e->getCode(), 'Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT.');
@@ -140,6 +178,193 @@ class MCPSaaSServer
             );
             return $this->createErrorResponse($response, -32603, 'Internal error');
         }
+    }
+
+    /**
+     * Get default authless context when none is provided
+     */
+    private function getDefaultAuthlessContext(Request $request): array
+    {
+        return [
+            'context_data' => [
+                'id' => 1,
+                'uuid' => 'authless-public',
+                'name' => 'Authless Public Access',
+                'active' => true,
+                'context_type' => 'public'
+            ],
+            'token_data' => [
+                'user_id' => 1,
+                'scope' => 'mcp:read mcp:write',
+                'access_token' => 'authless-access',
+                'expires_at' => time() + 86400
+            ],
+            'context_id' => 'authless-public',
+            'base_url' => $this->getBaseUrl($request),
+            'protocol_version' => '2025-06-18',
+            'authless' => true
+        ];
+    }
+
+    /**
+     * Session ID negotiation for MCP protocol
+     */
+    private function negotiateSessionId(Request $request, ?array $data = null): ?string
+    {
+        $method = $request->getMethod();
+        $isAuthless = $this->config['authless'] ?? false;
+
+        // Check for existing session ID in header or route
+        $existingSessionId = $this->extractSessionIdFromRequest($request);
+
+        // Debug logging
+        $this->logger->debug('Session negotiation start', [
+            'method' => $method,
+            'existing_session_id' => $existingSessionId,
+            'request_method' => $data['method'] ?? 'unknown'
+        ]);
+
+        if ($method === 'GET') {
+            // GET requires existing session ID
+            if (!$existingSessionId) {
+                throw new ProtocolException('Session ID required for GET requests', -32001);
+            }
+
+            // Verify session exists in storage
+            $sessionData = $this->storage->getSession($existingSessionId);
+            if (!$sessionData) {
+                throw new ProtocolException('Invalid or expired session ID', -32001);
+            }
+
+            return $existingSessionId;
+        }
+
+        if ($method === 'POST') {
+            // Check if this is an initialize request first
+            if (($data['method'] ?? '') === 'initialize') {
+                $newSessionId = $this->generateSessionId();
+                $this->logger->info('New MCP session created', [
+                    'session_id' => $newSessionId,
+                    'context' => $this->contextData,
+                    'authless' => $isAuthless
+                ]);
+                return $newSessionId;
+            }
+
+            // For non-initialize requests, we need a valid existing session
+            if (!$existingSessionId) {
+                $this->logger->warning('No session ID found in request', [
+                    'method' => $data['method'] ?? 'unknown',
+                    'headers' => array_keys($request->getHeaders())
+                ]);
+                throw new ProtocolException('Session ID required for non-initialize requests', -32001);
+            }
+
+            // Verify session exists in storage
+            $sessionData = $this->storage->getSession($existingSessionId);
+            if (!$sessionData) {
+                $this->logger->warning('Session not found in storage', [
+                    'session_id' => $existingSessionId,
+                    'method' => $data['method'] ?? 'unknown'
+                ]);
+                throw new ProtocolException('Invalid or expired session ID', -32001);
+            }
+
+            $this->logger->debug('Valid session found', [
+                'session_id' => $existingSessionId,
+                'session_data' => $sessionData
+            ]);
+
+            return $existingSessionId;
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract session ID from request headers or route parameters
+     */
+    private function extractSessionIdFromRequest(Request $request): ?string
+    {
+        // Check headers first (case-insensitive)
+        foreach ($request->getHeaders() as $name => $values) {
+            if (strtolower($name) === 'mcp-session-id') {
+                return $values[0];
+            }
+        }
+
+        // Check route parameters with multiple methods
+        $route = $request->getAttribute('__route__');
+        if ($route && method_exists($route, 'getArgument')) {
+            $routeSessionId = $route->getArgument('sessID');
+            if ($routeSessionId) {
+                return $routeSessionId;
+            }
+        }
+
+        // Also check direct route arguments (Slim 4 compatibility)
+        $routeArgs = $request->getAttribute('routeInfo')[2] ?? [];
+        if (isset($routeArgs['sessID'])) {
+            return $routeArgs['sessID'];
+        }
+
+        // Check URI path directly as fallback
+        $path = $request->getUri()->getPath();
+        if (preg_match('#/mcp-repo/([a-zA-Z0-9]+)#', $path, $matches)) {
+            return $matches[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * Get base URL from request with fallback
+     */
+    private function getBaseUrl(Request $request): string
+    {
+        // First try to get from config (for tests and when explicitly set)
+        if (!empty($this->config['base_url'])) {
+            return $this->config['base_url'];
+        }
+
+        // Extract from request URI
+        $uri = $request->getUri();
+        $scheme = $uri->getScheme() ?: 'https';
+        $host = $uri->getHost() ?: 'localhost';
+        $port = $uri->getPort();
+
+        $baseUrl = $scheme . '://' . $host;
+        if ($port && (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443))) {
+            $baseUrl .= ':' . $port;
+        }
+
+        return $baseUrl;
+    }
+
+    /**
+     * Extract protocol version from initialize message (POST requests only)
+     */
+    private function extractProtocolFromInitialize(Request $request, ?array $parsedData = null): ?string
+    {
+        if ($request->getMethod() !== 'POST') {
+            return null;
+        }
+
+        $data = $parsedData;
+
+        // Only read body if we don't have pre-parsed data
+        if ($data === null) {
+            $body = (string) $request->getBody();
+            if (!empty($body)) {
+                $data = json_decode($body, true);
+            }
+        }
+
+        if ($data && isset($data['method']) && $data['method'] === 'initialize' && isset($data['params']['protocolVersion'])) {
+            return $data['params']['protocolVersion'];
+        }
+
+        return null;
     }
 
     /**
@@ -167,78 +392,11 @@ class MCPSaaSServer
     }
 
     /**
-     * Extract protocol version from initialize message (POST requests only)
-     */
-    private function extractProtocolFromInitialize(Request $request): ?string
-    {
-        if ($request->getMethod() !== 'POST') {
-            return null;
-        }
-
-        $body = (string) $request->getBody();
-        if (!empty($body)) {
-            $data = json_decode($body, true);
-            if (isset($data['method']) && $data['method'] === 'initialize' && isset($data['params']['protocolVersion'])) {
-                return $data['params']['protocolVersion'];
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * Determine which transport to use based on protocol version
      */
     private function shouldUseStreamableHTTP(string $protocolVersion): bool
     {
         return in_array($protocolVersion, ['2025-03-26', '2025-06-18']);
-    }
-
-    /**
-     * Session ID negotiation per MCP 2024 HTTP+SSE specification
-     */
-    private function negotiateSessionId(Request $request, ?array $data = null): ?string
-    {
-        $method = $request->getMethod();
-
-        // Check for existing session ID in header
-        $existingSessionId = $this->extractSessionIdFromRequest($request);
-
-        if ($method === 'GET') {
-            // GET requires existing session ID
-            if (!$existingSessionId) {
-                throw new ProtocolException('Session ID required for GET requests', -32001);
-            }
-            return $existingSessionId;
-        }
-
-        if ($method === 'POST') {
-            // Return existing session if available
-            if ($existingSessionId) {
-                return $existingSessionId;
-            }
-
-            // Check if this is an initialize request
-            $body = (string) $request->getBody();
-            $data = json_decode($body, true);
-
-            if (($data['method'] ?? '') === 'initialize') {
-                $newSessionId = $this->generateSessionId();
-                $this->logger->info(
-                    'New MCP session created',
-                    [
-                    'session_id' => $newSessionId,
-                    'context' => $this->contextData
-                    ]
-                );
-                return $newSessionId;
-            }
-
-            // Non-initialize POST without session
-            throw new ProtocolException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Session required', -32001);
-        }
-
-        return null;
     }
 
     /**
@@ -278,20 +436,17 @@ class MCPSaaSServer
      */
     private function handleMCPRequest(Request $request, Response $response, ?array $data = null): Response
     {
+        // At this point, $data should always be parsed and valid, but let's be defensive
         if ($data === null) {
-            $body = (string) $request->getBody();
-            $data = json_decode($body, true);
-
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                throw new ProtocolException('Parse error', -32700);
-            }
+            throw new ProtocolException('No request data provided', -32600);
         }
 
         $this->logger->debug(
             'Processing MCP request',
             [
             'method' => $data['method'] ?? 'unknown',
-            'session_id' => $this->sessionId
+            'session_id' => $this->sessionId,
+            'authless' => $this->config['authless'] ?? false
             ]
         );
 
@@ -341,30 +496,6 @@ class MCPSaaSServer
     }
 
     /**
-     * Extract session ID from request headers or route
-     */
-    private function extractSessionIdFromRequest(Request $request): ?string
-    {
-        // Check headers first (case-insensitive)
-        foreach ($request->getHeaders() as $name => $values) {
-            if (strtolower($name) === 'mcp-session-id') {
-                return $values[0];
-            }
-        }
-
-        // Check route parameters as fallback
-        $route = $request->getAttribute('__route__');
-        if ($route && method_exists($route, 'getArgument')) {
-            $routeSessionId = $route->getArgument('sessID');
-            if ($routeSessionId) {
-                return $routeSessionId;
-            }
-        }
-
-        return null;
-    }
-
-    /**
      * Generate a new session ID
      */
     private function generateSessionId(): string
@@ -398,168 +529,29 @@ class MCPSaaSServer
             ->withStatus($httpStatus);
     }
 
-    /**
-     * Add a tool to the registry
-     */
     public function addTool(string $name, callable $handler, array $schema = []): void
     {
         $this->toolRegistry->register($name, $handler, $schema);
     }
 
-    /**
-     * Add a prompt to the registry
-     */
     public function addPrompt(string $name, callable $handler, array $schema = []): void
     {
         $this->promptRegistry->register($name, $handler, $schema);
     }
 
-    /**
-     * Add a resource to the registry
-     */
     public function addResource(string $uri, callable $handler, array $schema = []): void
     {
         $this->resourceRegistry->register($uri, $handler, $schema);
     }
 
-    /**
-     * Add a resource template to the registry
-     */
     public function addResourceTemplate(string $uriTemplate, callable $handler, array $schema = []): void
     {
         $this->resourceRegistry->registerTemplate($uriTemplate, $handler, $schema);
     }
 
-    /**
-     * Set context data (typically from middleware)
-     */
     public function setContext(array $contextData): void
     {
         $this->contextData = $contextData;
-    }
-
-    /**
-     * Request LLM sampling from connected client
-     */
-    public function requestSampling(
-        string $sessionId,
-        array $messages,
-        array $options = []
-    ): string {
-        return $this->messageHandler->requestSampling(
-            $sessionId,
-            $messages,
-            $options,
-            $this->contextData ?? []
-        );
-    }
-
-    /**
-     * Request structured user input via elicitation (2025-06-18 feature)
-     */
-    public function requestElicitation(
-        string $sessionId,
-        string $message,
-        ?array $requestedSchema = null,
-        array $context = []
-    ): string {
-        return $this->messageHandler->requestElicitation(
-            $sessionId,
-            $message,
-            $requestedSchema,
-            $context
-        );
-    }
-
-    /**
-     * Get elicitation response by request ID
-     */
-    public function getElicitationResponse(string $sessionId, string $requestId): ?array
-    {
-        return $this->storage->getElicitationResponse($sessionId, $requestId);
-    }
-
-    /**
-     * Get all elicitation responses for session
-     */
-    public function getElicitationResponses(string $sessionId): array
-    {
-        return $this->storage->getElicitationResponses($sessionId);
-    }
-
-    /**
-     * Get sampling response by request ID
-     */
-    public function getSamplingResponse(string $sessionId, string $requestId): ?array
-    {
-        return $this->storage->getSamplingResponse($sessionId, $requestId);
-    }
-
-    /**
-     * Get all sampling responses for session
-     */
-    public function getSamplingResponses(string $sessionId): array
-    {
-        return $this->storage->getSamplingResponses($sessionId);
-    }
-
-    /**
-     * Request list of available filesystem roots from client
-     */
-    public function requestRootsList(string $sessionId): string
-    {
-        return $this->messageHandler->requestRootsList(
-            $sessionId,
-            $this->contextData ?? []
-        );
-    }
-
-    /**
-     * Request file/directory read from client filesystem
-     */
-    public function requestRootsRead(
-        string $sessionId,
-        string $uri,
-        array $options = []
-    ): string {
-        return $this->messageHandler->requestRootsRead(
-            $sessionId,
-            $uri,
-            $options,
-            $this->contextData ?? []
-        );
-    }
-
-    /**
-     * Request directory listing from client filesystem
-     */
-    public function requestRootsListDirectory(
-        string $sessionId,
-        string $uri,
-        array $options = []
-    ): string {
-        return $this->messageHandler->requestRootsListDirectory(
-            $sessionId,
-            $uri,
-            $options,
-            $this->contextData ?? []
-        );
-    }
-
-    /**
-     * Get roots response by request ID
-     */
-    public function getRootsResponse(string $sessionId, string $requestId): ?array
-    {
-        return $this->storage->getRootsResponse($sessionId, $requestId);
-    }
-
-    /**
-     * Get all roots responses for session
-     */
-    public function getRootsResponses(string $sessionId): array
-    {
-        return $this->storage->getRootsResponses($sessionId);
     }
 
     /**
@@ -587,7 +579,9 @@ class MCPSaaSServer
             'resource_server' => true,
             'resource_indicators_supported' => true,
             'resource_indicator' => null
-        ]
+        ],
+        'authless' => false,
+        'base_url' => null
         ];
     }
 }

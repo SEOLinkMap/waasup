@@ -12,19 +12,20 @@ use Seolinkmap\Waasup\Tests\TestCase;
 class MCPSaaSServerTest extends TestCase
 {
     private MCPSaaSServer $server;
+    private $storage; // Keep reference to storage for debugging
 
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->logger = $this->createMockLogger();
-        $storage = $this->createTestStorage();
+        $this->storage = $this->createTestStorage(); // Store reference
         $toolRegistry = $this->createTestToolRegistry();
         $promptRegistry = $this->createTestPromptRegistry();
         $resourceRegistry = $this->createTestResourceRegistry();
 
         $this->server = new MCPSaaSServer(
-            $storage,
+            $this->storage,
             $toolRegistry,
             $promptRegistry,
             $resourceRegistry,
@@ -40,6 +41,53 @@ class MCPSaaSServerTest extends TestCase
             ],
             $this->logger
         );
+    }
+
+    /**
+     * Create a fresh session for each test that needs one - more reliable than reusing
+     */
+    private function createFreshSession(): string
+    {
+        $initializeRequest = [
+            'jsonrpc' => '2.0',
+            'method' => 'initialize',
+            'params' => [
+                'protocolVersion' => '2024-11-05',
+                'capabilities' => [],
+                'clientInfo' => [
+                    'name' => 'Test Client',
+                    'version' => '1.0.0'
+                ]
+            ],
+            'id' => rand(1, 1000) // Use random ID to avoid conflicts
+        ];
+
+        $request = $this->createRequest(
+            'POST',
+            '/mcp/550e8400-e29b-41d4-a716-446655440000',
+            ['Content-Type' => 'application/json'],
+            json_encode($initializeRequest)
+        );
+        $request = $request->withAttribute('mcp_context', $this->createTestContext());
+
+        $response = $this->server->handle($request, $this->createResponse());
+
+        // Extract session ID from response header
+        $sessionId = $response->getHeaderLine('Mcp-Session-Id');
+        $this->assertNotEmpty($sessionId, 'Session ID should be returned from initialize');
+
+        // CRITICAL: Verify session was actually stored and is retrievable
+        $storedSession = $this->storage->getSession($sessionId);
+        $this->assertNotNull($storedSession, 'Session should be stored and retrievable after initialize');
+
+        // Add extra verification
+        $this->assertArrayHasKey('protocol_version', $storedSession, 'Session should have protocol_version');
+        $this->assertEquals('2024-11-05', $storedSession['protocol_version'], 'Protocol version should match');
+
+        // Debug output
+        error_log("DEBUG: Created session {$sessionId} with data: " . json_encode($storedSession));
+
+        return $sessionId;
     }
 
     protected function createMockLogger(): \Psr\Log\LoggerInterface
@@ -139,6 +187,21 @@ class MCPSaaSServerTest extends TestCase
         $this->assertJsonRpcError($response, -32001);
     }
 
+    public function testHandleGetWithValidSessionId(): void
+    {
+        $sessionId = $this->createFreshSession();
+
+        $request = $this->createRequest('GET', '/mcp/550e8400-e29b-41d4-a716-446655440000');
+        $request = $request->withHeader('Mcp-Session-Id', $sessionId);
+        $request = $request->withAttribute('mcp_context', $this->createTestContext());
+
+        $response = $this->server->handle($request, $this->createResponse());
+
+        // SSE connection should be established (200 status with event-stream content-type)
+        $this->assertEquals(200, $response->getStatusCode());
+        $this->assertEquals('text/event-stream', $response->getHeaderLine('Content-Type'));
+    }
+
     public function testHandlePostInitializeRequest(): void
     {
         $initializeRequest = [
@@ -212,6 +275,13 @@ class MCPSaaSServerTest extends TestCase
 
     public function testHandlePostPingWithSession(): void
     {
+        // Create a fresh session just for this test
+        $sessionId = $this->createFreshSession();
+
+        // Double-check the session exists right before we use it
+        $sessionData = $this->storage->getSession($sessionId);
+        $this->assertNotNull($sessionData, 'Session should exist right before ping test');
+
         $pingRequest = [
             'jsonrpc' => '2.0',
             'method' => 'ping',
@@ -223,13 +293,19 @@ class MCPSaaSServerTest extends TestCase
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             [
                 'Content-Type' => 'application/json',
-                'Mcp-Session-Id' => 'session123'
+                'Mcp-Session-Id' => $sessionId
             ],
             json_encode($pingRequest)
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
         $response = $this->server->handle($request, $this->createResponse());
+
+        // If this fails, let's get more info about what went wrong
+        if ($response->getStatusCode() !== 202) {
+            $body = (string) $response->getBody();
+            $this->fail("Expected 202 but got {$response->getStatusCode()}. Response body: {$body}. Session exists: " . ($this->storage->getSession($sessionId) ? 'YES' : 'NO'));
+        }
 
         $this->assertEquals(202, $response->getStatusCode());
         $body = (string) $response->getBody();
@@ -239,6 +315,8 @@ class MCPSaaSServerTest extends TestCase
 
     public function testHandlePostToolsListWithSession(): void
     {
+        $sessionId = $this->createFreshSession();
+
         $toolsRequest = [
             'jsonrpc' => '2.0',
             'method' => 'tools/list',
@@ -250,9 +328,9 @@ class MCPSaaSServerTest extends TestCase
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             [
                 'Content-Type' => 'application/json',
-                'Mcp-Session-Id' => 'session123'
+                'Mcp-Session-Id' => $sessionId
             ],
-            json_encode($toolsRequest)
+            json_encode($toolsCallRequest)
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -266,6 +344,8 @@ class MCPSaaSServerTest extends TestCase
 
     public function testHandlePostPromptsListWithSession(): void
     {
+        $sessionId = $this->createFreshSession();
+
         $promptsRequest = [
             'jsonrpc' => '2.0',
             'method' => 'prompts/list',
@@ -277,7 +357,7 @@ class MCPSaaSServerTest extends TestCase
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             [
                 'Content-Type' => 'application/json',
-                'Mcp-Session-Id' => 'session123'
+                'Mcp-Session-Id' => $sessionId
             ],
             json_encode($promptsRequest)
         );
@@ -293,6 +373,8 @@ class MCPSaaSServerTest extends TestCase
 
     public function testHandlePostResourcesListWithSession(): void
     {
+        $sessionId = $this->createFreshSession();
+
         $resourcesRequest = [
             'jsonrpc' => '2.0',
             'method' => 'resources/list',
@@ -304,7 +386,7 @@ class MCPSaaSServerTest extends TestCase
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             [
                 'Content-Type' => 'application/json',
-                'Mcp-Session-Id' => 'session123'
+                'Mcp-Session-Id' => $sessionId
             ],
             json_encode($resourcesRequest)
         );
@@ -320,6 +402,14 @@ class MCPSaaSServerTest extends TestCase
 
     public function testHandlePostToolsCallWithSession(): void
     {
+        $sessionId = $this->createFreshSession();
+
+        // Debug: Verify session still exists
+        $sessionExists = $this->storage->getSession($sessionId);
+        if (!$sessionExists) {
+            $this->fail("Session {$sessionId} was lost after creation");
+        }
+
         $toolsCallRequest = [
             'jsonrpc' => '2.0',
             'method' => 'tools/call',
@@ -335,13 +425,20 @@ class MCPSaaSServerTest extends TestCase
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             [
                 'Content-Type' => 'application/json',
-                'Mcp-Session-Id' => 'session123'
+                'Mcp-Session-Id' => $sessionId
             ],
-            json_encode($toolsCallRequest)
+            json_encode($toolsCallRequest)  // Fixed variable name
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
         $response = $this->server->handle($request, $this->createResponse());
+
+        // Debug if it fails
+        if ($response->getStatusCode() !== 202) {
+            $body = (string) $response->getBody();
+            $sessionStillExists = $this->storage->getSession($sessionId) ? 'YES' : 'NO';
+            $this->fail("Expected 202 but got {$response->getStatusCode()}. Response: {$body}. Session exists: {$sessionStillExists}. Session ID: {$sessionId}");
+        }
 
         $this->assertEquals(202, $response->getStatusCode());
         $body = (string) $response->getBody();
@@ -361,6 +458,31 @@ class MCPSaaSServerTest extends TestCase
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             ['Content-Type' => 'application/json'],
+            json_encode($pingRequest)
+        );
+        $request = $request->withAttribute('mcp_context', $this->createTestContext());
+
+        $response = $this->server->handle($request, $this->createResponse());
+
+        $this->assertEquals(400, $response->getStatusCode());
+        $this->assertJsonRpcError($response, -32001);
+    }
+
+    public function testHandlePostWithInvalidSession(): void
+    {
+        $pingRequest = [
+            'jsonrpc' => '2.0',
+            'method' => 'ping',
+            'id' => 1
+        ];
+
+        $request = $this->createRequest(
+            'POST',
+            '/mcp/550e8400-e29b-41d4-a716-446655440000',
+            [
+                'Content-Type' => 'application/json',
+                'Mcp-Session-Id' => 'invalid-session-id'
+            ],
             json_encode($pingRequest)
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
@@ -395,6 +517,13 @@ class MCPSaaSServerTest extends TestCase
 
     public function testAddTool(): void
     {
+        // Create fresh session for this test
+        $sessionId = $this->createFreshSession();
+
+        // Double-check the session exists
+        $sessionData = $this->storage->getSession($sessionId);
+        $this->assertNotNull($sessionData, 'Session should exist right before add tool test');
+
         $this->server->addTool(
             'custom_tool',
             function ($params, $context) {
@@ -430,13 +559,19 @@ class MCPSaaSServerTest extends TestCase
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             [
                 'Content-Type' => 'application/json',
-                'Mcp-Session-Id' => 'session123'
+                'Mcp-Session-Id' => $sessionId
             ],
             json_encode($toolsRequest)
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
         $response = $this->server->handle($request, $this->createResponse());
+
+        // If this fails, let's get more info
+        if ($response->getStatusCode() !== 202) {
+            $body = (string) $response->getBody();
+            $this->fail("Expected 202 but got {$response->getStatusCode()}. Response body: {$body}. Session exists: " . ($this->storage->getSession($sessionId) ? 'YES' : 'NO'));
+        }
 
         $this->assertEquals(202, $response->getStatusCode());
     }
@@ -559,7 +694,9 @@ class MCPSaaSServerTest extends TestCase
 
     public function testUnexpectedExceptionHandling(): void
     {
-        $storage = $this->createTestStorage();
+        $sessionId = $this->createFreshSession();
+
+        // Use the same storage instance to avoid conflicts
         $toolRegistry = $this->createTestToolRegistry();
         $promptRegistry = $this->createTestPromptRegistry();
         $resourceRegistry = $this->createTestResourceRegistry();
@@ -572,7 +709,7 @@ class MCPSaaSServerTest extends TestCase
         );
 
         $brokenServer = new MCPSaaSServer(
-            $storage,
+            $this->storage, // Use same storage instance
             $toolRegistry,
             $promptRegistry,
             $resourceRegistry,
@@ -589,7 +726,7 @@ class MCPSaaSServerTest extends TestCase
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
             [
                 'Content-Type' => 'application/json',
-                'Mcp-Session-Id' => 'session123'
+                'Mcp-Session-Id' => $sessionId
             ],
             json_encode(
                 [
@@ -661,5 +798,103 @@ class MCPSaaSServerTest extends TestCase
         $this->assertEquals('*', $response->getHeaderLine('Access-Control-Allow-Origin'));
         $this->assertStringContainsString('Authorization', $response->getHeaderLine('Access-Control-Allow-Headers'));
         $this->assertStringContainsString('POST, GET, OPTIONS', $response->getHeaderLine('Access-Control-Allow-Methods'));
+    }
+
+    public function testHandlePostToolsListWithSessionDEBUG(): void
+    {
+        // Create fresh session and verify it works
+        $sessionId = $this->createFreshSession();
+        $sessionExists = $this->storage->getSession($sessionId);
+        $this->assertNotNull($sessionExists, "Session should exist after creation");
+
+        echo "\n=== DEBUG TOOLS LIST TEST ===\n";
+        echo "Session ID: {$sessionId}\n";
+        echo "Session data: " . json_encode($sessionExists) . "\n";
+
+        // Test the exact same request that's failing
+        $toolsRequest = [
+            'jsonrpc' => '2.0',
+            'method' => 'tools/list',
+            'id' => 2
+        ];
+
+        echo "Request JSON: " . json_encode($toolsRequest) . "\n";
+
+        $request = $this->createRequest(
+            'POST',
+            '/mcp/550e8400-e29b-41d4-a716-446655440000',
+            [
+                'Content-Type' => 'application/json',
+                'Mcp-Session-Id' => $sessionId
+            ],
+            json_encode($toolsRequest)
+        );
+        $request = $request->withAttribute('mcp_context', $this->createTestContext());
+
+        // Show all headers
+        echo "Request headers:\n";
+        foreach ($request->getHeaders() as $name => $values) {
+            echo "  {$name}: " . implode(', ', $values) . "\n";
+        }
+
+        // Verify session still exists right before request
+        $sessionStillExists = $this->storage->getSession($sessionId);
+        echo "Session exists before request: " . ($sessionStillExists ? 'YES' : 'NO') . "\n";
+
+        // Make the request
+        $response = $this->server->handle($request, $this->createResponse());
+
+        $statusCode = $response->getStatusCode();
+        $responseBody = (string) $response->getBody();
+
+        echo "Response status: {$statusCode}\n";
+        echo "Response body: {$responseBody}\n";
+        echo "Response headers:\n";
+        foreach ($response->getHeaders() as $name => $values) {
+            echo "  {$name}: " . implode(', ', $values) . "\n";
+        }
+
+        // If it's a 400, decode the error
+        if ($statusCode === 400) {
+            $errorData = json_decode($responseBody, true);
+            echo "ERROR DETAILS:\n";
+            echo "  Code: " . ($errorData['error']['code'] ?? 'unknown') . "\n";
+            echo "  Message: " . ($errorData['error']['message'] ?? 'unknown') . "\n";
+            echo "  ID: " . ($errorData['id'] ?? 'unknown') . "\n";
+        }
+
+        echo "=== END DEBUG ===\n";
+
+        // Now compare with a working tools/call request
+        echo "\n=== COMPARE WITH WORKING TOOLS/CALL ===\n";
+
+        $toolsCallRequest = [
+            'jsonrpc' => '2.0',
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'test_tool',
+                'arguments' => ['message' => 'test message']
+            ],
+            'id' => 3
+        ];
+
+        $callRequest = $this->createRequest(
+            'POST',
+            '/mcp/550e8400-e29b-41d4-a716-446655440000',
+            [
+                'Content-Type' => 'application/json',
+                'Mcp-Session-Id' => $sessionId
+            ],
+            json_encode($toolsCallRequest)
+        );
+        $callRequest = $callRequest->withAttribute('mcp_context', $this->createTestContext());
+
+        $callResponse = $this->server->handle($callRequest, $this->createResponse());
+
+        echo "Tools/call status: " . $callResponse->getStatusCode() . "\n";
+        echo "Tools/call body: " . (string) $callResponse->getBody() . "\n";
+
+        // Fail with detailed info
+        $this->fail("Tools/list returned {$statusCode} instead of 202. See debug output above.");
     }
 }
