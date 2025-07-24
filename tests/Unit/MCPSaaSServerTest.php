@@ -330,7 +330,7 @@ class MCPSaaSServerTest extends TestCase
                 'Content-Type' => 'application/json',
                 'Mcp-Session-Id' => $sessionId
             ],
-            json_encode($toolsCallRequest)
+            json_encode($toolsRequest)  // Fixed: was $toolsCallRequest, now $toolsRequest
         );
         $request = $request->withAttribute('mcp_context', $this->createTestContext());
 
@@ -894,7 +894,10 @@ class MCPSaaSServerTest extends TestCase
         echo "Tools/call status: " . $callResponse->getStatusCode() . "\n";
         echo "Tools/call body: " . (string) $callResponse->getBody() . "\n";
 
-        // Fail with detailed info
-        $this->fail("Tools/list returned {$statusCode} instead of 202. See debug output above.");
+        // Since this is a debug test that's designed to show output, we expect it to work
+        $this->assertEquals(202, $statusCode, "Tools/list should return 202");
+
+        $data = json_decode($responseBody, true);
+        $this->assertEquals('queued', $data['status'] ?? null, "Response should contain queued status");
     }
 }
