@@ -111,7 +111,7 @@ class MCPSaaSServer
                     // Create the combined sessionID with protocol version
                     $this->sessionId = $protocolVersion . '_' . $this->sessionId;
 
-                    return $this->messageHandler->handleInitialize($data['params'] ?? [], $data['id'] ?? null, $this->sessionId, $response);
+                    return $this->messageHandler->handleInitialize($data['params'] ?? [], $data['id'] ?? null, $this->sessionId, $protocolVersion, $response);
                 }
 
                 if (($data['method'] ?? '') === 'initialize') {

@@ -371,19 +371,20 @@ class MessageHandler
         }
     }
 
-    public function handleInitialize(array $params, mixed $id, ?string $sessionId, Response $response): Response
+    public function handleInitialize(array $params, mixed $id, ?string $sessionId, $selectedVersion, Response $response): Response
     {
-        $selectedVersion = $params['protocolVersion'] ?? null;
         if ($sessionId) {
             $this->storeSessionVersion($sessionId, $selectedVersion);
         }
 
         $serverInfo = $this->config['server_info'] ?? [
         'name' => 'WaaSuP MCP SaaS Server',
-        'version' => '0.0.7'
+        'version' => '1.1.0'
         ];
 
-        $capabilities = [];
+        $capabilities = [
+            'logging' => new \stdClass()
+        ];
 
         if ($this->isFeatureSupported('tools', $selectedVersion)) {
             $capabilities['tools'] = ['listChanged' => true];
@@ -394,19 +395,19 @@ class MessageHandler
         }
 
         if ($this->isFeatureSupported('resources', $selectedVersion)) {
-            $capabilities['resources'] = ['subscribe' => false, 'listChanged' => true];
+            $capabilities['resources'] = ['subscribe' => true, 'listChanged' => true];
         }
 
         if ($this->isFeatureSupported('completions', $selectedVersion)) {
-            $capabilities['completions'] = true;
+            $capabilities['completions'] = new \stdClass();
         }
 
         if ($this->isFeatureSupported('elicitation', $selectedVersion)) {
-            $capabilities['elicitation'] = (object)[];
+            $capabilities['elicitation'] = new \stdClass();
         }
 
         if ($this->isFeatureSupported('sampling', $selectedVersion)) {
-            $capabilities['sampling'] = (object)[];
+            $capabilities['sampling'] = new \stdClass();
         }
 
         if ($this->isFeatureSupported('roots', $selectedVersion)) {
