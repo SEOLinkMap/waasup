@@ -159,9 +159,9 @@ class MCPSaaSServer
                         $capabilities['completions'] = true;
                     }
                     if ($protocolVersion === '2025-06-18') {
-                        $capabilities['elicitation'] = true;
+                        $capabilities['elicitation'] = (object)[];
                     }
-                    $capabilities['sampling'] = [];
+                    $capabilities['sampling'] = (object)[];
                     $capabilities['roots'] = ['listChanged' => true];
 
                     $result = [
