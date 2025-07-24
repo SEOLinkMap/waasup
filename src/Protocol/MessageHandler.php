@@ -640,20 +640,51 @@ class MessageHandler
         return $this->storeSuccessResponse($sessionId, ['received' => true], $id, $response);
     }
 
-    // @todo the main server sets protocol_version. This does not set protocol version. This is breaking the repo
+        /**
+     * Get protocol version from session data (authoritative source)
+     */
     private function getSessionVersion(?string $sessionId): string
     {
         if (!$sessionId) {
-            return '2024-11-05';
+            throw new ProtocolException('Session required', -32001);
         }
 
         $sessionData = $this->storage->getSession($sessionId);
-        return $sessionData['protocol_version'] ?? '2024-11-05';
+
+        if (!$sessionData) {
+            throw new ProtocolException('Invalid or expired session ID', -32001);
+        }
+
+        // Use stored protocol version as authoritative source
+        if (isset($sessionData['protocol_version'])) {
+            return $sessionData['protocol_version'];
+        }
+
+        // Fallback to extracting from sessionId format (protocolVersion_sessionId)
+        if (strpos($sessionId, '_') !== false) {
+            $parts = explode('_', $sessionId, 2);
+            if (count($parts) === 2 && in_array($parts[0], $this->config['supported_versions'] ?? [])) {
+                return $parts[0];
+            }
+        }
+
+        throw new ProtocolException('No protocol version found in session', -32001);
     }
 
+    /**
+     * Store protocol version in session data
+     */
     private function storeSessionVersion(string $sessionId, string $version): void
     {
-        $sessionData = ['protocol_version' => $version, 'initialized_at' => time()];
+        // Get existing session data to preserve other values
+        $existingData = $this->storage->getSession($sessionId) ?? [];
+
+        // Update with new protocol version
+        $sessionData = array_merge($existingData, [
+            'protocol_version' => $version,
+            'updated_at' => time()
+        ]);
+
         $this->storage->storeSession($sessionId, $sessionData);
     }
 
