@@ -371,22 +371,16 @@ class MessageHandler
         }
     }
 
-    private function handleInitialize(array $params, mixed $id, ?string $sessionId, Response $response): Response
+    public function handleInitialize(array $params, mixed $id, ?string $sessionId, Response $response): Response
     {
-        $clientProtocolVersion = $params['protocolVersion'] ?? null;
-        if ($clientProtocolVersion === null) {
-            throw new ProtocolException('Invalid params: protocolVersion required', -32602);
-        }
-
-        $selectedVersion = $this->versionNegotiator->negotiate($clientProtocolVersion);
-
+        $selectedVersion = $params['protocolVersion'] ?? null;
         if ($sessionId) {
             $this->storeSessionVersion($sessionId, $selectedVersion);
         }
 
         $serverInfo = $this->config['server_info'] ?? [
         'name' => 'WaaSuP MCP SaaS Server',
-        'version' => '1.1.0'
+        'version' => '0.0.7'
         ];
 
         $capabilities = [];
@@ -408,11 +402,11 @@ class MessageHandler
         }
 
         if ($this->isFeatureSupported('elicitation', $selectedVersion)) {
-            $capabilities['elicitation'] = true;
+            $capabilities['elicitation'] = (object)[];
         }
 
         if ($this->isFeatureSupported('sampling', $selectedVersion)) {
-            $capabilities['sampling'] = [];
+            $capabilities['sampling'] = (object)[];
         }
 
         if ($this->isFeatureSupported('roots', $selectedVersion)) {

@@ -111,6 +111,22 @@ class MCPSaaSServer
                     // Create the combined sessionID with protocol version
                     $this->sessionId = $protocolVersion . '_' . $this->sessionId;
 
+                    return $this->messageHandler->handleInitialize($data['params'] ?? [], $data['id'] ?? null, $this->sessionId, $response);
+                }
+
+                if (($data['method'] ?? '') === 'initialize') {
+                    // negotiate the protocol
+                    $clientProtocolVersion = $data['params']['protocolVersion'] ?? null;
+                    if (!$clientProtocolVersion) {
+                        throw new ProtocolException('Invalid params: protocolVersion required', -32602);
+                    }
+
+                    // This is where we negotiate the protocol
+                    $protocolVersion = $this->versionNegotiator->negotiate($clientProtocolVersion);
+
+                    // Create the combined sessionID with protocol version
+                    $this->sessionId = $protocolVersion . '_' . $this->sessionId;
+
                     if ($protocolVersion && $this->sessionId) {
                         $sessionData = [
                             'protocol_version' => $protocolVersion,
