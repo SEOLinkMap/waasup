@@ -121,7 +121,7 @@ class StreamableHTTPTransport implements TransportInterface
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
             $this->logger->debug("DEBUG StreamableHTTP polling loop iteration");
 
-            $this->sendKeepalive($body);
+
 
             if (connection_aborted()) {
                 // Client (or other player) ended the connection
@@ -133,6 +133,8 @@ class StreamableHTTPTransport implements TransportInterface
                 $startTime = time();
                 // Reset the server lifetime
                 $endTime = $startTime + $maxTime;
+            } else {
+                $this->sendKeepalive($body);
             }
 
             // Kick down the polling schedule since there has been no messaging for a little bit
