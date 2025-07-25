@@ -428,7 +428,7 @@ class MCPSaaSServer
             'context' => $this->contextData
             ]
         );
-
+        error_log("DEBUG MCPSaaSServer shouldUseStreamableHTTP for '{$protocolVersion}': " . ($this->shouldUseStreamableHTTP($protocolVersion) ? 'true' : 'false'));
         if ($this->shouldUseStreamableHTTP($protocolVersion)) {
             $streamableResponse = $this->streamableTransport->handleConnection(
                 $request,
