@@ -2,15 +2,20 @@
 
 namespace Seolinkmap\Waasup\Storage;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+
 class DatabaseStorage implements StorageInterface
 {
     private \PDO $pdo;
+    private LoggerInterface $logger;
     private string $tablePrefix;
     private array $config;
     private string $databaseType;
 
     public function __construct(\PDO $pdo, array $config = [])
     {
+        $this->logger = $logger ?? new NullLogger();
         $this->pdo = $pdo;
         $this->config = array_merge($this->getDefaultConfig(), $config);
         $this->tablePrefix = $this->config['table_prefix'];
@@ -19,7 +24,7 @@ class DatabaseStorage implements StorageInterface
 
     public function storeMessage(string $sessionId, array $messageData, array $context = []): bool
     {
-        error_log("DEBUG storeMessage() called with sessionId: '{$sessionId}' for method: " . ($messageData['method'] ?? $messageData['result'] ? 'response' : 'unknown'));
+        $this->logger->debug("DEBUG storeMessage() called with sessionId: '{$sessionId}' for method: " . ($messageData['method'] ?? $messageData['result'] ? 'response' : 'unknown'));
         $sql = "INSERT INTO `{$this->tablePrefix}messages`
                 (`session_id`, `message_data`, `context_data`, `created_at`)
                 VALUES (:session_id, :message_data, :context_data, :created_at)";

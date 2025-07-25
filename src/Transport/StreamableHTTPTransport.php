@@ -4,6 +4,8 @@ namespace Seolinkmap\Waasup\Transport;
 
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Psr\Http\Message\StreamInterface;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 use Slim\Psr7\NonBufferedBody;
@@ -14,11 +16,14 @@ use Slim\Psr7\NonBufferedBody;
  */
 class StreamableHTTPTransport implements TransportInterface
 {
+    private LoggerInterface $logger;
     private StorageInterface $storage;
     private array $config;
 
+
     public function __construct(StorageInterface $storage, array $config = [])
     {
+        $this->logger = $logger ?? new NullLogger();
         $this->storage = $storage;
         $this->config = array_merge($this->getDefaultConfig(), $config);
     }
@@ -29,7 +34,7 @@ class StreamableHTTPTransport implements TransportInterface
         string $sessionId,
         array $context
     ): Response {
-        error_log("DEBUG StreamableHTTP handleConnection() called with sessionId: '{$sessionId}'");
+        $this->logger->debug("DEBUG StreamableHTTP handleConnection() called with sessionId: '{$sessionId}'");
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_write_close();
         }
@@ -96,7 +101,7 @@ class StreamableHTTPTransport implements TransportInterface
     */
     private function pollForMessages(StreamInterface $body, string $sessionId, array $context): void
     {
-        error_log("DEBUG StreamableHTTP pollForMessages() starting for sessionId: '{$sessionId}'");
+        $this->logger->debug("DEBUG StreamableHTTP pollForMessages() starting for sessionId: '{$sessionId}'");
 
         $startTime = time();
         $pollInterval = $this->config['keepalive_interval'];
@@ -104,14 +109,15 @@ class StreamableHTTPTransport implements TransportInterface
         $switchTime = $this->config['switch_interval_after'];
         $endTime = $startTime + $maxTime;
 
-        error_log("DEBUG StreamableHTTP pollForMessages() about to enter while loop");
-        error_log("DEBUG StreamableHTTP connection_status(): " . connection_status());
-        error_log("DEBUG StreamableHTTP CONNECTION_NORMAL constant: " . CONNECTION_NORMAL);
+        $this->logger->debug("DEBUG StreamableHTTP pollForMessages() about to enter while loop");
+        $this->logger->debug("DEBUG StreamableHTTP connection_status(): " . connection_status());
+        $this->logger->debug("DEBUG StreamableHTTP CONNECTION_NORMAL constant: " . CONNECTION_NORMAL);
 
 
         // Begin Streaming loop until server connection shutdown
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
-            error_log("DEBUG StreamableHTTP polling loop iteration");
+            $this->logger->debug("DEBUG StreamableHTTP polling loop iteration");
+
             $this->sendKeepalive($body);
 
             if (connection_aborted()) {
@@ -135,7 +141,7 @@ class StreamableHTTPTransport implements TransportInterface
 
             sleep($pollInterval);
         }
-        error_log("DEBUG StreamableHTTP pollForMessages() exited while loop");
+        $this->logger->debug("DEBUG StreamableHTTP pollForMessages() exited while loop");
         $this->sendConnectionClose($body);
     }
 
@@ -154,16 +160,18 @@ class StreamableHTTPTransport implements TransportInterface
 
     private function checkAndSendMessages(StreamInterface $body, string $sessionId): bool
     {
-        error_log("DEBUG StreamableHTTP checkAndSendMessages() called with sessionId: '{$sessionId}'");
+        $this->logger->debug("DEBUG StreamableHTTP checkAndSendMessages() called with sessionId: '{$sessionId}'");
 
         $messages = $this->storage->getMessages($sessionId);
-        error_log("DEBUG StreamableHTTP found " . count($messages) . " messages");
+
+        $this->logger->debug("DEBUG StreamableHTTP found " . count($messages) . " messages");
+
         if (empty($messages)) {
             return false;
         }
 
         foreach ($messages as $message) {
-            error_log("DEBUG StreamableHTTP sending message: " . json_encode($message['data']));
+            $this->logger->debug("DEBUG StreamableHTTP sending message: " . json_encode($message['data']));
             $this->writeChunkedMessage($body, $message['data']);
             $this->storage->deleteMessage($message['id']);
         }
