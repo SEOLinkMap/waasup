@@ -55,7 +55,7 @@ class StreamableHTTPTransport implements TransportInterface
 
         $response = $response
             ->withBody(new NonBufferedBody())
-            ->withHeader('Content-Type', 'application/json')
+            ->withHeader('Content-Type', 'text/event-stream')
             //->withHeader('Transfer-Encoding', 'chunked')
             ->withHeader('Cache-Control', 'no-cache')
             ->withHeader('Connection', 'keep-alive')
