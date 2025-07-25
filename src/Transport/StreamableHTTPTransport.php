@@ -40,12 +40,12 @@ class StreamableHTTPTransport implements TransportInterface
         }
 
         // Get protocol version from context if available
-        $protocolVersion = $context['protocol_version'] ?? '2025-03-26';
+        $protocolVersion = $context['protocol_version'];
 
         $response = $response
             ->withBody(new NonBufferedBody())
             ->withHeader('Content-Type', 'application/json')
-            ->withHeader('Transfer-Encoding', 'chunked')
+            //->withHeader('Transfer-Encoding', 'chunked')
             ->withHeader('Cache-Control', 'no-cache')
             ->withHeader('Connection', 'keep-alive')
             ->withHeader('X-Accel-Buffering', 'no')
