@@ -436,6 +436,9 @@ class MCPSaaSServer
 
     if ($this->shouldUseStreamableHTTP($protocolVersion)) {
         $this->logger->debug('MCPSaaSServer calling streamableTransport->handleConnection()');
+        $this->logger->debug('MCPSaaSServer transport object type', ['type' => get_class($this->streamableTransport)]);
+        $this->logger->debug('MCPSaaSServer transport object valid', ['valid' => $this->streamableTransport !== null]);
+
         $streamableResponse = $this->streamableTransport->handleConnection(
             $request,
             $response,
