@@ -418,40 +418,42 @@ class MCPSaaSServer
      * Handle streaming connection using appropriate transport based on protocol version
      */
     private function handleStreamConnection(Request $request, Response $response, string $protocolVersion): Response
-    {
-        error_log("DEBUG MCPSaaSServer handleStreamConnection() called with protocol: '{$protocolVersion}'");
-        error_log("DEBUG MCPSaaSServer shouldUseStreamableHTTP: " . ($this->shouldUseStreamableHTTP($protocolVersion) ? 'true' : 'false'));
-            $this->logger->info(
-            'Stream connection established',
-            [
-            'session_id' => $this->sessionId,
-            'protocol_version' => $protocolVersion,
-            'transport' => $this->shouldUseStreamableHTTP($protocolVersion) ? 'streamable_http' : 'sse',
-            'context' => $this->contextData
-            ]
-        );
-        error_log("DEBUG MCPSaaSServer shouldUseStreamableHTTP for '{$protocolVersion}': " . ($this->shouldUseStreamableHTTP($protocolVersion) ? 'true' : 'false'));
-        if ($this->shouldUseStreamableHTTP($protocolVersion)) {
-            error_log("DEBUG MCPSaaSServer calling streamableTransport->handleConnection()");
-            $streamableResponse = $this->streamableTransport->handleConnection(
-                $request,
-                $response,
-                $this->sessionId,
-                array_merge($this->contextData, ['protocol_version' => $protocolVersion])
-            );
-            error_log("DEBUG MCPSaaSServer streamableTransport->handleConnection() returned");
+{
+    $this->logger->debug('MCPSaaSServer handleStreamConnection() called', ['protocol' => $protocolVersion]);
+    $this->logger->debug('MCPSaaSServer shouldUseStreamableHTTP', ['result' => $this->shouldUseStreamableHTTP($protocolVersion)]);
 
-            return $streamableResponse;
-        } else {
-            error_log("DEBUG MCPSaaSServer using SSE transport instead");
-            return $this->sseTransport->handleConnection(
-                $request,
-                $response,
-                $this->sessionId,
-                $this->contextData
-            );
-        }
+    $this->logger->info(
+        'Stream connection established',
+        [
+        'session_id' => $this->sessionId,
+        'protocol_version' => $protocolVersion,
+        'transport' => $this->shouldUseStreamableHTTP($protocolVersion) ? 'streamable_http' : 'sse',
+        'context' => $this->contextData
+        ]
+    );
+
+    $this->logger->debug('MCPSaaSServer after logger->info()');
+
+    if ($this->shouldUseStreamableHTTP($protocolVersion)) {
+        $this->logger->debug('MCPSaaSServer calling streamableTransport->handleConnection()');
+        $streamableResponse = $this->streamableTransport->handleConnection(
+            $request,
+            $response,
+            $this->sessionId,
+            array_merge($this->contextData, ['protocol_version' => $protocolVersion])
+        );
+        $this->logger->debug('MCPSaaSServer streamableTransport->handleConnection() returned');
+        return $streamableResponse;
+    } else {
+        $this->logger->debug('MCPSaaSServer using SSE transport instead');
+        return $this->sseTransport->handleConnection(
+            $request,
+            $response,
+            $this->sessionId,
+            $this->contextData
+        );
     }
+}
 
     /**
      * Handle MCP JSON-RPC requests
