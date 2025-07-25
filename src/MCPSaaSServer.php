@@ -439,14 +439,24 @@ class MCPSaaSServer
         $this->logger->debug('MCPSaaSServer transport object type', ['type' => get_class($this->streamableTransport)]);
         $this->logger->debug('MCPSaaSServer transport object valid', ['valid' => $this->streamableTransport !== null]);
 
-        $streamableResponse = $this->streamableTransport->handleConnection(
-            $request,
-            $response,
-            $this->sessionId,
-            array_merge($this->contextData, ['protocol_version' => $protocolVersion])
-        );
-        $this->logger->debug('MCPSaaSServer streamableTransport->handleConnection() returned');
-        return $streamableResponse;
+        try {
+            $streamableResponse = $this->streamableTransport->handleConnection(
+                $request,
+                $response,
+                $this->sessionId,
+                array_merge($this->contextData, ['protocol_version' => $protocolVersion])
+            );
+            $this->logger->debug('MCPSaaSServer streamableTransport->handleConnection() returned');
+            return $streamableResponse;
+        } catch (\Throwable $e) {
+            $this->logger->error('MCPSaaSServer transport exception', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
     } else {
         $this->logger->debug('MCPSaaSServer using SSE transport instead');
         return $this->sseTransport->handleConnection(
