@@ -145,13 +145,16 @@ class StreamableHTTPTransport implements TransportInterface
 
     private function checkAndSendMessages(StreamInterface $body, string $sessionId): bool
     {
-        $messages = $this->storage->getMessages($sessionId);
+        error_log("DEBUG StreamableHTTP checkAndSendMessages() called with sessionId: '{$sessionId}'");
 
+        $messages = $this->storage->getMessages($sessionId);
+        error_log("DEBUG StreamableHTTP found " . count($messages) . " messages");
         if (empty($messages)) {
             return false;
         }
 
         foreach ($messages as $message) {
+            error_log("DEBUG StreamableHTTP sending message: " . json_encode($message['data']));
             $this->writeChunkedMessage($body, $message['data']);
             $this->storage->deleteMessage($message['id']);
         }
