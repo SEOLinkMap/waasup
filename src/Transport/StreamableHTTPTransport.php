@@ -187,7 +187,7 @@ class StreamableHTTPTransport implements TransportInterface
     private function getDefaultConfig(): array
     {
         return [
-            'keepalive_interval' => 2,
+            'keepalive_interval' => 1,
             'max_connection_time' => 1800,
             'switch_interval_after' => 60,
             'test_mode' => false
