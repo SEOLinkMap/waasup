@@ -199,13 +199,6 @@ class MCPSaaSServer
         // Check for existing session ID in header or route
         $existingSessionId = $this->extractSessionIdFromRequest($request);
 
-        // Debug logging
-        $this->logger->debug('Session negotiation start', [
-            'method' => $method,
-            'existing_session_id' => $existingSessionId,
-            'request_method' => $data['method'] ?? 'unknown'
-        ]);
-
         if ($method === 'GET') {
             // GET requires existing session ID
             if (!$existingSessionId) {
@@ -226,11 +219,6 @@ class MCPSaaSServer
             if (($data['method'] ?? '') === 'initialize') {
                 // Generate just the numeric session ID - protocol gets added later in initialize
                 $newSessionId = $this->generateSessionId();
-                $this->logger->info('New MCP session created', [
-                    'session_id' => $newSessionId,
-                    'context' => $this->contextData,
-                    'authless' => $isAuthless
-                ]);
                 return $newSessionId;
             }
 
@@ -252,11 +240,6 @@ class MCPSaaSServer
                 ]);
                 throw new ProtocolException('Invalid or expired session ID', -32001);
             }
-
-            $this->logger->debug('Valid session found', [
-                'session_id' => $existingSessionId,
-                'session_data' => $sessionData
-            ]);
 
             return $existingSessionId;
         }
@@ -419,9 +402,6 @@ class MCPSaaSServer
      */
     private function handleStreamConnection(Request $request, Response $response, string $protocolVersion): Response
 {
-    $this->logger->debug('MCPSaaSServer handleStreamConnection() called', ['protocol' => $protocolVersion]);
-    $this->logger->debug('MCPSaaSServer shouldUseStreamableHTTP', ['result' => $this->shouldUseStreamableHTTP($protocolVersion)]);
-
     $this->logger->info(
         'Stream connection established',
         [
@@ -432,13 +412,7 @@ class MCPSaaSServer
         ]
     );
 
-    $this->logger->debug('MCPSaaSServer after logger->info()');
-
     if ($this->shouldUseStreamableHTTP($protocolVersion)) {
-        $this->logger->debug('MCPSaaSServer calling streamableTransport->handleConnection()');
-        $this->logger->debug('MCPSaaSServer transport object type', ['type' => get_class($this->streamableTransport)]);
-        $this->logger->debug('MCPSaaSServer transport object valid', ['valid' => $this->streamableTransport !== null]);
-
         try {
             $streamableResponse = $this->streamableTransport->handleConnection(
                 $request,
@@ -446,7 +420,6 @@ class MCPSaaSServer
                 $this->sessionId,
                 array_merge($this->contextData, ['protocol_version' => $protocolVersion])
             );
-            $this->logger->debug('MCPSaaSServer streamableTransport->handleConnection() returned');
             return $streamableResponse;
         } catch (\Throwable $e) {
             $this->logger->error('MCPSaaSServer transport exception', [
@@ -458,7 +431,6 @@ class MCPSaaSServer
             throw $e;
         }
     } else {
-        $this->logger->debug('MCPSaaSServer using SSE transport instead');
         return $this->sseTransport->handleConnection(
             $request,
             $response,
@@ -477,15 +449,6 @@ class MCPSaaSServer
         if ($data === null) {
             throw new ProtocolException('No request data provided', -32600);
         }
-
-        $this->logger->debug(
-            'Processing MCP request',
-            [
-            'method' => $data['method'] ?? 'unknown',
-            'session_id' => $this->sessionId,
-            'authless' => $this->config['authless'] ?? false
-            ]
-        );
 
         return $this->messageHandler->processMessage(
             $data,

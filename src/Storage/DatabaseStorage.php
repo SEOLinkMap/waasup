@@ -24,7 +24,6 @@ class DatabaseStorage implements StorageInterface
 
     public function storeMessage(string $sessionId, array $messageData, array $context = []): bool
     {
-        $this->logger->debug("DEBUG storeMessage() called with sessionId: '{$sessionId}' for method: " . ($messageData['method'] ?? $messageData['result'] ? 'response' : 'unknown'));
         $sql = "INSERT INTO `{$this->tablePrefix}messages`
                 (`session_id`, `message_data`, `context_data`, `created_at`)
                 VALUES (:session_id, :message_data, :context_data, :created_at)";

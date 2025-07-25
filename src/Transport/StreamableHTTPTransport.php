@@ -37,7 +37,6 @@ class StreamableHTTPTransport implements TransportInterface
         string $sessionId,
         array $context
     ): Response {
-        $this->logger->debug("DEBUG StreamableHTTP handleConnection() called with sessionId: '{$sessionId}'");
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_write_close();
         }
@@ -56,7 +55,6 @@ class StreamableHTTPTransport implements TransportInterface
         $response = $response
             ->withBody(new NonBufferedBody())
             ->withHeader('Content-Type', 'text/event-stream')
-            //->withHeader('Transfer-Encoding', 'chunked')
             ->withHeader('Cache-Control', 'no-cache')
             ->withHeader('Connection', 'keep-alive')
             ->withHeader('X-Accel-Buffering', 'no')
@@ -67,8 +65,6 @@ class StreamableHTTPTransport implements TransportInterface
 
         $body = $response->getBody();
 
-        // $this->sendConnectionAck($body, $sessionId, $context);
-
         if ($isTestMode) {
             $this->checkAndSendMessages($body, $sessionId);
             return $response;
@@ -76,21 +72,6 @@ class StreamableHTTPTransport implements TransportInterface
 
         $this->pollForMessages($body, $sessionId, $context);
         return $response;
-    }
-
-    private function sendConnectionAck(StreamInterface $body, string $sessionId, array $context): void
-    {
-        $ackMessage = [
-            'jsonrpc' => '2.0',
-            'method' => 'notifications/connection',
-            'params' => [
-                'status' => 'connected',
-                'sessionId' => $sessionId,
-                'timestamp' => date('c')
-            ]
-        ];
-
-        $this->writeSSEMessage($body, $ackMessage);
     }
 
     /**
@@ -104,26 +85,15 @@ class StreamableHTTPTransport implements TransportInterface
     */
     private function pollForMessages(StreamInterface $body, string $sessionId, array $context): void
     {
-        $this->logger->debug("DEBUG StreamableHTTP pollForMessages() starting for sessionId: '{$sessionId}'");
-
         $startTime = time();
         $pollInterval = $this->config['keepalive_interval'];
         $maxTime = $this->config['max_connection_time']; // $maxTime after 'last active' messaging.
         $switchTime = $this->config['switch_interval_after'];
         $endTime = $startTime + $maxTime;
 
-        $this->logger->debug("DEBUG StreamableHTTP pollForMessages() about to enter while loop");
-        $this->logger->debug("DEBUG StreamableHTTP connection_status(): " . connection_status());
-        $this->logger->debug("DEBUG StreamableHTTP CONNECTION_NORMAL constant: " . CONNECTION_NORMAL);
-
-
         // Begin Streaming loop until server connection shutdown
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
-            $this->logger->debug("DEBUG StreamableHTTP polling loop iteration");
-
-
-
-            if (connection_aborted()) {
+           if (connection_aborted()) {
                 // Client (or other player) ended the connection
                 break;
             }
@@ -146,8 +116,6 @@ class StreamableHTTPTransport implements TransportInterface
 
             sleep($pollInterval);
         }
-        $this->logger->debug("DEBUG StreamableHTTP pollForMessages() exited while loop");
-        $this->sendConnectionClose($body);
     }
 
     private function sendKeepalive(StreamInterface $body): void
@@ -165,37 +133,18 @@ class StreamableHTTPTransport implements TransportInterface
 
     private function checkAndSendMessages(StreamInterface $body, string $sessionId): bool
     {
-        $this->logger->debug("DEBUG StreamableHTTP checkAndSendMessages() called with sessionId: '{$sessionId}'");
-
         $messages = $this->storage->getMessages($sessionId);
-
-        $this->logger->debug("DEBUG StreamableHTTP found " . count($messages) . " messages");
 
         if (empty($messages)) {
             return false;
         }
 
         foreach ($messages as $message) {
-            $this->logger->debug("DEBUG StreamableHTTP sending message: " . json_encode($message['data']));
             $this->writeSSEMessage($body, $message['data']);
             $this->storage->deleteMessage($message['id']);
         }
 
         return true;
-    }
-
-    private function sendConnectionClose(StreamInterface $body): void
-    {
-        $closeMessage = [
-            'jsonrpc' => '2.0',
-            'method' => 'notifications/connection',
-            'params' => [
-                'status' => 'closed',
-                'timestamp' => date('c')
-            ]
-        ];
-
-        $this->writeSSEMessage($body, $closeMessage);
     }
 
     private function writeSSEMessage(StreamInterface $body, array $message): void
