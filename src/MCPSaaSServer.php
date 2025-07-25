@@ -436,17 +436,6 @@ class MCPSaaSServer
                 $this->sessionId,
                 array_merge($this->contextData, ['protocol_version' => $protocolVersion])
             );
-
-            if ($streamableResponse === null) {
-                // No immediate response, upgrade to SSE
-                return $this->sseTransport->handleConnection(
-                    $request,
-                    $response,
-                    $this->sessionId,
-                    $this->contextData
-                );
-            }
-
             return $streamableResponse;
         } else {
             return $this->sseTransport->handleConnection(
