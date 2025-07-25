@@ -21,8 +21,11 @@ class StreamableHTTPTransport implements TransportInterface
     private array $config;
 
 
-    public function __construct(StorageInterface $storage, array $config = [])
-    {
+    public function __construct(
+        StorageInterface $storage,
+        array $config = [],
+        ?LoggerInterface $logger = null
+    ) {
         $this->logger = $logger ?? new NullLogger();
         $this->storage = $storage;
         $this->config = array_merge($this->getDefaultConfig(), $config);
