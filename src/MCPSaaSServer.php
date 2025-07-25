@@ -388,11 +388,17 @@ class MCPSaaSServer
 
         // Only check MCP-Protocol-Version header for 2025-06-18 (spec requirement)
         if ($negotiatedVersion === '2025-06-18') {
+            $context = $request->getAttribute('mcp_context') ?? [];
+            $isAuthless = $context['authless'] ?? false;
+
             $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
-            if (!$headerVersion) {
+
+            if (!$headerVersion && !$isAuthless) {
+                // Only require header for OAuth mode (security critical)
                 throw new ProtocolException('MCP-Protocol-Version header required for version 2025-06-18', -32600);
             }
-            if ($headerVersion !== $negotiatedVersion) {
+
+            if ($headerVersion && $headerVersion !== $negotiatedVersion) {
                 throw new ProtocolException('MCP-Protocol-Version header must match negotiated version', -32600);
             }
         }
