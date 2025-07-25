@@ -419,7 +419,9 @@ class MCPSaaSServer
      */
     private function handleStreamConnection(Request $request, Response $response, string $protocolVersion): Response
     {
-        $this->logger->info(
+        error_log("DEBUG MCPSaaSServer handleStreamConnection() called with protocol: '{$protocolVersion}'");
+        error_log("DEBUG MCPSaaSServer shouldUseStreamableHTTP: " . ($this->shouldUseStreamableHTTP($protocolVersion) ? 'true' : 'false'));
+            $this->logger->info(
             'Stream connection established',
             [
             'session_id' => $this->sessionId,
@@ -430,14 +432,18 @@ class MCPSaaSServer
         );
         error_log("DEBUG MCPSaaSServer shouldUseStreamableHTTP for '{$protocolVersion}': " . ($this->shouldUseStreamableHTTP($protocolVersion) ? 'true' : 'false'));
         if ($this->shouldUseStreamableHTTP($protocolVersion)) {
+            error_log("DEBUG MCPSaaSServer calling streamableTransport->handleConnection()");
             $streamableResponse = $this->streamableTransport->handleConnection(
                 $request,
                 $response,
                 $this->sessionId,
                 array_merge($this->contextData, ['protocol_version' => $protocolVersion])
             );
+            error_log("DEBUG MCPSaaSServer streamableTransport->handleConnection() returned");
+
             return $streamableResponse;
         } else {
+            error_log("DEBUG MCPSaaSServer using SSE transport instead");
             return $this->sseTransport->handleConnection(
                 $request,
                 $response,
