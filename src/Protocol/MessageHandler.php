@@ -635,7 +635,7 @@ class MessageHandler
         return $this->storeSuccessResponse($sessionId, ['received' => true], $id, $response);
     }
 
-        /**
+    /**
      * Get protocol version from session data (authoritative source)
      */
     private function getSessionVersion(?string $sessionId): string

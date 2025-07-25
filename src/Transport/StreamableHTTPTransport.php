@@ -95,14 +95,22 @@ class StreamableHTTPTransport implements TransportInterface
     */
     private function pollForMessages(StreamInterface $body, string $sessionId, array $context): void
     {
+        error_log("DEBUG StreamableHTTP pollForMessages() starting for sessionId: '{$sessionId}'");
+
         $startTime = time();
         $pollInterval = $this->config['keepalive_interval'];
         $maxTime = $this->config['max_connection_time']; // $maxTime after 'last active' messaging.
         $switchTime = $this->config['switch_interval_after'];
         $endTime = $startTime + $maxTime;
 
+        error_log("DEBUG StreamableHTTP pollForMessages() about to enter while loop");
+        error_log("DEBUG StreamableHTTP connection_status(): " . connection_status());
+        error_log("DEBUG StreamableHTTP CONNECTION_NORMAL constant: " . CONNECTION_NORMAL);
+
+
         // Begin Streaming loop until server connection shutdown
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
+            error_log("DEBUG StreamableHTTP polling loop iteration");
             $this->sendKeepalive($body);
 
             if (connection_aborted()) {
@@ -126,7 +134,7 @@ class StreamableHTTPTransport implements TransportInterface
 
             sleep($pollInterval);
         }
-
+        error_log("DEBUG StreamableHTTP pollForMessages() exited while loop");
         $this->sendConnectionClose($body);
     }
 
