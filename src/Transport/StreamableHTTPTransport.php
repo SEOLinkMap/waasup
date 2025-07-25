@@ -35,7 +35,9 @@ class StreamableHTTPTransport implements TransportInterface
 
         $isTestMode = $this->config['test_mode'] ?? false;
 
-        if (!$isTestMode && function_exists('exec')) {
+        if (!$isTestMode && function_exists('exec') && function_exists('getmypid')) {
+            // Make the streamed and sustained connection gentler on the server resources.
+            // This can wait a millisecond or so longer to respond if the server is busy.
             exec('renice 10 ' . getmypid());
         }
 
@@ -56,7 +58,7 @@ class StreamableHTTPTransport implements TransportInterface
 
         $body = $response->getBody();
 
-        $this->sendConnectionAck($body, $sessionId, $context);
+        // $this->sendConnectionAck($body, $sessionId, $context);
 
         if ($isTestMode) {
             $this->checkAndSendMessages($body, $sessionId);
@@ -82,25 +84,41 @@ class StreamableHTTPTransport implements TransportInterface
         $this->writeChunkedMessage($body, $ackMessage);
     }
 
+    /**
+     * Handles message queue check for the sessionID
+     *
+     * Also handles timing:
+     * Fast polling for a period after a message was found.
+     *  - this assumes if one message happened, there may be a series of messages coming through
+     * Reduced polling if no messages for a period
+     * Ultimate timeout (server connection shutdown) when no messages for an extended time
+    */
     private function pollForMessages(StreamInterface $body, string $sessionId, array $context): void
     {
         $startTime = time();
         $pollInterval = $this->config['keepalive_interval'];
-        $maxTime = $this->config['max_connection_time'];
+        $maxTime = $this->config['max_connection_time']; // $maxTime after 'last active' messaging.
         $switchTime = $this->config['switch_interval_after'];
         $endTime = $startTime + $maxTime;
 
+        // Begin Streaming loop until server connection shutdown
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
             $this->sendKeepalive($body);
 
             if (connection_aborted()) {
+                // Client (or other player) ended the connection
                 break;
             }
 
             if ($this->checkAndSendMessages($body, $sessionId)) {
+                // Reset 'last active' start time for more frequent messaging for a little bit
                 $startTime = time();
+                // Reset the server lifetime
+                $endTime = $startTime + $maxTime;
             }
 
+            // Kick down the polling schedule since there has been no messaging for a little bit
+            // Stay active, but apparently there is no need for spastic polling
             $currentTime = time();
             if ($currentTime - $startTime > $switchTime) {
                 $pollInterval = max($pollInterval * 2, 5);
