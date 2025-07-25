@@ -90,7 +90,7 @@ class StreamableHTTPTransport implements TransportInterface
             ]
         ];
 
-        $this->writeChunkedMessage($body, $ackMessage);
+        $this->writeSSEMessage($body, $ackMessage);
     }
 
     /**
@@ -160,7 +160,7 @@ class StreamableHTTPTransport implements TransportInterface
             ]
         ];
 
-        $this->writeChunkedMessage($body, $keepaliveMessage);
+        $this->writeSSEMessage($body, $keepaliveMessage);
     }
 
     private function checkAndSendMessages(StreamInterface $body, string $sessionId): bool
@@ -177,7 +177,7 @@ class StreamableHTTPTransport implements TransportInterface
 
         foreach ($messages as $message) {
             $this->logger->debug("DEBUG StreamableHTTP sending message: " . json_encode($message['data']));
-            $this->writeChunkedMessage($body, $message['data']);
+            $this->writeSSEMessage($body, $message['data']);
             $this->storage->deleteMessage($message['id']);
         }
 
@@ -195,18 +195,24 @@ class StreamableHTTPTransport implements TransportInterface
             ]
         ];
 
-        $this->writeChunkedMessage($body, $closeMessage);
+        $this->writeSSEMessage($body, $closeMessage);
     }
 
-    private function writeChunkedMessage(StreamInterface $body, array $message): void
+    private function writeSSEMessage(StreamInterface $body, array $message): void
     {
         $jsonData = json_encode($message);
         if ($jsonData === false) {
             return;
         }
 
-        $jsonData .= "\n";
-        $body->write($jsonData);
+        // Format as Server-Sent Events for streaming connections
+        $sseData = "event: message\ndata: " . $jsonData . "\n\n";
+        $body->write($sseData);
+
+        // Force immediate send
+        if (method_exists($body, 'flush')) {
+            $body->flush();
+        }
     }
 
     private function getDefaultConfig(): array
