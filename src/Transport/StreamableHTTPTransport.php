@@ -4,9 +4,9 @@ namespace Seolinkmap\Waasup\Transport;
 
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Http\Message\StreamInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
-use Psr\Http\Message\StreamInterface;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 use Slim\Psr7\NonBufferedBody;
 
@@ -93,7 +93,7 @@ class StreamableHTTPTransport implements TransportInterface
 
         // Begin Streaming loop until server connection shutdown
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
-           if (connection_aborted()) {
+            if (connection_aborted()) {
                 // Client (or other player) ended the connection
                 break;
             }

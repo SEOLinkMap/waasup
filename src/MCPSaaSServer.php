@@ -401,44 +401,44 @@ class MCPSaaSServer
      * Handle streaming connection using appropriate transport based on protocol version
      */
     private function handleStreamConnection(Request $request, Response $response, string $protocolVersion): Response
-{
-    $this->logger->info(
-        'Stream connection established',
-        [
-        'session_id' => $this->sessionId,
-        'protocol_version' => $protocolVersion,
-        'transport' => $this->shouldUseStreamableHTTP($protocolVersion) ? 'streamable_http' : 'sse',
-        'context' => $this->contextData
-        ]
-    );
+    {
+        $this->logger->info(
+            'Stream connection established',
+            [
+            'session_id' => $this->sessionId,
+            'protocol_version' => $protocolVersion,
+            'transport' => $this->shouldUseStreamableHTTP($protocolVersion) ? 'streamable_http' : 'sse',
+            'context' => $this->contextData
+            ]
+        );
 
-    if ($this->shouldUseStreamableHTTP($protocolVersion)) {
-        try {
-            $streamableResponse = $this->streamableTransport->handleConnection(
+        if ($this->shouldUseStreamableHTTP($protocolVersion)) {
+            try {
+                $streamableResponse = $this->streamableTransport->handleConnection(
+                    $request,
+                    $response,
+                    $this->sessionId,
+                    array_merge($this->contextData, ['protocol_version' => $protocolVersion])
+                );
+                return $streamableResponse;
+            } catch (\Throwable $e) {
+                $this->logger->error('MCPSaaSServer transport exception', [
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                throw $e;
+            }
+        } else {
+            return $this->sseTransport->handleConnection(
                 $request,
                 $response,
                 $this->sessionId,
-                array_merge($this->contextData, ['protocol_version' => $protocolVersion])
+                $this->contextData
             );
-            return $streamableResponse;
-        } catch (\Throwable $e) {
-            $this->logger->error('MCPSaaSServer transport exception', [
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw $e;
         }
-    } else {
-        return $this->sseTransport->handleConnection(
-            $request,
-            $response,
-            $this->sessionId,
-            $this->contextData
-        );
     }
-}
 
     /**
      * Handle MCP JSON-RPC requests
