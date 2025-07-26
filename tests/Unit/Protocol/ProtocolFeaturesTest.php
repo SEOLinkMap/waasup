@@ -3,7 +3,6 @@
 namespace Seolinkmap\Waasup\Tests\Unit\Protocol;
 
 use Seolinkmap\Waasup\Protocol\MessageHandler;
-use Seolinkmap\Waasup\Protocol\VersionNegotiator;
 use Seolinkmap\Waasup\Storage\MemoryStorage;
 use Seolinkmap\Waasup\Tests\TestCase;
 
