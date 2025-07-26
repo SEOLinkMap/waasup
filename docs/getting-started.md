@@ -847,12 +847,12 @@ $mcpProvider = new SlimMCPProvider(
 3. **Framework Integration**: Use Laravel service provider for Laravel projects
 4. **Custom Tools**: Build domain-specific tools for your use case
 5. **Client Libraries**: Implement proper MCP client with streaming support
-6. **Database Schema**: See [database-schema.md](database-schema.md) for complete table definitions
+6. **Database Schema**: See [database-schema.sql](../examples/database/database-schema.sql) for complete table definitions
 
 ## Resources
 
 - **Source Code**: [GitHub Repository](https://github.com/seolinkmap/waasup)
 - **MCP Protocol**: [Anthropic MCP Specification](https://spec.modelcontextprotocol.io/)
-- **Database Schema**: [database-schema.md](database-schema.md)
+- **Database Schema**: [database-schema.sql](../examples/database/database-schema.sql)
 - **Configuration**: [configuration.md](configuration.md)
 - **API Reference**: [api-reference.md](api-reference.md)

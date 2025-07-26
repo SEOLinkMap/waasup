@@ -12,9 +12,30 @@
 
 ## 🚀 Try It Live
 
-Want to see WaaSuP in action? **Try our live demo at seolinkmap.com/mcp-repo** with your favorite LLM or agentic tool! This demo showcases the server's capabilities with a public Website-as-a-Server (MCP authless).
+Want to see WaaSuP in action? **Connect to our live demo MCP server** with your favorite LLM or agentic tool!
 
-> **Built by [SEOLinkMap](https://seolinkmap.com)** - The public production implementation powering chat and agentic tools to use with our existing SEO intelligence platform.
+### 💬 Chat With This Repository
+**Get instant help with:**
+- ✅ **Installation guidance** - Step-by-step setup for your environment
+- ⚙️ **Configuration assistance** - Database setup, OAuth, framework integration
+- 🛠️ **Custom tool development** - Build tools specific to your use case
+- 🐛 **Troubleshooting** - Debug issues with access to the full codebase
+- 📚 **Code exploration** - Understand how features work under the hood
+
+The MCP server has access to our entire repository, documentation, and examples. Ask it anything!
+
+### 📡 Live MCP Server
+
+`https://seolinkmap.com/mcp-repo`
+
+This public MCP endpoint showcases the server's capabilities with a complete Website-as-a-Server implementation (authless).
+
+### 🔗 Need Help Connecting?
+**New to MCP servers?** Learn how to connect: **[How to Connect to MCP Servers](https://seolinkmap.com/documentation/how-to-connect-to-mcp-servers)**
+
+Once connected, you can explore our entire repository through chat and get real-time help with WaaSuP installation and configuration.
+
+> **Built by [SEOLinkMap](https://seolinkmap.com)** - This is our production "web server for chat and agentics" powering AI access to our entire SEO intelligence platform.
 
 ## ✨ Features
 

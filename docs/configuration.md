@@ -477,7 +477,7 @@ The `DatabaseStorage` implementation requires these tables to exist:
 
 **⚠️ Important:** You must create these tables manually before using `DatabaseStorage`.
 
-📖 **See the [Database Schema Documentation](database-schema.md) for complete CREATE TABLE statements, field descriptions, and database-specific variations.**
+📖 **See the [Database Schema Documentation](../examples/database/database-schema.sql) for complete CREATE TABLE statements, field descriptions, and database-specific variations.**
 
 ## Complete Working Example
 
