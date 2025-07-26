@@ -41,7 +41,6 @@ class DatabaseStorage implements StorageInterface
 
     public function getMessages(string $sessionId, array $context = []): array
     {
-        error_log("DEBUG getMessages() called with sessionId: '{$sessionId}'");
         $sql = "SELECT `id`, `message_data`, `context_data`, `created_at`
                 FROM `{$this->tablePrefix}messages`
                 WHERE `session_id` = :session_id
@@ -59,7 +58,6 @@ class DatabaseStorage implements StorageInterface
                 'created_at' => $row['created_at']
             ];
         }
-        error_log("DEBUG getMessages() found " . count($messages) . " messages for sessionId: '{$sessionId}'");
         return $messages;
     }
 

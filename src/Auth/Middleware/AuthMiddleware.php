@@ -60,8 +60,7 @@ class AuthMiddleware
                 return $this->createOAuthDiscoveryResponse($request);
             }
 
-            // @todo main server sets the protocol version during initialize. This is breaking the repo
-            $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
+            $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version');
 
             // OAuth Resource Server validation for 2025-06-18
             if ($protocolVersion === '2025-06-18') {
@@ -69,7 +68,7 @@ class AuthMiddleware
                     $this->validateResourceServerRequirements($request, $tokenData);
                 } catch (AuthenticationException $e) {
                     // Return specific error for resource binding failures
-                    return $this->createErrorResponse($e->getMessage(), 401);
+                    return $this->createErrorResponse('Resource validation failed', 401);
                 }
             }
 
@@ -97,8 +96,7 @@ class AuthMiddleware
      */
     private function handleAuthlessRequest(Request $request, RequestHandler $handler): Response
     {
-        // @todo main server sets the protocol version during initialize. This is breaking the repo
-        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
+        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version');
         $contextId = $this->extractContextId($request) ?? $this->config['authless_context_id'] ?? 'public';
 
         $contextData = $this->config['authless_context_data'] ?? [
@@ -169,8 +167,7 @@ class AuthMiddleware
     protected function createOAuthDiscoveryResponse(Request $request): Response
     {
         $baseUrl = $this->getBaseUrl($request);
-        // @todo main server sets the protocol version during initialize. This is breaking the repo
-        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
+        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version');
 
         $responseData = [
             'jsonrpc' => '2.0',
