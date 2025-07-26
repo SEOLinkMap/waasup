@@ -79,6 +79,25 @@ $storage = new DatabaseStorage($pdo, [
 ]);
 ```
 
+### Custom Table Mapping for Existing Applications
+
+If you have an existing application with user/agency tables you want to preserve, you can configure custom table mapping:
+
+```php
+// Basic integration - map existing user/agency tables
+$storage = new DatabaseStorage($pdo, [
+    'table_prefix' => 'mcp_',
+    'table_mapping' => [
+        'agencies' => 'companies',      // Your existing companies table
+        'users' => 'app_users'          // Your existing users table
+        // Other tables use mcp_ prefix defaults
+    ]
+]);
+```
+
+**📖 For complete custom table configuration:** See the [Custom Table Configuration Guide](../examples/database/custom-table-configuration.md) for detailed examples, required field mappings, database preparation steps, and framework-specific integration patterns.
+
+
 ### Required Database Tables
 
 The software expects these tables to exist (you must create them manually):

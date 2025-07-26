@@ -27,17 +27,53 @@ composer require monolog/monolog
 composer require slim/slim
 ```
 
+# Getting Started
+
+This guide will help you set up and run the MCP SaaS Server in your environment.
+
+## Prerequisites
+
+- **PHP 8.1+** with PDO extension
+- **Composer** for dependency management
+- **MySQL/PostgreSQL** database (recommended for production)
+- **Web server** (Apache/Nginx) or PHP built-in server for development
+
+## Installation
+
+### 1. Install via Composer
+
+```bash
+# Install the package
+composer require seolinkmap/waasup
+
+# Install PSR-17 factories (required)
+composer require slim/psr7
+
+# Optional: Add logging
+composer require monolog/monolog
+
+# Optional: Add Slim framework for easy setup
+composer require slim/slim
+```
+
 ### 2. Database Setup
 
-Create your database and tables:
+You have two options for database setup:
+
+#### Option A: New Installation (Recommended)
+Create your database and tables using the default schema:
 
 ```bash
 # Create database
 mysql -u root -p -e "CREATE DATABASE mcp_server"
 
-# Create required tables - see database-schema.md for complete SQL
-# You must manually create the required tables before using DatabaseStorage
+# Import the complete schema
+mysql -u root -p mcp_server < examples/database/database-schema.sql
 ```
+
+#### Option B: Existing Database Integration
+If you have existing user/agency tables you want to integrate with, see the **[Custom Table Configuration Guide](../examples/database/custom-table-configuration.md)** for detailed instructions on mapping your existing tables to WaaSuP's requirements.
+
 
 ### 3. Create Your First Agency
 
