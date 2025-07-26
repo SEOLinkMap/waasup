@@ -357,16 +357,18 @@ $server->sendProgressNotification($sessionId, 50, 'Processing data...');
 | Method | Description | Supported Versions |
 |--------|-------------|-------------------|
 | `initialize` | Initialize MCP session | All |
+| `ping` | Health check | All |
 | `tools/list` | List available tools | All |
 | `tools/call` | Execute a tool | All |
 | `prompts/list` | List available prompts | All |
 | `prompts/get` | Get a prompt | All |
 | `resources/list` | List available resources | All |
 | `resources/read` | Read a resource | All |
-| `completions/complete` | Get completions | 2025-03-26+ |
-| `elicitation/create` | Request user input | 2025-06-18 |
+| `completion/complete` | Get completions for arguments | All |
 | `sampling/createMessage` | Request LLM sampling | All |
-| `ping` | Health check | All |
+| `roots/list` | List available root directories | All |
+| `elicitation/create` | Request user input | 2025-06-18 |
+
 
 ### Error Codes
 

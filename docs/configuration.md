@@ -98,7 +98,7 @@ The software expects these tables to exist (you must create them manually):
 - `mcp_roots_responses` - Stores client filesystem responses
 - `mcp_elicitation_responses` - Stores user input responses (2025-06-18)
 
-See [Database Schema](#database-schema) section for complete table structures.
+📖 **See the [Database Schema Documentation](../examples/database/database-schema.sql) for complete CREATE TABLE statements...
 
 ## Authentication Configuration
 
