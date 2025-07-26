@@ -477,6 +477,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - [Anthropic](https://anthropic.com) for the Model Context Protocol specification
+- [modelcontextprotocol.io](https://modelcontextprotocol.io/) for official MCP documentation and schema
 - [PHP-FIG](https://www.php-fig.org/) for the PSR standards
 - [Slim Framework](https://slimframework.com/) for the excellent HTTP foundation
 
