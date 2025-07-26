@@ -72,7 +72,7 @@ mysql -u root -p mcp_server < examples/database/database-schema.sql
 ```
 
 #### Option B: Existing Database Integration
-If you have existing user/agency tables you want to integrate with, see the **[Custom Table Configuration Guide](../examples/database/custom-table-configuration.md)** for detailed instructions on mapping your existing tables to WaaSuP's requirements.
+If you have existing user/agency tables you want to integrate with, see the **[Custom Table Configuration Guide](../examples/database/custom-table-configurations.md)** for detailed instructions on mapping your existing tables to WaaSuP's requirements.
 
 
 ### 3. Create Your First Agency

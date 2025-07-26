@@ -95,7 +95,7 @@ $storage = new DatabaseStorage($pdo, [
 ]);
 ```
 
-**📖 For complete custom table configuration:** See the [Custom Table Configuration Guide](../examples/database/custom-table-configuration.md) for detailed examples, required field mappings, database preparation steps, and framework-specific integration patterns.
+**📖 For complete custom table configuration:** See the [Custom Table Configuration Guide](../examples/database/custom-table-configurations.md) for detailed examples, required field mappings, database preparation steps, and framework-specific integration patterns.
 
 
 ### Required Database Tables
