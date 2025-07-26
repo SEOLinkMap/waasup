@@ -34,7 +34,16 @@ abstract class TestCase extends PHPUnitTestCase
     }
 
     /**
-     * Create a test storage with sample data
+     * Generate session ID in the format used by the actual MCP server
+     * Format: protocolVersion_hexstring (e.g., "2024-11-05_a1b2c3d4e5f6...")
+     */
+    protected function generateMcpSessionId(string $protocolVersion = '2024-11-05'): string
+    {
+        return $protocolVersion . '_' . bin2hex(random_bytes(16));
+    }
+
+    /**
+     * Create a test storage with sample data and properly formatted sessions
      */
     protected function createTestStorage(): MemoryStorage
     {
@@ -90,7 +99,87 @@ abstract class TestCase extends PHPUnitTestCase
             ]
         );
 
+        // Add test sessions using the ACTUAL MCP server format
+        $this->setupTestSessions($storage);
+
         return $storage;
+    }
+
+    /**
+     * Setup standard test sessions using the actual MCP server session format
+     * Sessions are stored as: protocolVersion_sessionId with session data containing protocol_version
+     */
+    protected function setupTestSessions(MemoryStorage $storage): void
+    {
+        $protocols = ['2024-11-05', '2025-03-26', '2025-06-18'];
+        $baseSessionNames = ['session1', 'session2', 'session3', 'test-session', 'session123'];
+
+        foreach ($protocols as $index => $protocol) {
+            // Create proper MCP session ID format
+            $sessionId = $this->generateMcpSessionId($protocol);
+
+            $sessionData = [
+                'protocol_version' => $protocol,
+                'agency_id' => 1,
+                'user_id' => 1,
+                'created_at' => time()
+            ];
+
+            $storage->storeSession($sessionId, $sessionData, 3600);
+
+            // Also create sessions with predictable names for specific tests
+            if ($index < count($baseSessionNames)) {
+                $predictableSessionId = $protocol . '_' . hash('sha256', $baseSessionNames[$index]);
+                $storage->storeSession($predictableSessionId, $sessionData, 3600);
+            }
+        }
+
+        // Create specific well-known sessions for protocol compliance tests
+        $wellKnownSessions = [
+            'session1' => '2024-11-05_' . hash('sha256', 'session1'),
+            'session123' => '2024-11-05_' . hash('sha256', 'session123'),
+            'test-session' => '2024-11-05_' . hash('sha256', 'test-session')
+        ];
+
+        foreach ($wellKnownSessions as $alias => $fullSessionId) {
+            $sessionData = [
+                'protocol_version' => '2024-11-05',
+                'agency_id' => 1,
+                'user_id' => 1,
+                'created_at' => time()
+            ];
+            $storage->storeSession($fullSessionId, $sessionData, 3600);
+        }
+    }
+
+    /**
+     * Create a session with specific protocol version using actual MCP server format
+     */
+    protected function createTestSession(MemoryStorage $storage, string $sessionId, string $protocolVersion = '2024-11-05'): string
+    {
+        // If sessionId doesn't already include protocol version, format it properly
+        if (!str_contains($sessionId, '_')) {
+            $sessionId = $protocolVersion . '_' . hash('sha256', $sessionId);
+        }
+
+        $sessionData = [
+            'protocol_version' => $protocolVersion,
+            'agency_id' => 1,
+            'user_id' => 1,
+            'created_at' => time()
+        ];
+
+        $storage->storeSession($sessionId, $sessionData, 3600);
+        return $sessionId;
+    }
+
+    /**
+     * Get a properly formatted session ID for testing
+     * This returns a session ID that will work with the actual MCP server
+     */
+    protected function getTestSessionId(string $protocolVersion = '2024-11-05', string $baseName = 'test'): string
+    {
+        return $protocolVersion . '_' . hash('sha256', $baseName . time());
     }
 
     /**

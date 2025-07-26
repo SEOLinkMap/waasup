@@ -4,11 +4,13 @@ namespace Seolinkmap\Waasup\Tests\Unit\Protocol;
 
 use Seolinkmap\Waasup\Protocol\MessageHandler;
 use Seolinkmap\Waasup\Protocol\VersionNegotiator;
+use Seolinkmap\Waasup\Storage\MemoryStorage;
 use Seolinkmap\Waasup\Tests\TestCase;
 
 class ProtocolFeaturesTest extends TestCase
 {
     private MessageHandler $messageHandler;
+    private MemoryStorage $storage;
     private array $supportedVersions = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
     protected function setUp(): void
@@ -18,7 +20,63 @@ class ProtocolFeaturesTest extends TestCase
         $toolRegistry = $this->createTestToolRegistry();
         $promptRegistry = $this->createTestPromptRegistry();
         $resourceRegistry = $this->createTestResourceRegistry();
-        $storage = $this->createTestStorage();
+        $this->storage = $this->createTestStorage();
+
+        // Add test prompts with validation
+        $promptRegistry->register(
+            'template_prompt',
+            function ($arguments, $context) {
+                if (empty($arguments['name'])) {
+                    throw new \InvalidArgumentException('Name is required');
+                }
+                $name = $arguments['name'];
+                $topic = $arguments['topic'] ?? 'general';
+                return [
+                    'description' => "Template for {$name} about {$topic}",
+                    'messages' => [
+                        [
+                            'role' => 'user',
+                            'content' => [
+                                'type' => 'text',
+                                'text' => "Hello {$name}, let's discuss {$topic}."
+                            ]
+                        ]
+                    ]
+                ];
+            },
+            [
+                'description' => 'Template prompt requiring name',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'name' => ['type' => 'string', 'description' => 'Required name'],
+                        'topic' => ['type' => 'string', 'description' => 'Optional topic']
+                    ],
+                    'required' => ['name']
+                ]
+            ]
+        );
+
+        // Add test resource that can fail
+        $resourceRegistry->register(
+            'test://protected',
+            function ($uri, $context) {
+                // Check for agency_id in the context structure
+                $agencyId = $context['agency_id'] ?? $context['token_data']['agency_id'] ?? $context['context_data']['id'] ?? null;
+                if (empty($agencyId)) {
+                    throw new \RuntimeException('Access denied - no agency context');
+                }
+                return [
+                    'contents' => [
+                        [
+                            'uri' => $uri,
+                            'mimeType' => 'application/json',
+                            'text' => json_encode(['protected' => true, 'agency' => $agencyId])
+                        ]
+                    ]
+                ];
+            }
+        );
 
         // Add test tool with structured output schema
         $toolRegistry->register(
@@ -100,7 +158,7 @@ class ProtocolFeaturesTest extends TestCase
             $toolRegistry,
             $promptRegistry,
             $resourceRegistry,
-            $storage,
+            $this->storage,
             [
                 'supported_versions' => $this->supportedVersions,
                 'server_info' => [
@@ -111,29 +169,27 @@ class ProtocolFeaturesTest extends TestCase
         );
     }
 
-    private function createMessageHandlerForVersion(string $version): MessageHandler
-    {
-        $toolRegistry = $this->createTestToolRegistry();
-        $promptRegistry = $this->createTestPromptRegistry();
-        $resourceRegistry = $this->createTestResourceRegistry();
-        $storage = $this->createTestStorage();
-
-        $versionNegotiator = new VersionNegotiator([$version]);
-
-        return new MessageHandler(
-            $toolRegistry,
-            $promptRegistry,
-            $resourceRegistry,
-            $storage,
-            ['supported_versions' => [$version]],
-            $versionNegotiator
-        );
-    }
-
+    /**
+     * Initialize a session with proper MCP session format
+     */
     private function initializeSession(string $version): string
     {
-        $sessionId = 'test-session-' . bin2hex(random_bytes(8));
+        // Generate proper MCP session ID format: protocolVersion_hexstring
+        $sessionId = $this->generateMcpSessionId($version);
 
+        // Store session with required protocol_version field
+        $this->storage->storeSession(
+            $sessionId,
+            [
+                'protocol_version' => $version,
+                'agency_id' => 1,
+                'user_id' => 1,
+                'created_at' => time()
+            ],
+            3600
+        );
+
+        // Process initialize message to complete session setup
         $initMessage = [
             'jsonrpc' => '2.0',
             'method' => 'initialize',
@@ -164,7 +220,10 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(200, $response->getStatusCode());
+        if ($response->getStatusCode() !== 200) {
+            throw new \RuntimeException("Failed to initialize session for version {$version}");
+        }
+
         return $sessionId;
     }
 
@@ -238,7 +297,6 @@ class ProtocolFeaturesTest extends TestCase
     public function testElicitationUserResponse(): void
     {
         $sessionId = $this->initializeSession('2025-06-18');
-        $storage = $this->createTestStorage();
 
         $responseMessage = [
             'jsonrpc' => '2.0',
@@ -335,7 +393,7 @@ class ProtocolFeaturesTest extends TestCase
 
     public function testElicitationCapabilityDeclaration(): void
     {
-        $sessionId = 'test-session-' . bin2hex(random_bytes(8));
+        $sessionId = $this->generateMcpSessionId('2025-06-18');
 
         $initMessage = [
             'jsonrpc' => '2.0',
@@ -484,8 +542,7 @@ class ProtocolFeaturesTest extends TestCase
         $this->assertEquals(202, $response->getStatusCode());
 
         // Check that tools with output schemas are properly listed
-        $storage = $this->createTestStorage();
-        $messages = $storage->getMessages($sessionId);
+        $messages = $this->storage->getMessages($sessionId);
 
         if (!empty($messages)) {
             $lastMessage = end($messages);
@@ -560,8 +617,7 @@ class ProtocolFeaturesTest extends TestCase
         $this->assertEquals(202, $response->getStatusCode());
 
         // Verify structured content is present in the queued message
-        $storage = $this->createTestStorage();
-        $messages = $storage->getMessages($sessionId);
+        $messages = $this->storage->getMessages($sessionId);
 
         if (!empty($messages)) {
             $lastMessage = end($messages);
@@ -662,8 +718,7 @@ class ProtocolFeaturesTest extends TestCase
         $this->assertEquals(202, $response->getStatusCode());
 
         // Verify resource links are present
-        $storage = $this->createTestStorage();
-        $messages = $storage->getMessages($sessionId);
+        $messages = $this->storage->getMessages($sessionId);
 
         if (!empty($messages)) {
             $lastMessage = end($messages);
@@ -882,8 +937,7 @@ class ProtocolFeaturesTest extends TestCase
         $this->assertEquals(202, $response->getStatusCode());
 
         // Verify annotations are not included in 2024-11-05
-        $storage = $this->createTestStorage();
-        $messages = $storage->getMessages($sessionId);
+        $messages = $this->storage->getMessages($sessionId);
 
         if (!empty($messages)) {
             $lastMessage = end($messages);
@@ -1110,7 +1164,7 @@ class ProtocolFeaturesTest extends TestCase
     public function testCompletionsCapabilityDeclaration(): void
     {
         foreach (['2025-06-18', '2025-03-26'] as $version) {
-            $sessionId = 'test-session-' . bin2hex(random_bytes(8));
+            $sessionId = $this->generateMcpSessionId($version);
 
             $initMessage = [
                 'jsonrpc' => '2.0',

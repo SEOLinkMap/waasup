@@ -15,6 +15,7 @@ class JsonRpcComplianceTest extends TestCase
 {
     private MessageHandler $handler;
     private MemoryStorage $storage;
+    private string $validSessionId;
 
     protected function setUp(): void
     {
@@ -30,6 +31,19 @@ class JsonRpcComplianceTest extends TestCase
             $this->storage,
             ['server_info' => ['name' => 'Test Server', 'version' => '1.0.0']]
         );
+
+        // Create a properly formatted session that matches the MCP server format
+        $this->validSessionId = '2024-11-05_' . bin2hex(random_bytes(16));
+        $this->storage->storeSession(
+            $this->validSessionId,
+            [
+                'protocol_version' => '2024-11-05',
+                'agency_id' => 1,
+                'user_id' => 1,
+                'created_at' => time()
+            ],
+            3600
+        );
     }
 
     public function testJsonRpcVersionRequired(): void
@@ -38,7 +52,7 @@ class JsonRpcComplianceTest extends TestCase
         $this->expectExceptionCode(-32600);
 
         $data = ['method' => 'ping', 'id' => 1];
-        $this->handler->processMessage($data, 'session1', [], new Response());
+        $this->handler->processMessage($data, $this->validSessionId, [], new Response());
     }
 
     public function testRequestIdMustNotBeNull(): void
@@ -51,7 +65,7 @@ class JsonRpcComplianceTest extends TestCase
             'method' => 'ping',
             'id' => null
         ];
-        $this->handler->processMessage($data, 'session1', [], new Response());
+        $this->handler->processMessage($data, $this->validSessionId, [], new Response());
     }
 
     public function testRequestIdUniquenessTracking(): void
@@ -69,12 +83,12 @@ class JsonRpcComplianceTest extends TestCase
             'id' => 'unique-id-123'
         ];
 
-        $response1 = $this->handler->processMessage($data1, 'session1', [], new Response());
+        $response1 = $this->handler->processMessage($data1, $this->validSessionId, [], new Response());
         $this->assertEquals(200, $response1->getStatusCode());
 
         $this->expectException(ProtocolException::class);
         $this->expectExceptionCode(-32600);
-        $this->handler->processMessage($data2, 'session1', [], new Response());
+        $this->handler->processMessage($data2, $this->validSessionId, [], new Response());
     }
 
     public function testNotificationHandling(): void
@@ -84,7 +98,7 @@ class JsonRpcComplianceTest extends TestCase
             'method' => 'notifications/initialized'
         ];
 
-        $response = $this->handler->processMessage($notificationData, 'session1', [], new Response());
+        $response = $this->handler->processMessage($notificationData, $this->validSessionId, [], new Response());
 
         $this->assertEquals(202, $response->getStatusCode());
         $this->assertEmpty((string) $response->getBody());
@@ -97,7 +111,7 @@ class JsonRpcComplianceTest extends TestCase
             'method' => 'initialized'
         ];
 
-        $response = $this->handler->processMessage($notificationData, 'session1', [], new Response());
+        $response = $this->handler->processMessage($notificationData, $this->validSessionId, [], new Response());
 
         $this->assertEquals(202, $response->getStatusCode());
         $this->assertEmpty((string) $response->getBody());
@@ -111,13 +125,12 @@ class JsonRpcComplianceTest extends TestCase
             'id' => 42
         ];
 
-        // MCP spec: errors should be queued, not thrown (except for initialize)
-        $response = $this->handler->processMessage($data, 'session1', [], new Response());
+        $response = $this->handler->processMessage($data, $this->validSessionId, [], new Response());
 
         $this->assertEquals(202, $response->getStatusCode());
 
         // Verify error was queued
-        $messages = $this->storage->getMessages('session1');
+        $messages = $this->storage->getMessages($this->validSessionId);
         $this->assertCount(1, $messages);
         $errorMessage = $messages[0]['data'];
         $this->assertEquals('2.0', $errorMessage['jsonrpc']);
@@ -135,7 +148,7 @@ class JsonRpcComplianceTest extends TestCase
             'id' => 'string-id-456'
         ];
 
-        $response = $this->handler->processMessage($data, 'session1', [], new Response());
+        $response = $this->handler->processMessage($data, $this->validSessionId, [], new Response());
         $responseData = json_decode((string) $response->getBody(), true);
 
         $this->assertEquals('2.0', $responseData['jsonrpc']);
@@ -152,7 +165,7 @@ class JsonRpcComplianceTest extends TestCase
             'id' => 789
         ];
 
-        $response = $this->handler->processMessage($data, 'session1', [], new Response());
+        $response = $this->handler->processMessage($data, $this->validSessionId, [], new Response());
         $responseData = json_decode((string) $response->getBody(), true);
 
         $this->assertEquals('2.0', $responseData['jsonrpc']);
@@ -169,7 +182,7 @@ class JsonRpcComplianceTest extends TestCase
             'jsonrpc' => '2.0'
         ];
 
-        $this->handler->processMessage($data, 'session1', [], new Response());
+        $this->handler->processMessage($data, $this->validSessionId, [], new Response());
     }
 
     public function testMethodNotFoundError(): void
@@ -180,13 +193,12 @@ class JsonRpcComplianceTest extends TestCase
             'id' => 1
         ];
 
-        // MCP spec: method not found errors should be queued, not thrown
-        $response = $this->handler->processMessage($data, 'session1', [], new Response());
+        $response = $this->handler->processMessage($data, $this->validSessionId, [], new Response());
 
         $this->assertEquals(202, $response->getStatusCode());
 
         // Verify error was queued
-        $messages = $this->storage->getMessages('session1');
+        $messages = $this->storage->getMessages($this->validSessionId);
         $this->assertCount(1, $messages);
         $errorMessage = $messages[0]['data'];
         $this->assertEquals('2.0', $errorMessage['jsonrpc']);
@@ -207,6 +219,6 @@ class JsonRpcComplianceTest extends TestCase
             'id' => 1
         ];
 
-        $this->handler->processMessage($data, 'session1', [], new Response());
+        $this->handler->processMessage($data, $this->validSessionId, [], new Response());
     }
 }

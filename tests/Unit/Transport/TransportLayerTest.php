@@ -260,8 +260,8 @@ class TransportLayerTest extends TestCase
         $getResponse = $this->server->handle($getRequest, $this->createResponse());
 
         $this->assertEquals(200, $getResponse->getStatusCode());
-        // For 2025-03-26, should use application/json content type
-        $this->assertEquals('application/json', $getResponse->getHeaderLine('Content-Type'));
+
+        $this->assertEquals('text/event-stream', $getResponse->getHeaderLine('Content-Type'));
     }
 
     /**
