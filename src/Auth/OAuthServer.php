@@ -833,7 +833,9 @@ class OAuthServer
             $tokenData['aud'] = [$resource]; // Audience claim for token validation
         }
 
-        $this->storage->storeAccessToken($tokenData);
+        if (!$this->storage->storeAccessToken($tokenData)) {
+            return $this->errorResponse('server_error', 'Failed to store access token');
+        }
 
         $responseData = [
             'access_token' => $accessToken,
@@ -907,7 +909,9 @@ class OAuthServer
             $newTokenData['aud'] = $tokenData['aud'] ?? [$tokenData['resource']];
         }
 
-        $this->storage->storeAccessToken($newTokenData);
+        if (!$this->storage->storeAccessToken($newTokenData)) {
+            return $this->errorResponse('server_error', 'Failed to store access token');
+        }
 
         $responseData = [
             'access_token' => $newAccessToken,
