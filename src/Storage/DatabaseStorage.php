@@ -384,7 +384,7 @@ class DatabaseStorage implements StorageInterface
             ':client_id' => $data['client_id'],
             ':auth_code' => $code,
             ':scope' => $data['scope'],
-            ':expires_at' => $this->getTimestampWithOffset($data['expires_at'] - time()),
+            ':expires_at' => date('Y-m-d H:i:s', $data['expires_at']),
             ':code_challenge' => $data['code_challenge'],
             ':code_challenge_method' => $data['code_challenge_method'],
             ':agency_id' => $data['agency_id'],
@@ -444,7 +444,7 @@ class DatabaseStorage implements StorageInterface
             ':access_token' => $tokenData['access_token'],
             ':refresh_token' => $tokenData['refresh_token'],
             ':scope' => $tokenData['scope'],
-            ':expires_at' => $this->getTimestampWithOffset($tokenData['expires_at'] - time()),
+            ':expires_at' => date('Y-m-d H:i:s', $tokenData['expires_at']),
             ':agency_id' => $tokenData['agency_id'],
             ':user_id' => $tokenData['user_id'],
             ':created_at' => $this->getCurrentTimestamp()

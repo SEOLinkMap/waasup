@@ -14,7 +14,7 @@
 
 Want to see WaaSuP in action? **Connect to our live demo MCP server** with your favorite LLM or agentic tool!
 
-### 💬 Chat With This Repository
+## 💬 Chat With This Repository
 **Get instant help with:**
 - ✅ **Installation guidance** - Step-by-step setup for your environment
 - ⚙️ **Configuration assistance** - Database setup, OAuth, framework integration
