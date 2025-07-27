@@ -833,9 +833,13 @@ class OAuthServer
             $tokenData['aud'] = [$resource]; // Audience claim for token validation
         }
 
-        if (!$this->storage->storeAccessToken($tokenData)) {
-            return $this->errorResponse('server_error', 'Failed to store access token');
-        }
+        file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " OAUTH: About to store token data: " . json_encode($tokenData) . "\n", FILE_APPEND);
+if (!$this->storage->storeAccessToken($tokenData)) {
+    file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " OAUTH: Token storage FAILED\n", FILE_APPEND);
+    return $this->errorResponse('server_error', 'Failed to store access token');
+} else {
+    file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " OAUTH: Token storage SUCCESS\n", FILE_APPEND);
+}
 
         $responseData = [
             'access_token' => $accessToken,

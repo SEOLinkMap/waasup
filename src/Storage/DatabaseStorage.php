@@ -432,7 +432,11 @@ class DatabaseStorage implements StorageInterface
      */
     public function storeAccessToken(array $tokenData): bool
 {
-    $sql = "INSERT INTO `{$this->getTableName('oauth_tokens')}`
+    $tableName = $this->getTableName('oauth_tokens');
+    file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " STORAGE: Using table: {$tableName}\n", FILE_APPEND);
+    file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " STORAGE: Token data: " . json_encode($tokenData) . "\n", FILE_APPEND);
+
+    $sql = "INSERT INTO `{$tableName}`
             (`client_id`, `access_token`, `refresh_token`, `token_type`, `scope`, `expires_at`,
              `agency_id`, `user_id`, `revoked`, `created_at`)
             VALUES (:client_id, :access_token, :refresh_token, 'Bearer', :scope,
@@ -440,7 +444,7 @@ class DatabaseStorage implements StorageInterface
 
     try {
         $stmt = $this->pdo->prepare($sql);
-        $result = $stmt->execute([
+        $params = [
             ':client_id' => $tokenData['client_id'],
             ':access_token' => $tokenData['access_token'],
             ':refresh_token' => $tokenData['refresh_token'],
@@ -449,20 +453,23 @@ class DatabaseStorage implements StorageInterface
             ':agency_id' => $tokenData['agency_id'],
             ':user_id' => $tokenData['user_id'],
             ':created_at' => $this->getCurrentTimestamp()
-        ]);
+        ];
+
+        file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " STORAGE: SQL: {$sql}\n", FILE_APPEND);
+        file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " STORAGE: Params: " . json_encode($params) . "\n", FILE_APPEND);
+
+        $result = $stmt->execute($params);
 
         if (!$result) {
             $errorInfo = $stmt->errorInfo();
-            file_put_contents('/var/www/devsa/logs/uncaught.log',
-                date('Y-m-d H:i:s') . " TOKEN STORAGE ERROR: " . json_encode($errorInfo) . "\n",
-                FILE_APPEND);
+            file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " STORAGE: Execute failed: " . json_encode($errorInfo) . "\n", FILE_APPEND);
+        } else {
+            file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " STORAGE: Execute SUCCESS\n", FILE_APPEND);
         }
 
         return $result;
     } catch (\Exception $e) {
-        file_put_contents('/var/www/devsa/logs/uncaught.log',
-            date('Y-m-d H:i:s') . " TOKEN STORAGE EXCEPTION: " . $e->getMessage() . "\n",
-            FILE_APPEND);
+        file_put_contents('/var/www/devsa/logs/uncaught.log', date('Y-m-d H:i:s') . " STORAGE: Exception: " . $e->getMessage() . "\n", FILE_APPEND);
         return false;
     }
 }
