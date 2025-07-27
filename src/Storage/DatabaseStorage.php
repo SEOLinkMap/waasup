@@ -431,15 +431,16 @@ class DatabaseStorage implements StorageInterface
      * Store OAuth access token and refresh token
      */
     public function storeAccessToken(array $tokenData): bool
-    {
-        $sql = "INSERT INTO `{$this->getTableName('oauth_tokens')}`
-                (`client_id`, `access_token`, `refresh_token`, `token_type`, `scope`, `expires_at`,
-                 `agency_id`, `user_id`, `revoked`, `created_at`)
-                VALUES (:client_id, :access_token, :refresh_token, 'Bearer', :scope,
-                        :expires_at, :agency_id, :user_id, 0, :created_at)";
+{
+    $sql = "INSERT INTO `{$this->getTableName('oauth_tokens')}`
+            (`client_id`, `access_token`, `refresh_token`, `token_type`, `scope`, `expires_at`,
+             `agency_id`, `user_id`, `revoked`, `created_at`)
+            VALUES (:client_id, :access_token, :refresh_token, 'Bearer', :scope,
+                    :expires_at, :agency_id, :user_id, 0, :created_at)";
 
+    try {
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([
+        $result = $stmt->execute([
             ':client_id' => $tokenData['client_id'],
             ':access_token' => $tokenData['access_token'],
             ':refresh_token' => $tokenData['refresh_token'],
@@ -449,7 +450,22 @@ class DatabaseStorage implements StorageInterface
             ':user_id' => $tokenData['user_id'],
             ':created_at' => $this->getCurrentTimestamp()
         ]);
+
+        if (!$result) {
+            $errorInfo = $stmt->errorInfo();
+            file_put_contents('/var/www/devsa/logs/uncaught.log',
+                date('Y-m-d H:i:s') . " TOKEN STORAGE ERROR: " . json_encode($errorInfo) . "\n",
+                FILE_APPEND);
+        }
+
+        return $result;
+    } catch (\Exception $e) {
+        file_put_contents('/var/www/devsa/logs/uncaught.log',
+            date('Y-m-d H:i:s') . " TOKEN STORAGE EXCEPTION: " . $e->getMessage() . "\n",
+            FILE_APPEND);
+        return false;
     }
+}
 
     /**
      * Get token data by refresh token (for refresh flow)
