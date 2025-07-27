@@ -2,6 +2,7 @@
 
 namespace Seolinkmap\Waasup\Integration\Laravel;
 
+use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\ServiceProvider;
@@ -88,7 +89,7 @@ class LaravelServiceProvider extends ServiceProvider
             }
         );
 
-        // Register Laravel MCP provider (like SlimMCPProvider)
+        // Register Laravel MCP provider
         $this->app->singleton(
             LaravelMCPProvider::class,
             function ($app) {
@@ -110,26 +111,20 @@ class LaravelServiceProvider extends ServiceProvider
                     $app->make(ResourceRegistry::class),
                     $app->make(ResponseFactoryInterface::class),
                     $app->make(StreamFactoryInterface::class),
+                    $app->make(PsrHttpFactory::class),
                     $config,
                     $app->make(LoggerInterface::class)
                 );
             }
         );
 
-        // Register auth middleware
+        // Register Laravel middleware wrapper
         $this->app->singleton(
-            AuthMiddleware::class,
+            LaravelMCPAuthMiddleware::class,
             function ($app) {
-                $config = [
-                'context_types' => ['agency'],
-                'base_url' => config('app.url')
-                ];
-
-                return new AuthMiddleware(
-                    $app->make(DatabaseStorage::class),
-                    $app->make(ResponseFactoryInterface::class),
-                    $app->make(StreamFactoryInterface::class),
-                    $config
+                return new LaravelMCPAuthMiddleware(
+                    $app->make(LaravelMCPProvider::class),
+                    $app->make(PsrHttpFactory::class)
                 );
             }
         );
@@ -142,7 +137,7 @@ class LaravelServiceProvider extends ServiceProvider
     {
         // Register middleware alias
         $router = $this->app['router'];
-        $router->aliasMiddleware('mcp.auth', AuthMiddleware::class);
+        $router->aliasMiddleware('mcp.auth', LaravelMCPAuthMiddleware::class);
     }
 
     /**
@@ -153,11 +148,11 @@ class LaravelServiceProvider extends ServiceProvider
         return [
             MCPSaaSServer::class,
             LaravelMCPProvider::class,
+            LaravelMCPAuthMiddleware::class,
             ToolRegistry::class,
             PromptRegistry::class,
             ResourceRegistry::class,
             DatabaseStorage::class,
-            AuthMiddleware::class,
             WellKnownProvider::class,
             ResponseFactoryInterface::class,
             StreamFactoryInterface::class,
@@ -167,7 +162,62 @@ class LaravelServiceProvider extends ServiceProvider
 }
 
 /**
- * Laravel-specific MCP provider (matches SlimMCPProvider pattern)
+ * Laravel middleware wrapper for PSR-15 AuthMiddleware
+ */
+class LaravelMCPAuthMiddleware
+{
+    private LaravelMCPProvider $mcpProvider;
+    private PsrHttpFactory $psrFactory;
+
+    public function __construct(LaravelMCPProvider $mcpProvider, PsrHttpFactory $psrFactory)
+    {
+        $this->mcpProvider = $mcpProvider;
+        $this->psrFactory = $psrFactory;
+    }
+
+    public function handle(Request $request, Closure $next)
+    {
+        // Convert Laravel request to PSR-7
+        $psrRequest = $this->psrFactory->createRequest($request);
+        $psrResponse = $this->psrFactory->createResponse(new Response());
+
+        // Create PSR-15 request handler
+        $handler = new class($next, $this->psrFactory) implements \Psr\Http\Server\RequestHandlerInterface {
+            private Closure $next;
+            private PsrHttpFactory $psrFactory;
+
+            public function __construct(Closure $next, PsrHttpFactory $psrFactory)
+            {
+                $this->next = $next;
+                $this->psrFactory = $psrFactory;
+            }
+
+            public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
+            {
+                // Convert PSR-7 request back to Laravel request for next middleware
+                $laravelRequest = $this->psrFactory->createRequest($request);
+                $laravelResponse = ($this->next)($laravelRequest);
+
+                // Convert Laravel response to PSR-7
+                return $this->psrFactory->createResponse($laravelResponse);
+            }
+        };
+
+        // Run PSR-15 auth middleware
+        $authMiddleware = $this->mcpProvider->getAuthMiddleware();
+        $psrResponse = $authMiddleware($psrRequest, $handler);
+
+        // Convert PSR-7 response back to Laravel response
+        return new Response(
+            $psrResponse->getBody()->getContents(),
+            $psrResponse->getStatusCode(),
+            $psrResponse->getHeaders()
+        );
+    }
+}
+
+/**
+ * Laravel-specific MCP provider
  */
 class LaravelMCPProvider
 {
@@ -183,13 +233,27 @@ class LaravelMCPProvider
         ResourceRegistry $resourceRegistry,
         ResponseFactoryInterface $responseFactory,
         StreamFactoryInterface $streamFactory,
+        PsrHttpFactory $psrFactory,
         array $config = [],
         ?LoggerInterface $logger = null
     ) {
+        $this->psrFactory = $psrFactory;
         $this->mcpServer = new MCPSaaSServer($storage, $toolRegistry, $promptRegistry, $resourceRegistry, $config, $logger);
-        $this->authMiddleware = new AuthMiddleware($storage, $responseFactory, $streamFactory, $config['auth'] ?? []);
+
+        $authConfig = $config['auth'] ?? [];
+
+        // Merge oauth_endpoints from discovery config into auth config
+        if (isset($config['discovery']['oauth_endpoints'])) {
+            $authConfig['oauth_endpoints'] = $config['discovery']['oauth_endpoints'];
+        }
+
+        $this->authMiddleware = new AuthMiddleware(
+            $storage,
+            $responseFactory,
+            $streamFactory,
+            $authConfig
+        );
         $this->discoveryProvider = new WellKnownProvider($config['discovery'] ?? []);
-        $this->psrFactory = app(PsrHttpFactory::class);
     }
 
     /**
@@ -209,13 +273,13 @@ class LaravelMCPProvider
     }
 
     /**
-     * Handle MCP requests (Laravel-style)
+     * Handle MCP requests
      */
     public function handleMCP(Request $request): Response
     {
         // Convert Laravel request to PSR-7
         $psrRequest = $this->psrFactory->createRequest($request);
-        $psrResponse = $this->psrFactory->createResponse(new \Illuminate\Http\Response());
+        $psrResponse = $this->psrFactory->createResponse(new Response());
 
         // Handle with MCP server
         $psrResponse = $this->mcpServer->handle($psrRequest, $psrResponse);
@@ -234,7 +298,7 @@ class LaravelMCPProvider
     public function handleAuthDiscovery(Request $request): Response
     {
         $psrRequest = $this->psrFactory->createRequest($request);
-        $psrResponse = $this->psrFactory->createResponse(new \Illuminate\Http\Response());
+        $psrResponse = $this->psrFactory->createResponse(new Response());
 
         $psrResponse = $this->discoveryProvider->authorizationServer($psrRequest, $psrResponse);
 
@@ -251,7 +315,7 @@ class LaravelMCPProvider
     public function handleResourceDiscovery(Request $request): Response
     {
         $psrRequest = $this->psrFactory->createRequest($request);
-        $psrResponse = $this->psrFactory->createResponse(new \Illuminate\Http\Response());
+        $psrResponse = $this->psrFactory->createResponse(new Response());
 
         $psrResponse = $this->discoveryProvider->protectedResource($psrRequest, $psrResponse);
 

@@ -176,9 +176,9 @@ class AuthMiddleware
                 'message' => 'Authentication required',
                 'data' => [
                     'oauth' => [
-                        'authorization_endpoint' => "{$baseUrl}/oauth/authorize",
-                        'token_endpoint' => "{$baseUrl}/oauth/token",
-                        'registration_endpoint' => "{$baseUrl}/oauth/register"
+                        'authorization_endpoint' => $baseUrl . $this->config['oauth_endpoints']['authorize'],
+                        'token_endpoint' => $baseUrl . $this->config['oauth_endpoints']['token'],
+                        'registration_endpoint' => $baseUrl . $this->config['oauth_endpoints']['register']
                     ]
                 ]
             ],
@@ -365,6 +365,13 @@ class AuthMiddleware
                 'user_id' => 1,
                 'scope' => 'mcp:read mcp:write',
                 'access_token' => 'authless-access'
+            ],
+            'oauth_endpoints' => [
+                'authorize' => '/oauth/authorize',
+                'token' => '/oauth/token',
+                'register' => '/oauth/register',
+                'revoke' => '/oauth/revoke',
+                'resource' => '/oauth/resource'
             ]
         ];
     }

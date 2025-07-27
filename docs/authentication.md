@@ -65,6 +65,108 @@ $oauthServer = new OAuthServer(
 );
 ```
 
+### Custom OAuth Endpoint Configuration
+
+#### Overview
+
+By default, the MCP SaaS Server uses standard `/oauth/*` paths for OAuth endpoints. To avoid conflicts with existing OAuth systems on your server, you can configure custom paths.
+
+#### Configuration Structure
+
+Configure custom OAuth endpoints through the discovery configuration:
+
+```php
+$config = [
+    'discovery' => [
+        'oauth_endpoints' => [
+            'authorize' => '/mcp-oauth/authorize',     // Custom authorization endpoint
+            'token' => '/mcp-oauth/token',             // Custom token endpoint
+            'register' => '/mcp-oauth/register',       // Custom registration endpoint
+            'revoke' => '/mcp-oauth/revoke',           // Custom revocation endpoint
+            'resource' => '/mcp-oauth/resource'        // Custom resource endpoint (2025-06-18)
+        ]
+    ],
+    'auth' => [
+        'oauth_endpoints' => [
+            'authorize' => '/mcp-oauth/authorize',     // Must match discovery config
+            'token' => '/mcp-oauth/token',             // Must match discovery config
+            'register' => '/mcp-oauth/register',       // Must match discovery config
+            'revoke' => '/mcp-oauth/revoke',           // Must match discovery config
+            'resource' => '/mcp-oauth/resource'        // Must match discovery config
+        ]
+    ]
+];
+```
+
+#### Implementation Example
+
+```php
+use Seolinkmap\Waasup\Auth\OAuthServer;
+use Seolinkmap\Waasup\Integration\Slim\SlimMCPProvider;
+
+// Configure custom OAuth paths to avoid conflicts with existing OAuth
+$config = [
+    'discovery' => [
+        'oauth_endpoints' => [
+            'authorize' => '/api/v2/mcp/authorize',
+            'token' => '/api/v2/mcp/token',
+            'register' => '/api/v2/mcp/register',
+            'revoke' => '/api/v2/mcp/revoke'
+        ]
+    ],
+    'auth' => [
+        'oauth_endpoints' => [
+            'authorize' => '/api/v2/mcp/authorize',
+            'token' => '/api/v2/mcp/token',
+            'register' => '/api/v2/mcp/register',
+            'revoke' => '/api/v2/mcp/revoke'
+        ],
+        'context_types' => ['agency'],
+        'base_url' => 'https://your-server.com'
+    ]
+];
+
+// Register CUSTOM OAuth routes (not the default /oauth/* paths)
+$app->get('/api/v2/mcp/authorize', [$oauthServer, 'authorize']);
+$app->post('/api/v2/mcp/verify', [$oauthServer, 'verify']);
+$app->post('/api/v2/mcp/consent', [$oauthServer, 'consent']);
+$app->post('/api/v2/mcp/token', [$oauthServer, 'token']);
+$app->post('/api/v2/mcp/revoke', [$oauthServer, 'revoke']);
+$app->post('/api/v2/mcp/register', [$oauthServer, 'register']);
+```
+
+#### Common Use Cases
+
+**Avoiding Conflicts with Existing OAuth:**
+```php
+// Your existing OAuth system uses /oauth/*
+// Configure MCP to use completely different paths
+$config = [
+    'discovery' => [
+        'oauth_endpoints' => [
+            'authorize' => '/mcp-auth/authorize',
+            'token' => '/mcp-auth/token',
+            'register' => '/mcp-auth/register'
+        ]
+    ]
+];
+```
+
+**API Versioning:**
+```php
+// Use versioned API paths
+$config = [
+    'discovery' => [
+        'oauth_endpoints' => [
+            'authorize' => '/api/v3/oauth/authorize',
+            'token' => '/api/v3/oauth/token',
+            'register' => '/api/v3/oauth/register'
+        ]
+    ]
+];
+```
+
+
 ### Authorization Endpoint
 
 The authorization endpoint handles user authentication and consent with RFC 8707 Resource Indicators:

@@ -209,6 +209,68 @@ Content-Type: application/json
 # Actual response via streaming: {"jsonrpc":"2.0","result":{"status":"pong","timestamp":"..."},"id":2}
 ```
 
+### OAuth Endpoint Configuration
+
+To avoid collisions with existing OAuth systems on your server, you can configure custom OAuth endpoint URLs. If not configured, the server uses default `/oauth/*` paths.
+
+#### Configuration Structure
+
+```json
+{
+  "discovery": {
+    "oauth_endpoints": {
+      "authorize": "/mcp-auth/authorize",
+      "token": "/mcp-auth/token",
+      "register": "/mcp-auth/register",
+      "revoke": "/mcp-auth/revoke",
+      "resource": "/mcp-auth/resource"
+    }
+  }
+}
+```
+
+#### Default vs Custom Endpoints
+
+| Endpoint | Default Path | Custom Example | Purpose |
+|----------|-------------|----------------|---------|
+| Authorization | `/oauth/authorize` | `/mcp-auth/authorize` | User authorization with consent |
+| Token | `/oauth/token` | `/mcp-auth/token` | Token exchange and refresh |
+| Registration | `/oauth/register` | `/mcp-auth/register` | Dynamic client registration |
+| Revocation | `/oauth/revoke` | `/mcp-auth/revoke` | Token revocation |
+| Resource | `/oauth/resource` | `/mcp-auth/resource` | Resource indicator endpoint (2025-06-18) |
+
+#### Discovery Response Examples
+
+**With Custom Configuration:**
+```json
+{
+  "issuer": "https://server.com",
+  "authorization_endpoint": "https://server.com/mcp-auth/authorize",
+  "token_endpoint": "https://server.com/mcp-auth/token",
+  "registration_endpoint": "https://server.com/mcp-auth/register",
+  "revocation_endpoint": "https://server.com/mcp-auth/revoke"
+}
+```
+
+**Authentication Error Response (401) with Custom URLs:**
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32000,
+    "message": "Authentication required",
+    "data": {
+      "oauth": {
+        "authorization_endpoint": "https://server.com/mcp-auth/authorize",
+        "token_endpoint": "https://server.com/mcp-auth/token",
+        "registration_endpoint": "https://server.com/mcp-auth/register"
+      }
+    }
+  },
+  "id": null
+}
+```
+
 ## Core Methods
 
 ### ping
