@@ -560,28 +560,81 @@ class MCPSaaSServer
     private function getDefaultConfig(): array
     {
         return [
-        'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
-        'server_info' => [
-            'name' => 'WaaSuP MCP SaaS Server',
-            'version' => '1.0.0'
-        ],
-        'sse' => [
-            'keepalive_interval' => 1,
-            'max_connection_time' => 1800,
-            'switch_interval_after' => 60
-        ],
-        'streamable_http' => [
-            'keepalive_interval' => 2,
-            'max_connection_time' => 1800,
-            'switch_interval_after' => 60
-        ],
-        'oauth' => [
-            'resource_server' => true,
-            'resource_indicators_supported' => true,
-            'resource_indicator' => null
-        ],
-        'authless' => false,
-        'base_url' => null
+            'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
+            'server_info' => [
+                'name' => 'WaaSuP MCP SaaS Server',
+                'version' => '1.0.0'
+            ],
+            'sse' => [
+                'keepalive_interval' => 1,
+                'max_connection_time' => 1800,
+                'switch_interval_after' => 60,
+                'test_mode' => false  // SSETransport set true in unit tests
+            ],
+            'streamable_http' => [
+                'keepalive_interval' => 2,
+                'max_connection_time' => 1800,
+                'switch_interval_after' => 60,
+                'test_mode' => false  // StreamableHTTPTransport set true in unit tests
+            ],
+            'oauth' => [
+                'resource_server' => true,
+                'resource_indicators_supported' => true,
+                'resource_indicator' => null
+            ],
+            'authless' => false,
+            'base_url' => null,
+
+            // Keys that AuthMiddleware and/or WellKnownProvider expects
+            'context_types' => ['agency', 'user'],
+            'validate_scope' => true,
+            'required_scopes' => ['mcp:read'],
+            'resource_server_metadata' => true,
+            'require_resource_binding' => true,
+            'authless_context_id' => 'public',
+            'authless_context_data' => [
+                'id' => 1,
+                'name' => 'Public Access',
+                'active' => true,
+                'type' => 'public'
+            ],
+            'authless_token_data' => [
+                'user_id' => 1,
+                'scope' => 'mcp:read mcp:write',
+                'access_token' => 'authless-access'
+            ],
+            'oauth_endpoints' => [
+                'authorize' => '/oauth/authorize',
+                'token' => '/oauth/token',
+                'register' => '/oauth/register',
+                'revoke' => '/oauth/revoke'
+            ],
+
+            // Keys that OAuthServer expects
+            'session_lifetime' => 3600,
+            'google' => [
+                'client_id' => null,
+                'client_secret' => null,
+                'redirect_uri' => null
+            ],
+            'linkedin' => [
+                'client_id' => null,
+                'client_secret' => null,
+                'redirect_uri' => null
+            ],
+            'github' => [
+                'client_id' => null,
+                'client_secret' => null,
+                'redirect_uri' => null
+            ],
+
+            // Keys that WellKnownProvider expects
+            'scopes_supported' => ['mcp:read', 'mcp:write'],
+
+            // Keys that DatabaseStorage expects
+            'table_prefix' => 'mcp_',
+            'cleanup_interval' => 3600,
+            'table_mapping' => []
         ];
     }
 }

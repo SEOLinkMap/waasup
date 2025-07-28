@@ -182,7 +182,7 @@ class LaravelMCPAuthMiddleware
         $psrResponse = $this->psrFactory->createResponse(new Response());
 
         // Create PSR-15 request handler
-        $handler = new class($next, $this->psrFactory) implements \Psr\Http\Server\RequestHandlerInterface {
+        $handler = new class ($next, $this->psrFactory) implements \Psr\Http\Server\RequestHandlerInterface {
             private Closure $next;
             private PsrHttpFactory $psrFactory;
 

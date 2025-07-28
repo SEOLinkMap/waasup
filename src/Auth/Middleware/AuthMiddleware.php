@@ -26,13 +26,13 @@ class AuthMiddleware
         $this->storage = $storage;
         $this->responseFactory = $responseFactory;
         $this->streamFactory = $streamFactory;
-        $this->config = array_merge($this->getDefaultConfig(), $config);
+        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
     }
 
     public function __invoke(Request $request, RequestHandler $handler): Response
     {
         try {
-            if ($this->config['authless'] ?? false) {
+            if ($this->config['auth']['authless']) {
                 return $this->handleAuthlessRequest($request, $handler);
             }
 
@@ -62,12 +62,10 @@ class AuthMiddleware
 
             $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version');
 
-            // OAuth Resource Server validation for 2025-06-18
             if ($protocolVersion === '2025-06-18') {
                 try {
                     $this->validateResourceServerRequirements($request, $tokenData);
                 } catch (AuthenticationException $e) {
-                    // Return specific error for resource binding failures
                     return $this->createErrorResponse('Resource validation failed', 401);
                 }
             }
@@ -91,27 +89,13 @@ class AuthMiddleware
         }
     }
 
-    /**
-     * Handle authless requests by injecting default context
-     */
     private function handleAuthlessRequest(Request $request, RequestHandler $handler): Response
     {
         $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version');
-        $contextId = $this->extractContextId($request) ?? $this->config['authless_context_id'] ?? 'public';
+        $contextId = $this->extractContextId($request) ?? $this->config['auth']['authless_context_id'];
 
-        $contextData = $this->config['authless_context_data'] ?? [
-            'id' => 1,
-            'name' => 'Public Access',
-            'active' => true,
-            'type' => 'public'
-        ];
-
-        $tokenData = $this->config['authless_token_data'] ?? [
-            'user_id' => 1,
-            'scope' => 'mcp:read mcp:write',
-            'access_token' => 'authless-access',
-            'expires_at' => time() + 86400
-        ];
+        $contextData = $this->config['auth']['authless_context_data'];
+        $tokenData = $this->config['auth']['authless_token_data'];
 
         $request = $request->withAttribute(
             'mcp_context',
@@ -128,19 +112,16 @@ class AuthMiddleware
         return $handler->handle($request);
     }
 
-    // RFC 8707 Resource Indicators validation for 2025-06-18
     private function validateResourceServerRequirements(Request $request, array $tokenData): void
     {
         $baseUrl = $this->getBaseUrl($request);
         $contextId = $this->extractContextId($request);
         $expectedResource = $baseUrl . '/mcp/' . $contextId;
 
-        // Token must be bound to this specific resource
         if (!isset($tokenData['resource']) || $tokenData['resource'] !== $expectedResource) {
             throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
         }
 
-        // Audience validation prevents token mis-redemption
         if (!isset($tokenData['aud']) || !in_array($expectedResource, (array)$tokenData['aud'])) {
             throw new AuthenticationException('Token audience validation failed');
         }
@@ -153,7 +134,7 @@ class AuthMiddleware
     private function validateTokenScope(string $scope): bool
     {
         $tokenScopes = explode(' ', $scope);
-        $requiredScopes = $this->config['required_scopes'] ?? ['mcp:read'];
+        $requiredScopes = $this->config['auth']['required_scopes'];
 
         foreach ($requiredScopes as $requiredScope) {
             if (!in_array($requiredScope, $tokenScopes)) {
@@ -169,6 +150,8 @@ class AuthMiddleware
         $baseUrl = $this->getBaseUrl($request);
         $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version');
 
+        $oauthEndpoints = $this->config['discovery']['oauth_endpoints'] ?? $this->config['auth']['oauth_endpoints'];
+
         $responseData = [
             'jsonrpc' => '2.0',
             'error' => [
@@ -176,24 +159,23 @@ class AuthMiddleware
                 'message' => 'Authentication required',
                 'data' => [
                     'oauth' => [
-                        'authorization_endpoint' => $baseUrl . $this->config['oauth_endpoints']['authorize'],
-                        'token_endpoint' => $baseUrl . $this->config['oauth_endpoints']['token'],
-                        'registration_endpoint' => $baseUrl . $this->config['oauth_endpoints']['register']
+                        'authorization_endpoint' => $baseUrl . $oauthEndpoints['authorize'],
+                        'token_endpoint' => $baseUrl . $oauthEndpoints['token'],
+                        'registration_endpoint' => $baseUrl . $oauthEndpoints['register']
                     ]
                 ]
             ],
             'id' => null
         ];
 
-        // OAuth Resource Server metadata for 2025-06-18
-        if ($protocolVersion === '2025-06-18') {
-            $contextId = $this->extractContextId($request);
-            $resourceUrl = $baseUrl . '/mcp/' . $contextId;
+        $contextId = $this->extractContextId($request);
+        $resourceUrl = $baseUrl . '/mcp/' . $contextId;
 
-            $responseData['error']['data']['oauth']['resource'] = $resourceUrl;
-            $responseData['error']['data']['oauth']['resource_metadata_endpoint'] = $baseUrl . '/.well-known/oauth-protected-resource';
-            $responseData['error']['data']['oauth']['authorization_server_metadata_endpoint'] = $baseUrl . '/.well-known/oauth-authorization-server';
-        }
+        $wellknownEndpoints = $this->config['wellknown'];
+
+        $responseData['error']['data']['oauth']['resource'] = $resourceUrl;
+        $responseData['error']['data']['oauth']['resource_metadata_endpoint'] = $baseUrl . $wellknownEndpoints['protected_resource'];
+        $responseData['error']['data']['oauth']['authorization_server_metadata_endpoint'] = $baseUrl . $wellknownEndpoints['auth_server'];
 
         $jsonContent = json_encode($responseData);
         if ($jsonContent === false) {
@@ -207,16 +189,11 @@ class AuthMiddleware
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Access-Control-Allow-Origin', '*');
 
-        // WWW-Authenticate header with resource metadata for 2025-06-18
-        if ($protocolVersion === '2025-06-18') {
-            $resourceMetadataUrl = $baseUrl . '/.well-known/oauth-protected-resource';
-            $response = $response->withHeader(
-                'WWW-Authenticate',
-                'Bearer realm="MCP Server", resource_metadata="' . $resourceMetadataUrl . '"'
-            );
-        } else {
-            $response = $response->withHeader('WWW-Authenticate', 'Bearer realm="MCP Server"');
-        }
+        $resourceMetadataUrl = $baseUrl . $wellknownEndpoints['protected_resource'];
+        $response = $response->withHeader(
+            'WWW-Authenticate',
+            'Bearer realm="MCP Server", resource_metadata="' . $resourceMetadataUrl . '"'
+        );
 
         return $response;
     }
@@ -229,8 +206,8 @@ class AuthMiddleware
             return null;
         }
 
-        if ($this->config['validate_scope'] && isset($tokenData['scope'])) {
-            $requiredScopes = $this->config['required_scopes'] ?? [];
+        if ($this->config['auth']['validate_scope'] && isset($tokenData['scope'])) {
+            $requiredScopes = $this->config['auth']['required_scopes'];
             $tokenScopes = explode(' ', $tokenData['scope']);
 
             foreach ($requiredScopes as $requiredScope) {
@@ -271,7 +248,7 @@ class AuthMiddleware
 
     protected function validateContext(string $contextId): ?array
     {
-        $contextTypes = $this->config['context_types'] ?? ['agency', 'user'];
+        $contextTypes = $this->config['auth']['context_types'];
 
         foreach ($contextTypes as $type) {
             $contextData = $this->storage->getContextData($contextId, $type);
@@ -326,20 +303,17 @@ class AuthMiddleware
 
     protected function getBaseUrl(Request $request): string
     {
-        // First try to get from config (for tests and when explicitly set)
-        if (!empty($this->config['base_url'])) {
-            return $this->config['base_url'];
+        if (!empty($this->config['auth']['base_url'])) {
+            return $this->config['auth']['base_url'];
         }
 
-        // Fall back to extracting from request URI
+        if (!empty($this->config['discovery']['base_url'])) {
+            return $this->config['discovery']['base_url'];
+        }
+
         $uri = $request->getUri();
         $scheme = $uri->getScheme();
         $host = $uri->getHost();
-
-        // If request doesn't have proper scheme/host, use default
-        if (empty($scheme) || empty($host)) {
-            return 'https://localhost';
-        }
 
         return $scheme . '://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
@@ -347,31 +321,33 @@ class AuthMiddleware
     protected function getDefaultConfig(): array
     {
         return [
-            'context_types' => ['agency', 'user'],
-            'validate_scope' => true,
-            'required_scopes' => ['mcp:read'],
-            'base_url' => '',
-            'resource_server_metadata' => true,
-            'require_resource_binding' => true,
-            'authless' => false,
-            'authless_context_id' => 'public',
-            'authless_context_data' => [
-                'id' => 1,
-                'name' => 'Public Access',
-                'active' => true,
-                'type' => 'public'
+            'auth' => [
+                'context_types' => ['agency', 'user'],
+                'validate_scope' => true,
+                'required_scopes' => ['mcp:read'],
+                'base_url' => '',
+                'authless' => false,
+                'authless_context_id' => 'public',
+                'authless_context_data' => [
+                    'id' => 1,
+                    'name' => 'Public Access',
+                    'active' => true,
+                    'type' => 'public'
+                ],
+                'authless_token_data' => [
+                    'user_id' => 1,
+                    'scope' => 'mcp:read mcp:write',
+                    'access_token' => 'authless-access'
+                ],
+                'oauth_endpoints' => [
+                    'authorize' => '/oauth/authorize',
+                    'token' => '/oauth/token',
+                    'register' => '/oauth/register'
+                ]
             ],
-            'authless_token_data' => [
-                'user_id' => 1,
-                'scope' => 'mcp:read mcp:write',
-                'access_token' => 'authless-access'
-            ],
-            'oauth_endpoints' => [
-                'authorize' => '/oauth/authorize',
-                'token' => '/oauth/token',
-                'register' => '/oauth/register',
-                'revoke' => '/oauth/revoke',
-                'resource' => '/oauth/resource'
+            'wellknown' => [
+                'auth_server' => '/.well-known/oauth-authorization-server',
+                'protected_resource' => '/.well-known/oauth-protected-resource'
             ]
         ];
     }
