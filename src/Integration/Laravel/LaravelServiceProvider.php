@@ -67,16 +67,16 @@ class LaravelServiceProvider extends ServiceProvider
         $this->app->singleton(
             MCPSaaSServer::class,
             function ($app) {
-                $config = [
-                'server_info' => [
-                    'name' => config('app.name') . ' MCP Server',
-                    'version' => '1.0.0'
-                ],
-                'auth' => [
-                    'context_types' => ['agency'],
-                    'base_url' => config('app.url')
-                ]
-                ];
+                $config = array_merge([
+                    'server_info' => [
+                        'name' => config('app.name') . ' MCP Server',
+                        'version' => '1.0.0'
+                    ],
+                    'auth' => [
+                        'context_types' => ['agency'],
+                        'base_url' => config('app.url')
+                    ]
+                ], config('mcp', []));
 
                 return new MCPSaaSServer(
                     $app->make(DatabaseStorage::class),
@@ -93,16 +93,16 @@ class LaravelServiceProvider extends ServiceProvider
         $this->app->singleton(
             LaravelMCPProvider::class,
             function ($app) {
-                $config = [
-                'server_info' => [
-                    'name' => config('app.name') . ' MCP Server',
-                    'version' => '1.0.0'
-                ],
-                'auth' => [
-                    'context_types' => ['agency'],
-                    'base_url' => config('app.url')
-                ]
-                ];
+                $config = array_merge([
+                    'server_info' => [
+                        'name' => config('app.name') . ' MCP Server',
+                        'version' => '1.0.0'
+                    ],
+                    'auth' => [
+                        'context_types' => ['agency'],
+                        'base_url' => config('app.url')
+                    ]
+                ], config('mcp', []));
 
                 return new LaravelMCPProvider(
                     $app->make(DatabaseStorage::class),

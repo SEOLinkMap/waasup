@@ -15,7 +15,7 @@ use Psr\Log\NullLogger;
  *
  * Example (recommended):
  * ```php
- * $config = ['table_prefix' => 'mcp_'];
+ * $config = ['database' => ['table_prefix' => 'mcp_']];
  * $storage = new DatabaseStorage($pdo, $config);
  * // Results in tables: mcp_agencies, mcp_users, mcp_oauth_clients, etc.
  * ```
@@ -29,12 +29,14 @@ use Psr\Log\NullLogger;
  * Example (advanced - only for existing tables with data):
  * ```php
  * $config = [
- *     'table_prefix' => '',  // Empty since using custom mappings
- *     'table_mapping' => [
- *         'agencies' => 'client_agency',    // Your existing agency table
- *         'users' => 'app_users',           // Your existing user table
- *         // Don't map oauth_clients - let it use default since you have no data
- *         // Don't map sessions - let it use default (these are always new)
+ *     'database' => [
+ *         'table_prefix' => '',  // Empty since using custom mappings
+ *         'table_mapping' => [
+ *             'agencies' => 'client_agency',    // Your existing agency table
+ *             'users' => 'app_users',           // Your existing user table
+ *             // Don't map oauth_clients - let it use default since you have no data
+ *             // Don't map sessions - let it use default (these are always new)
+ *         ]
  *     ]
  * ];
  * $storage = new DatabaseStorage($pdo, $config);
@@ -75,17 +77,19 @@ class DatabaseStorage implements StorageInterface
      * Initialize database storage
      *
      * @param \PDO $pdo Database connection
-     * @param array $config Configuration array with optional keys:
-     *                     - 'table_prefix': Prefix for default table names (default: 'mcp_')
-     *                     - 'table_mapping': Map logical names to existing table names (use sparingly)
-     *                     - 'cleanup_interval': Cleanup frequency in seconds (default: 3600)
+     * @param array $config Configuration array with optional nested structure:
+     *                     - 'database': Database-specific configuration
+     *                       - 'table_prefix': Prefix for default table names (default: 'mcp_')
+     *                       - 'table_mapping': Map logical names to existing table names (use sparingly)
+     *                       - 'cleanup_interval': Cleanup frequency in seconds (default: 3600)
+     * @param LoggerInterface|null $logger Optional logger instance
      */
-    public function __construct(\PDO $pdo, array $config = [])
+    public function __construct(\PDO $pdo, array $config = [], ?LoggerInterface $logger = null)
     {
-        $this->logger = $config['logger'] ?? new NullLogger();
+        $this->logger = $logger ?? $config['logger'] ?? new NullLogger();
         $this->pdo = $pdo;
-        $this->config = array_merge($this->getDefaultConfig(), $config);
-        $this->tablePrefix = $this->config['table_prefix'];
+        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
+        $this->tablePrefix = $this->config['database']['table_prefix'];
         $this->databaseType = $this->detectDatabaseType();
     }
 
@@ -123,8 +127,8 @@ class DatabaseStorage implements StorageInterface
 
         // Check if there's a custom table mapping for this logical table
         // Only use this if you have existing tables with data to preserve
-        if (isset($this->config['table_mapping'][$logicalTableName])) {
-            return $this->config['table_mapping'][$logicalTableName];
+        if (isset($this->config['database']['table_mapping'][$logicalTableName])) {
+            return $this->config['database']['table_mapping'][$logicalTableName];
         }
 
         // Fall back to prefixed default table name
@@ -909,13 +913,17 @@ class DatabaseStorage implements StorageInterface
     }
 
     /**
-     * Get default configuration values
+     * Get default configuration values that match the main server structure
+     * Only includes database-specific configuration options used by this class
      */
     private function getDefaultConfig(): array
     {
         return [
-            'table_prefix' => 'mcp_',       // Default prefix for table names
-            'cleanup_interval' => 3600      // Cleanup expired sessions every hour
+            'database' => [
+                'table_prefix' => 'mcp_',
+                'cleanup_interval' => 3600,
+                'table_mapping' => []
+            ]
         ];
     }
 }
