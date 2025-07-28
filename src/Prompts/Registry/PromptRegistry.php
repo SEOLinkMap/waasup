@@ -93,7 +93,7 @@ class PromptRegistry
      */
     public function getPromptNames(): array
     {
-        return array_merge(
+        return array_replace_recursive(
             array_keys($this->prompts),
             array_keys($this->callables)
         );

@@ -144,7 +144,7 @@ class ResourceRegistry
      */
     public function getResourceUris(): array
     {
-        return array_merge(
+        return array_replace_recursive(
             array_keys($this->resources),
             array_keys($this->callables)
         );

@@ -11,7 +11,7 @@ class WellKnownProvider
 
     public function __construct(array $config = [])
     {
-        $this->config = array_merge($this->getDefaultConfig(), $config);
+        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
     }
 
     public function protectedResource(Request $request, Response $response): Response

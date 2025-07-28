@@ -159,7 +159,7 @@ class ProtocolManager
         $existingData = $this->storage->getSession($sessionId) ?? [];
 
         // Update with new protocol version
-        $sessionData = array_merge($existingData, [
+        $sessionData = array_replace_recursive($existingData, [
             'protocol_version' => $version,
             'updated_at' => time()
         ]);

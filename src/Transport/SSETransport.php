@@ -19,7 +19,7 @@ class SSETransport implements TransportInterface
     public function __construct(StorageInterface $storage, array $config = [])
     {
         $this->storage = $storage;
-        $this->config = array_merge($this->getDefaultConfig(), $config);
+        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
     }
 
     /**

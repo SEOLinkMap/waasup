@@ -44,7 +44,7 @@ class MCPSaaSServer
         $this->toolRegistry = $toolRegistry;
         $this->promptRegistry = $promptRegistry;
         $this->resourceRegistry = $resourceRegistry;
-        $this->config = array_merge($this->getDefaultConfig(), $config);
+        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
         $this->logger = $logger ?? new NullLogger();
 
         $this->versionNegotiator = new VersionNegotiator($this->config);
@@ -418,7 +418,7 @@ class MCPSaaSServer
                     $request,
                     $response,
                     $this->sessionId,
-                    array_merge($this->contextData, ['protocol_version' => $protocolVersion])
+                    array_replace_recursive($this->contextData, ['protocol_version' => $protocolVersion])
                 );
                 return $streamableResponse;
             } catch (\Throwable $e) {
@@ -556,6 +556,9 @@ class MCPSaaSServer
 
     /**
      * Get default configuration
+     *
+     * This is the one location where every developer-facing configuration exists.
+     * Override them, if you need to, or let this repository handle things for you.
      */
     private function getDefaultConfig(): array
     {
@@ -567,7 +570,7 @@ class MCPSaaSServer
             'session_lifetime' => 3600,
             'server_info' => [
                 'name' => 'WaaSuP MCP SaaS Server',
-                'version' => '1.0.0'
+                'version' => '2.0.0'
             ],
             'auth' => [
                 'context_types' => ['agency', 'user'],

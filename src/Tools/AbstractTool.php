@@ -23,7 +23,7 @@ abstract class AbstractTool implements ToolInterface
         $this->name = $name;
         $this->description = $description;
         $this->inputSchema = $inputSchema;
-        $this->annotations = array_merge($this->getDefaultAnnotations(), $annotations);
+        $this->annotations = array_replace_recursive($this->getDefaultAnnotations(), $annotations);
     }
 
     public function getName(): string

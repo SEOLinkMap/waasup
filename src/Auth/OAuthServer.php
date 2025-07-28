@@ -28,7 +28,7 @@ class OAuthServer
         $this->storage = $storage;
         $this->responseFactory = $responseFactory;
         $this->streamFactory = $streamFactory;
-        $this->config = array_merge($this->getDefaultConfig(), $config);
+        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
 
         $this->initializeSocialProviders();
     }

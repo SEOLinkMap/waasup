@@ -92,7 +92,7 @@ class ToolRegistry
 
     public function getToolNames(): array
     {
-        return array_merge(
+        return array_replace_recursive(
             array_keys($this->tools),
             array_keys($this->callables)
         );

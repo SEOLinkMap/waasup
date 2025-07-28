@@ -67,7 +67,7 @@ class LaravelServiceProvider extends ServiceProvider
         $this->app->singleton(
             MCPSaaSServer::class,
             function ($app) {
-                $config = array_merge([
+                $config = array_replace_recursive([
                     'server_info' => [
                         'name' => config('app.name') . ' MCP Server',
                         'version' => '1.0.0'
@@ -93,7 +93,7 @@ class LaravelServiceProvider extends ServiceProvider
         $this->app->singleton(
             LaravelMCPProvider::class,
             function ($app) {
-                $config = array_merge([
+                $config = array_replace_recursive([
                     'server_info' => [
                         'name' => config('app.name') . ' MCP Server',
                         'version' => '1.0.0'

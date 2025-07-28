@@ -28,7 +28,7 @@ class StreamableHTTPTransport implements TransportInterface
     ) {
         $this->logger = $logger ?? new NullLogger();
         $this->storage = $storage;
-        $this->config = array_merge($this->getDefaultConfig(), $config);
+        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
     }
 
     public function handleConnection(
