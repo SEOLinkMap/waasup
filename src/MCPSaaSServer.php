@@ -47,10 +47,10 @@ class MCPSaaSServer
         $this->config = array_merge($this->getDefaultConfig(), $config);
         $this->logger = $logger ?? new NullLogger();
 
-        $this->versionNegotiator = new VersionNegotiator($this->config['supported_versions']);
+        $this->versionNegotiator = new VersionNegotiator($this->config);
         $this->messageHandler = new MessageHandler($this->toolRegistry, $this->promptRegistry, $this->resourceRegistry, $this->storage, $this->config, $this->versionNegotiator);
-        $this->sseTransport = new SSETransport($this->storage, $this->config['sse']);
-        $this->streamableTransport = new StreamableHTTPTransport($this->storage, $this->config['streamable_http'], $this->logger);
+        $this->sseTransport = new SSETransport($this->storage, $this->config);
+        $this->streamableTransport = new StreamableHTTPTransport($this->storage, $this->config, $this->logger);
     }
 
     /**

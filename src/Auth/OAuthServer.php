@@ -490,28 +490,39 @@ class OAuthServer
      */
     private function initializeSocialProviders(): void
     {
-        if (isset($this->config['google'])) {
-            $this->googleProvider = new GoogleProvider(
-                $this->config['google']['client_id'],
-                $this->config['google']['client_secret'],
-                $this->config['google']['redirect_uri']
-            );
+        $providers = $this->config['oauth']['auth_server']['providers'] ?? [];
+
+        if (isset($providers['google'])) {
+            $googleConfig = $providers['google'];
+            if ($googleConfig['client_id'] && $googleConfig['client_secret'] && $googleConfig['redirect_uri']) {
+                $this->googleProvider = new GoogleProvider(
+                    $googleConfig['client_id'],
+                    $googleConfig['client_secret'],
+                    $googleConfig['redirect_uri']
+                );
+            }
         }
 
-        if (isset($this->config['linkedin'])) {
-            $this->linkedinProvider = new LinkedinProvider(
-                $this->config['linkedin']['client_id'],
-                $this->config['linkedin']['client_secret'],
-                $this->config['linkedin']['redirect_uri']
-            );
+        if (isset($providers['linkedin'])) {
+            $linkedinConfig = $providers['linkedin'];
+            if ($linkedinConfig['client_id'] && $linkedinConfig['client_secret'] && $linkedinConfig['redirect_uri']) {
+                $this->linkedinProvider = new LinkedinProvider(
+                    $linkedinConfig['client_id'],
+                    $linkedinConfig['client_secret'],
+                    $linkedinConfig['redirect_uri']
+                );
+            }
         }
 
-        if (isset($this->config['github'])) {
-            $this->githubProvider = new GithubProvider(
-                $this->config['github']['client_id'],
-                $this->config['github']['client_secret'],
-                $this->config['github']['redirect_uri']
-            );
+        if (isset($providers['github'])) {
+            $githubConfig = $providers['github'];
+            if ($githubConfig['client_id'] && $githubConfig['client_secret'] && $githubConfig['redirect_uri']) {
+                $this->githubProvider = new GithubProvider(
+                    $githubConfig['client_id'],
+                    $githubConfig['client_secret'],
+                    $githubConfig['redirect_uri']
+                );
+            }
         }
     }
 
@@ -934,7 +945,6 @@ class OAuthServer
     /**
      * Detect protocol version from request
      */
-    // @todo main server sets the protocol version during initialize. This is breaking the repo
     private function detectProtocolVersion(Request $request): string
     {
         // Check MCP-Protocol-Version header first
@@ -959,6 +969,11 @@ class OAuthServer
      */
     private function getBaseUrl(Request $request): string
     {
+        // Use configured base URL if available
+        if (!empty($this->config['base_url'])) {
+            return $this->config['base_url'];
+        }
+
         $uri = $request->getUri();
         return $uri->getScheme() . '://' . $uri->getHost() .
                ($uri->getPort() ? ':' . $uri->getPort() : '');
@@ -1147,8 +1162,28 @@ class OAuthServer
     private function getDefaultConfig(): array
     {
         return [
-            'base_url' => 'https://localhost',
-            'session_lifetime' => 3600
+            'base_url' => null,
+            'oauth' => [
+                'auth_server' => [
+                    'providers' => [
+                        'google' => [
+                            'client_id' => null,
+                            'client_secret' => null,
+                            'redirect_uri' => null
+                        ],
+                        'linkedin' => [
+                            'client_id' => null,
+                            'client_secret' => null,
+                            'redirect_uri' => null
+                        ],
+                        'github' => [
+                            'client_id' => null,
+                            'client_secret' => null,
+                            'redirect_uri' => null
+                        ]
+                    ]
+                ]
+            ]
         ];
     }
 }
