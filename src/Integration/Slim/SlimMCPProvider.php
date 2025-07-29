@@ -38,20 +38,15 @@ class SlimMCPProvider
         $logger = $logger ?? new NullLogger();
 
         $this->mcpServer = new MCPSaaSServer($storage, $toolRegistry, $promptRegistry, $resourceRegistry, $config, $logger);
-        $authConfig = $config['auth'] ?? [];
-
-        // Merge oauth_endpoints from discovery config into auth config
-        if (isset($config['discovery']['oauth_endpoints'])) {
-            $authConfig['oauth_endpoints'] = $config['discovery']['oauth_endpoints'];
-        }
 
         $this->authMiddleware = new AuthMiddleware(
             $storage,
             $responseFactory,
             $streamFactory,
-            $authConfig
+            $config
         );
-        $this->discoveryProvider = new WellKnownProvider($config['discovery'] ?? []);
+
+        $this->discoveryProvider = new WellKnownProvider($config);
     }
 
     /**
