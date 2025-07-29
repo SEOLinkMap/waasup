@@ -31,6 +31,24 @@ class AuthMiddleware
 
     public function __invoke(Request $request, RequestHandler $handler): Response
     {
+        if ($request->getMethod() === 'POST') {
+            $body = (string) $request->getBody();
+            if (!empty($body)) {
+                $data = json_decode($body, true);
+                if (is_array($data) && isset($data['method']) && $data['method'] === 'initialize') {
+                    // Rewind the body for the handler to read again
+                    if ($request->getBody()->isSeekable()) {
+                        $request->getBody()->rewind();
+                    }
+                    return $handler->handle($request);
+                }
+                // Rewind the body for normal processing
+                if ($request->getBody()->isSeekable()) {
+                    $request->getBody()->rewind();
+                }
+            }
+        }
+
         try {
             if ($this->config['auth']['authless']) {
                 return $this->handleAuthlessRequest($request, $handler);

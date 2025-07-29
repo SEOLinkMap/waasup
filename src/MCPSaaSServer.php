@@ -91,14 +91,17 @@ class MCPSaaSServer
                     }
                 }
 
-                // THEN check authentication (skip for authless mode)
-                if (empty($this->contextData) && !$isAuthless) {
+                // Check for initialize method - skip auth if this is initialize
+                $isInitialize = ($data['method'] ?? '') === 'initialize';
+
+                // THEN check authentication (skip for authless mode OR initialize)
+                if (!$isInitialize && empty($this->contextData) && !$isAuthless) {
                     throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
                 }
 
                 $this->sessionId = $this->negotiateSessionId($request, $data);
 
-                if (($data['method'] ?? '') === 'initialize') {
+                if ($isInitialize) {
                     // negotiate the protocol
                     $clientProtocolVersion = $data['params']['protocolVersion'] ?? null;
                     if (!$clientProtocolVersion) {
