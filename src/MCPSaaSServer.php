@@ -60,7 +60,7 @@ class MCPSaaSServer
     {
         try {
             $this->contextData = $request->getAttribute('mcp_context') ?? [];
-            $isAuthless = $this->config['authless'] ?? false;
+            $isAuthless = $this->config['auth']['authless'];
 
             if ($request->getMethod() === 'OPTIONS') {
                 return $this->handleCorsPreflightRequest($response);
@@ -197,7 +197,7 @@ class MCPSaaSServer
     private function negotiateSessionId(Request $request, ?array $data = null): ?string
     {
         $method = $request->getMethod();
-        $isAuthless = $this->config['authless'] ?? false;
+        $isAuthless = $this->config['auth']['authless'];
 
         // Check for existing session ID in header or route
         $existingSessionId = $this->extractSessionIdFromRequest($request);
