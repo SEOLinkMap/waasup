@@ -373,8 +373,7 @@ class MCPSaaSServer
 
         // Only check MCP-Protocol-Version header for 2025-06-18 (spec requirement)
         if ($negotiatedVersion === '2025-06-18') {
-            $context = $request->getAttribute('mcp_context') ?? [];
-            $isAuthless = $context['authless'] ?? false;
+            $isAuthless = $this->config['auth']['authless'];
 
             $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
 
