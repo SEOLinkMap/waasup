@@ -130,9 +130,7 @@ class AuthMiddleware
 
     private function validateResourceServerRequirements(Request $request, array $tokenData): void
     {
-        $baseUrl = $this->getMCPBaseUrl($request);
-        $contextId = $this->extractContextId($request);
-        $expectedResource = $baseUrl . '/mcp/' . $contextId;
+        $expectedResource = $this->getMCPBaseUrl($request);
 
         if (!isset($tokenData['resource']) || $tokenData['resource'] !== $expectedResource) {
             throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
@@ -184,9 +182,7 @@ class AuthMiddleware
             'id' => null
         ];
 
-        $contextId = $this->extractContextId($request);
-
-        $wellknownEndpoints = $this->config['discovery']['wellknown'];
+        $wellknownEndpoints = $this->config['oauth']['wellknown'];
 
         $responseData['error']['data']['oauth']['resource'] = $mcpBaseUrl;
         $responseData['error']['data']['oauth']['resource_metadata_endpoint'] = $oauthBaseUrl . $wellknownEndpoints['protected_resource'];
@@ -370,14 +366,12 @@ class AuthMiddleware
                     'access_token' => 'authless-access'
                 ]
             ],
-            'discovery' => [
+            'oauth' => [
+                'base_url' => '',
                 'wellknown' => [
                     'auth_server' => '/.well-known/oauth-authorization-server',
                     'protected_resource' => '/.well-known/oauth-protected-resource'
-                ]
-            ],
-            'oauth' => [
-                'base_url' => '',
+                ],
                 'auth_server' => [
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',

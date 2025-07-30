@@ -570,7 +570,11 @@ class MCPSaaSServer
             'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
             'base_url' => null, // MCP base url
             'scopes_supported' => ['mcp:read', 'mcp:write'],
-            'session_lifetime' => 3600,
+            'session_lifetime' => 3600,    // seconds
+            'keepalive_interval' => 1,     // seconds
+            'max_connection_time' => 1800, // 30 minutes inactivity before dropping connection
+            'switch_interval_after' => 60,  // switch to longer intervals after 1 minute
+            'test_mode' => false,           // set to true in tests
             'server_info' => [
                 'name' => 'WaaSuP MCP SaaS Server',
                 'version' => '2.0.0'
@@ -595,14 +599,12 @@ class MCPSaaSServer
                     'access_token' => 'authless-access'
                 ]
             ],
-            'discovery' => [
+            'oauth' => [
+                'base_url' => '', // OAuth base url
                 'wellknown' => [
                     'auth_server' => '/.well-known/oauth-authorization-server',
                     'protected_resource' => '/.well-known/oauth-protected-resource'
-                ]
-            ],
-            'oauth' => [
-                'base_url' => '', // OAuth base url
+                ],
                 'auth_server' => [
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',
