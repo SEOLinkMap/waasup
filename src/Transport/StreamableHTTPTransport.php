@@ -86,9 +86,9 @@ class StreamableHTTPTransport implements TransportInterface
     private function pollForMessages(StreamInterface $body, string $sessionId, array $context): void
     {
         $startTime = time();
-        $pollInterval = $this->config['keepalive_interval'];
-        $maxTime = $this->config['max_connection_time']; // $maxTime after 'last active' messaging.
-        $switchTime = $this->config['switch_interval_after'];
+        $pollInterval = $this->config['streamable_http']['keepalive_interval'];
+        $maxTime = $this->config['streamable_http']['max_connection_time']; // $maxTime after 'last active' messaging.
+        $switchTime = $this->config['streamable_http']['switch_interval_after'];
         $endTime = $startTime + $maxTime;
 
         // Begin Streaming loop until server connection shutdown
@@ -167,10 +167,12 @@ class StreamableHTTPTransport implements TransportInterface
     private function getDefaultConfig(): array
     {
         return [
-            'keepalive_interval' => 1,     // seconds
-            'max_connection_time' => 1800, // 30 minutes
-            'switch_interval_after' => 60,  // switch to longer intervals after 1 minute
-            'test_mode' => false           // set to true in tests
+            'test_mode' => false,              // set to true in tests for instant responses
+            'streamable_http' => [
+                'keepalive_interval' => 1,     // seconds
+                'max_connection_time' => 1800, // 30 minutes
+                'switch_interval_after' => 60  // switch to longer intervals after 1 minute
+            ]
         ];
     }
 }

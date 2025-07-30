@@ -37,7 +37,7 @@ class SSETransport implements TransportInterface
         }
 
         // Check if we're in a test environment for shortened behavior
-        $isTestMode = $this->config['test_mode'] ?? false;
+        $isTestMode = $this->config['test_mode'];
 
         // Set low process priority (only in non-test environments)
         if (!$isTestMode && function_exists('exec')) {
@@ -89,9 +89,9 @@ class SSETransport implements TransportInterface
     private function pollForMessages(StreamInterface $body, string $sessionId, array $context): void
     {
         $startTime = time();
-        $pollInterval = $this->config['keepalive_interval'];
-        $maxTime = $this->config['max_connection_time'];
-        $switchTime = $this->config['switch_interval_after'];
+        $pollInterval = $this->config['sse']['keepalive_interval'];
+        $maxTime = $this->config['sse']['max_connection_time'];
+        $switchTime = $this->config['sse']['switch_interval_after'];
         $endTime = $startTime + $maxTime;
 
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
@@ -150,10 +150,12 @@ class SSETransport implements TransportInterface
     private function getDefaultConfig(): array
     {
         return [
-            'keepalive_interval' => 1,     // seconds
-            'max_connection_time' => 1800, // 30 minutes
-            'switch_interval_after' => 60,  // switch to longer intervals after 1 minute
-            'test_mode' => false           // set to true in tests
+            'test_mode' => false,              // set to true in tests for instant responses
+            'sse' => [
+                'keepalive_interval' => 1,     // seconds
+                'max_connection_time' => 1800, // 30 minutes
+                'switch_interval_after' => 60  // switch to longer intervals after 1 minute
+            ]
         ];
     }
 }

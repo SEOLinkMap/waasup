@@ -571,9 +571,6 @@ class MCPSaaSServer
             'base_url' => null, // MCP base url
             'scopes_supported' => ['mcp:read', 'mcp:write'],
             'session_lifetime' => 3600,    // seconds
-            'keepalive_interval' => 1,     // seconds
-            'max_connection_time' => 1800, // 30 minutes inactivity before dropping connection
-            'switch_interval_after' => 60,  // switch to longer intervals after 1 minute
             'test_mode' => false,           // set to true in tests
             'server_info' => [
                 'name' => 'WaaSuP MCP SaaS Server',
@@ -583,8 +580,6 @@ class MCPSaaSServer
                 'context_types' => ['agency', 'user'],
                 'validate_scope' => true,
                 'required_scopes' => ['mcp:read'],
-
-                'base_url' => '', // @todo remove, in favor of 'oauth'.'base_url' (update code first)
                 'authless' => false,
                 'authless_context_id' => 'public',
                 'authless_context_data' => [
@@ -641,14 +636,12 @@ class MCPSaaSServer
             'sse' => [
                 'keepalive_interval' => 1,
                 'max_connection_time' => 1800,
-                'switch_interval_after' => 60,
-                'test_mode' => false
+                'switch_interval_after' => 60
             ],
             'streamable_http' => [
                 'keepalive_interval' => 1,
                 'max_connection_time' => 1800,
-                'switch_interval_after' => 60,
-                'test_mode' => false
+                'switch_interval_after' => 60
             ],
             'database' => [
                 'table_prefix' => 'mcp_',
