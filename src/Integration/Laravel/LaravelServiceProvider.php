@@ -56,7 +56,7 @@ class LaravelServiceProvider extends ServiceProvider
             DatabaseStorage::class,
             function ($app) {
                 $pdo = $app['db']->connection()->getPdo();
-                return new DatabaseStorage($pdo, ['table_prefix' => 'mcp_']);
+                return new DatabaseStorage($pdo, ['database' => ['table_prefix' => 'mcp_']]);
             }
         );
 
@@ -72,8 +72,11 @@ class LaravelServiceProvider extends ServiceProvider
                         'name' => config('app.name') . ' MCP Server',
                         'version' => '1.0.0'
                     ],
+                    'base_url' => config('app.url'),
                     'auth' => [
-                        'context_types' => ['agency'],
+                        'context_types' => ['agency']
+                    ],
+                    'oauth' => [
                         'base_url' => config('app.url')
                     ]
                 ], config('mcp', []));
@@ -98,8 +101,11 @@ class LaravelServiceProvider extends ServiceProvider
                         'name' => config('app.name') . ' MCP Server',
                         'version' => '1.0.0'
                     ],
+                    'base_url' => config('app.url'),
                     'auth' => [
-                        'context_types' => ['agency'],
+                        'context_types' => ['agency']
+                    ],
+                    'oauth' => [
                         'base_url' => config('app.url')
                     ]
                 ], config('mcp', []));
@@ -240,20 +246,13 @@ class LaravelMCPProvider
         $this->psrFactory = $psrFactory;
         $this->mcpServer = new MCPSaaSServer($storage, $toolRegistry, $promptRegistry, $resourceRegistry, $config, $logger);
 
-        $authConfig = $config['auth'] ?? [];
-
-        // Merge oauth_endpoints from discovery config into auth config
-        if (isset($config['discovery']['oauth_endpoints'])) {
-            $authConfig['oauth_endpoints'] = $config['discovery']['oauth_endpoints'];
-        }
-
         $this->authMiddleware = new AuthMiddleware(
             $storage,
             $responseFactory,
             $streamFactory,
-            $authConfig
+            $config
         );
-        $this->discoveryProvider = new WellKnownProvider($config['discovery'] ?? []);
+        $this->discoveryProvider = new WellKnownProvider($config);
     }
 
     /**
