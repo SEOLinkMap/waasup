@@ -31,27 +31,25 @@ class AuthMiddleware
 
     public function __invoke(Request $request, RequestHandler $handler): Response
     {
-        if ($request->getMethod() === 'POST') {
-            $body = (string) $request->getBody();
-            if (!empty($body)) {
-                $data = json_decode($body, true);
-                if (is_array($data) && isset($data['method']) && $data['method'] === 'initialize') {
-                    // Rewind the body for the handler to read again
-                    if ($request->getBody()->isSeekable()) {
-                        $request->getBody()->rewind();
-                    }
-                    return $handler->handle($request);
-                }
-                // Rewind the body for normal processing
-                if ($request->getBody()->isSeekable()) {
-                    $request->getBody()->rewind();
-                }
-            }
-        }
-
         try {
             if ($this->config['auth']['authless']) {
                 return $this->handleAuthlessRequest($request, $handler);
+            }
+
+            if ($request->getMethod() === 'POST') {
+                $body = (string) $request->getBody();
+                if (!empty($body)) {
+                    $data = json_decode($body, true);
+                    if (is_array($data) && isset($data['method']) && $data['method'] === 'initialize') {
+                        if ($request->getBody()->isSeekable()) {
+                            $request->getBody()->rewind();
+                        }
+                        return $handler->handle($request);
+                    }
+                    if ($request->getBody()->isSeekable()) {
+                        $request->getBody()->rewind();
+                    }
+                }
             }
 
             $contextId = $this->extractContextId($request);
@@ -165,7 +163,7 @@ class AuthMiddleware
 
     protected function createOAuthDiscoveryResponse(Request $request): Response
     {
-        $authBaseUrl = $this->getAuthBaseUrl($request);
+        $oauthBaseUrl = $this->getOAuthBaseUrl($request);
         $mcpBaseUrl = $this->getMCPBaseUrl($request);
 
         $oauthEndpoints = $this->config['oauth']['auth_server']['endpoints'];
@@ -177,9 +175,9 @@ class AuthMiddleware
                 'message' => 'Authentication required',
                 'data' => [
                     'oauth' => [
-                        'authorization_endpoint' => $authBaseUrl . $oauthEndpoints['authorize'],
-                        'token_endpoint' => $authBaseUrl . $oauthEndpoints['token'],
-                        'registration_endpoint' => $authBaseUrl . $oauthEndpoints['register']
+                        'authorization_endpoint' => $oauthBaseUrl . $oauthEndpoints['authorize'],
+                        'token_endpoint' => $oauthBaseUrl . $oauthEndpoints['token'],
+                        'registration_endpoint' => $oauthBaseUrl . $oauthEndpoints['register']
                     ]
                 ]
             ],
@@ -187,13 +185,12 @@ class AuthMiddleware
         ];
 
         $contextId = $this->extractContextId($request);
-        $resourceUrl = $mcpBaseUrl . '/mcp/' . $contextId;
 
         $wellknownEndpoints = $this->config['discovery']['wellknown'];
 
-        $responseData['error']['data']['oauth']['resource'] = $resourceUrl;
-        $responseData['error']['data']['oauth']['resource_metadata_endpoint'] = $mcpBaseUrl . $wellknownEndpoints['protected_resource'];
-        $responseData['error']['data']['oauth']['authorization_server_metadata_endpoint'] = $authBaseUrl . $wellknownEndpoints['auth_server'];
+        $responseData['error']['data']['oauth']['resource'] = $mcpBaseUrl;
+        $responseData['error']['data']['oauth']['resource_metadata_endpoint'] = $oauthBaseUrl . $wellknownEndpoints['protected_resource'];
+        $responseData['error']['data']['oauth']['authorization_server_metadata_endpoint'] = $oauthBaseUrl . $wellknownEndpoints['auth_server'];
 
         $jsonContent = json_encode($responseData);
         if ($jsonContent === false) {
@@ -207,7 +204,7 @@ class AuthMiddleware
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Access-Control-Allow-Origin', '*');
 
-        $resourceMetadataUrl = $mcpBaseUrl . $wellknownEndpoints['protected_resource'];
+        $resourceMetadataUrl = $oauthBaseUrl . $wellknownEndpoints['protected_resource'];
         $response = $response->withHeader(
             'WWW-Authenticate',
             'Bearer realm="MCP Server", resource_metadata="' . $resourceMetadataUrl . '"'
@@ -319,6 +316,9 @@ class AuthMiddleware
         return preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $uuid) === 1;
     }
 
+    /**
+     * Get MCP base URL for resource operations (tenant-specific)
+     */
     protected function getMCPBaseUrl(Request $request): string
     {
         if (!empty($this->config['base_url'])) {
@@ -332,10 +332,13 @@ class AuthMiddleware
         return $scheme . '://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
-    protected function getAuthBaseUrl(Request $request): string
+    /**
+     * Get OAuth base URL for auth operations (shared infrastructure)
+     */
+    protected function getOAuthBaseUrl(Request $request): string
     {
-        if (!empty($this->config['auth']['base_url'])) {
-            return $this->config['auth']['base_url'];
+        if (!empty($this->config['oauth']['base_url'])) {
+            return $this->config['oauth']['base_url'];
         }
 
         $uri = $request->getUri();
@@ -353,7 +356,6 @@ class AuthMiddleware
                 'context_types' => ['agency', 'user'],
                 'validate_scope' => true,
                 'required_scopes' => ['mcp:read'],
-                'base_url' => '',
                 'authless' => false,
                 'authless_context_id' => 'public',
                 'authless_context_data' => [
@@ -375,6 +377,7 @@ class AuthMiddleware
                 ]
             ],
             'oauth' => [
+                'base_url' => '',
                 'auth_server' => [
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',
