@@ -197,7 +197,6 @@ class MCPSaaSServer
     private function negotiateSessionId(Request $request, ?array $data = null): ?string
     {
         $method = $request->getMethod();
-        $isAuthless = $this->config['auth']['authless'];
 
         // Check for existing session ID in header or route
         $existingSessionId = $this->extractSessionIdFromRequest($request);
