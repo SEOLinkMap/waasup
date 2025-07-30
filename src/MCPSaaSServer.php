@@ -568,7 +568,7 @@ class MCPSaaSServer
         return [
             // Core MCP Protocol Configuration
             'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
-            'base_url' => null, // Auto-detected from request if not set
+            'base_url' => null, // MCP base url
             'scopes_supported' => ['mcp:read', 'mcp:write'],
             'session_lifetime' => 3600,
             'server_info' => [
@@ -580,7 +580,7 @@ class MCPSaaSServer
                 'validate_scope' => true,
                 'required_scopes' => ['mcp:read'],
 
-                'base_url' => '',
+                'base_url' => '', // @todo remove, in favor of 'oauth'.'base_url' (update code first)
                 'authless' => false,
                 'authless_context_id' => 'public',
                 'authless_context_data' => [
@@ -602,6 +602,7 @@ class MCPSaaSServer
                 ]
             ],
             'oauth' => [
+                'base_url' => '', // OAuth base url
                 'auth_server' => [
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',
