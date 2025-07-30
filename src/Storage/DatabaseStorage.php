@@ -196,28 +196,45 @@ class DatabaseStorage implements StorageInterface
     }
 
     /**
-     * Validate OAuth bearer token
-     *
-     * Required fields in oauth_tokens table:
-     * - access_token (varchar): The token to validate
-     * - expires_at (datetime): Token expiration time
-     * - revoked (tinyint/boolean): Whether token is revoked
-     * - token_type (varchar): Must be 'Bearer' for validation
-     */
+ * Validate OAuth bearer token with agency-level security
+ *
+ * Required fields in oauth_tokens table:
+ * - access_token (varchar): The token to validate
+ * - expires_at (datetime): Token expiration time
+ * - revoked (tinyint/boolean): Whether token is revoked
+ * - token_type (varchar): Must be 'Bearer' for validation
+ * - agency_id (int): Must match the context agency for security
+ */
     public function validateToken(string $accessToken, array $context = []): ?array
     {
         $sql = "SELECT * FROM `{$this->getTableName('oauth_tokens')}`
-                WHERE `access_token` = :token
-                AND `expires_at` > :current_time
-                AND `revoked` = 0
-                AND `token_type` = 'Bearer'
-                LIMIT 1";
+            WHERE `access_token` = :token
+            AND `expires_at` > :current_time
+            AND `revoked` = 0
+            AND `token_type` = 'Bearer'";
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
+        $params = [
             ':token' => $accessToken,
             ':current_time' => $this->getCurrentTimestamp()
-        ]);
+        ];
+
+        // SECURITY: Verify token belongs to the requested agency/context UUID from URL
+        if (!empty($context) && isset($context['context_type']) && isset($context['uuid'])) {
+            if ($context['context_type'] === 'agency') {
+                // Agency context - validate token's agency_id matches the UUID from URL
+                $sql .= " AND `agency_id` = (SELECT `id` FROM `{$this->getTableName('agencies')}` WHERE `uuid` = :context_uuid AND `active` = 1)";
+                $params[':context_uuid'] = $context['uuid'];
+            } elseif ($context['context_type'] === 'user') {
+                // User context - validate token's user_id matches the UUID from URL
+                $sql .= " AND `user_id` = (SELECT `id` FROM `{$this->getTableName('users')}` WHERE `uuid` = :context_uuid)";
+                $params[':context_uuid'] = $context['uuid'];
+            }
+        }
+
+        $sql .= " LIMIT 1";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $result ?: null;
