@@ -61,6 +61,11 @@ class MCPSaaSServer
         try {
             $this->contextData = $request->getAttribute('mcp_context') ?? [];
             $isAuthless = $this->config['auth']['authless'];
+            $this->logger->info("DEBUG authless check", [
+                'isAuthless' => $isAuthless,
+                'contextData_empty' => empty($this->contextData),
+                'auth_config' => $this->config['auth']
+            ]);
 
             if ($request->getMethod() === 'OPTIONS') {
                 return $this->handleCorsPreflightRequest($response);
