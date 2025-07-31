@@ -8,7 +8,7 @@ use Psr\Log\NullLogger;
 /**
  * Database storage implementation for MCP server data persistence
  *
- * PREFERRED USAGE: Use default table names with optional prefix
+ * DEFAULT USAGE: Use default table names with optional prefix
  * ================================================================
  * The simplest and recommended approach is to let this class create the default
  * table names, optionally with a prefix:
@@ -41,29 +41,6 @@ use Psr\Log\NullLogger;
  * ];
  * $storage = new DatabaseStorage($pdo, $config);
  * ```
- *
- * FIELD REQUIREMENTS:
- * ==================
- * This class expects specific field names. You may need to:
- * - Add missing fields to existing tables
- * - Create database views to map field names
- * - Modify your schema to match expected names
- *
- * Required fields by table:
- *
- * agencies: id (int), uuid (varchar), name (varchar), active (tinyint/boolean)
- * users: id (int), agency_id (int), name (varchar), email (varchar), password (varchar)
- * users (optional social): google_id (varchar), linkedin_id (varchar), github_id (varchar)
- * oauth_clients: client_id (varchar), client_secret (varchar), client_name (varchar),
- *                redirect_uris (json/text), grant_types (json/text), response_types (json/text), created_at (datetime)
- * oauth_tokens: client_id (varchar), access_token (varchar), refresh_token (varchar),
- *               token_type (varchar), scope (varchar), expires_at (datetime), agency_id (int),
- *               user_id (int), revoked (tinyint/boolean), created_at (datetime)
- * sessions: session_id (varchar), session_data (text), expires_at (datetime), created_at (datetime)
- * messages: id (int auto), session_id (varchar), message_data (text), context_data (text), created_at (datetime)
- * sampling_responses: id (int auto), session_id (varchar), request_id (varchar), response_data (text), created_at (datetime)
- * roots_responses: id (int auto), session_id (varchar), request_id (varchar), response_data (text), created_at (datetime)
- * elicitation_responses: id (int auto), session_id (varchar), request_id (varchar), response_data (text), created_at (datetime)
  */
 class DatabaseStorage implements StorageInterface
 {
@@ -137,6 +114,45 @@ class DatabaseStorage implements StorageInterface
     }
 
     /**
+ * Resolve logical field name to actual database field name
+ *
+ * Resolution order:
+ * 1. Check field_mapping config for custom override (use only for existing tables with different field names)
+ * 2. Fall back to original field name (preferred approach)
+ *
+ * @param string $logicalTableName One of the valid logical table names
+ * @param string $logicalFieldName One of the valid logical field names for the table
+ * @return string The actual database field name to use
+ * @throws \InvalidArgumentException If logical table or field name is not recognized
+ */
+    private function getField(string $logicalTableName, string $logicalFieldName): string
+    {
+        // Valid logical table names that can have field mappings
+        $validTableNames = [
+            'agencies', 'users', 'oauth_clients', 'oauth_tokens', 'sessions',
+            'messages', 'sampling_responses', 'roots_responses', 'elicitation_responses'
+        ];
+
+        // Validate the logical table name
+        if (!in_array($logicalTableName, $validTableNames)) {
+            throw new \InvalidArgumentException("Invalid logical table name: {$logicalTableName}. Valid names are: " . implode(', ', $validTableNames));
+        }
+
+        // Get valid fields for this table from config
+        if (!isset($this->config['database']['field_mapping'][$logicalTableName])) {
+            throw new \InvalidArgumentException("No field definitions found for table: {$logicalTableName}");
+        }
+
+        $validFields = array_keys($this->config['database']['field_mapping'][$logicalTableName]);
+        if (!in_array($logicalFieldName, $validFields)) {
+            throw new \InvalidArgumentException("Invalid logical field name '{$logicalFieldName}' for table '{$logicalTableName}'. Valid fields are: " . implode(', ', $validFields));
+        }
+
+        // Return the field mapping (either default or user override)
+        return $this->config['database']['field_mapping'][$logicalTableName][$logicalFieldName];
+    }
+
+    /**
      * Store a message for SSE/streaming delivery to MCP clients
      *
      * Required fields in messages table:
@@ -148,7 +164,7 @@ class DatabaseStorage implements StorageInterface
     public function storeMessage(string $sessionId, array $messageData, array $context = []): bool
     {
         $sql = "INSERT INTO `{$this->getTableName('messages')}`
-                (`session_id`, `message_data`, `context_data`, `created_at`)
+                (`{$this->getField('messages', 'session_id')}`, `{$this->getField('messages', 'message_data')}`, `{$this->getField('messages', 'context_data')}`, `{$this->getField('messages', 'created_at')}`)
                 VALUES (:session_id, :message_data, :context_data, :created_at)";
 
         $stmt = $this->pdo->prepare($sql);
@@ -165,10 +181,10 @@ class DatabaseStorage implements StorageInterface
      */
     public function getMessages(string $sessionId, array $context = []): array
     {
-        $sql = "SELECT `id`, `message_data`, `context_data`, `created_at`
+        $sql = "SELECT `{$this->getField('messages', 'id')}`, `{$this->getField('messages', 'message_data')}`, `{$this->getField('messages', 'context_data')}`, `{$this->getField('messages', 'created_at')}`
                 FROM `{$this->getTableName('messages')}`
-                WHERE `session_id` = :session_id
-                ORDER BY `created_at` ASC";
+                WHERE `{$this->getField('messages', 'session_id')}` = :session_id
+                ORDER BY `{$this->getField('messages', 'created_at')}` ASC";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':session_id' => $sessionId]);
@@ -176,10 +192,10 @@ class DatabaseStorage implements StorageInterface
         $messages = [];
         while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
             $messages[] = [
-                'id' => $row['id'],
-                'data' => json_decode($row['message_data'], true),
-                'context' => json_decode($row['context_data'], true),
-                'created_at' => $row['created_at']
+                'id' => $row[$this->getField('messages', 'id')],
+                'data' => json_decode($row[$this->getField('messages', 'message_data')], true),
+                'context' => json_decode($row[$this->getField('messages', 'context_data')], true),
+                'created_at' => $row[$this->getField('messages', 'created_at')]
             ];
         }
         return $messages;
@@ -190,7 +206,7 @@ class DatabaseStorage implements StorageInterface
      */
     public function deleteMessage(string $messageId): bool
     {
-        $sql = "DELETE FROM `{$this->getTableName('messages')}` WHERE `id` = :id";
+        $sql = "DELETE FROM `{$this->getTableName('messages')}` WHERE `{$this->getField('messages', 'id')}` = :id";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([':id' => $messageId]);
     }
@@ -208,10 +224,10 @@ class DatabaseStorage implements StorageInterface
     public function validateToken(string $accessToken, array $context = []): ?array
     {
         $sql = "SELECT * FROM `{$this->getTableName('oauth_tokens')}`
-            WHERE `access_token` = :token
-            AND `expires_at` > :current_time
-            AND `revoked` = 0
-            AND `token_type` = 'Bearer'";
+            WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :token
+            AND `{$this->getField('oauth_tokens', 'expires_at')}` > :current_time
+            AND `{$this->getField('oauth_tokens', 'revoked')}` = 0
+            AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
 
         $params = [
             ':token' => $accessToken,
@@ -222,11 +238,11 @@ class DatabaseStorage implements StorageInterface
         if (!empty($context) && isset($context['context_type']) && isset($context['uuid'])) {
             if ($context['context_type'] === 'agency') {
                 // Agency context - validate token's agency_id matches the UUID from URL
-                $sql .= " AND `agency_id` = (SELECT `id` FROM `{$this->getTableName('agencies')}` WHERE `uuid` = :context_uuid AND `active` = 1)";
+                $sql .= " AND `{$this->getField('oauth_tokens', 'agency_id')}` = (SELECT `{$this->getField('agencies', 'id')}` FROM `{$this->getTableName('agencies')}` WHERE `{$this->getField('agencies', 'uuid')}` = :context_uuid AND `{$this->getField('agencies', 'active')}` = 1)";
                 $params[':context_uuid'] = $context['uuid'];
             } elseif ($context['context_type'] === 'user') {
                 // User context - validate token's user_id matches the UUID from URL
-                $sql .= " AND `user_id` = (SELECT `id` FROM `{$this->getTableName('users')}` WHERE `uuid` = :context_uuid)";
+                $sql .= " AND `{$this->getField('oauth_tokens', 'user_id')}` = (SELECT `{$this->getField('users', 'id')}` FROM `{$this->getTableName('users')}` WHERE `{$this->getField('users', 'uuid')}` = :context_uuid)";
                 $params[':context_uuid'] = $context['uuid'];
             }
         }
@@ -252,11 +268,11 @@ class DatabaseStorage implements StorageInterface
         switch ($type) {
             case 'agency':
                 $sql = "SELECT * FROM `{$this->getTableName('agencies')}`
-                        WHERE `uuid` = :identifier AND `active` = 1 LIMIT 1";
+                        WHERE `{$this->getField('agencies', 'uuid')}` = :identifier AND `{$this->getField('agencies', 'active')}` = 1 LIMIT 1";
                 break;
             case 'user':
                 $sql = "SELECT * FROM `{$this->getTableName('users')}`
-                        WHERE `uuid` = :identifier LIMIT 1";
+                        WHERE `{$this->getField('users', 'uuid')}` = :identifier LIMIT 1";
                 break;
             default:
                 return null;
@@ -291,11 +307,11 @@ class DatabaseStorage implements StorageInterface
         if ($this->databaseType === 'mysql') {
             // Use MySQL's ON DUPLICATE KEY UPDATE for efficient upserts
             $sql = "INSERT INTO `{$this->getTableName('sessions')}`
-                    (`session_id`, `session_data`, `expires_at`, `created_at`)
+                    (`{$this->getField('sessions', 'session_id')}`, `{$this->getField('sessions', 'session_data')}`, `{$this->getField('sessions', 'expires_at')}`, `{$this->getField('sessions', 'created_at')}`)
                     VALUES (:session_id, :session_data, :expires_at, :created_at)
                     ON DUPLICATE KEY UPDATE
-                    `session_data` = VALUES(`session_data`),
-                    `expires_at` = VALUES(`expires_at`)";
+                    `{$this->getField('sessions', 'session_data')}` = VALUES(`{$this->getField('sessions', 'session_data')}`),
+                    `{$this->getField('sessions', 'expires_at')}` = VALUES(`{$this->getField('sessions', 'expires_at')}`)";
 
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute([
@@ -315,9 +331,9 @@ class DatabaseStorage implements StorageInterface
      */
     public function getSession(string $sessionId): ?array
     {
-        $sql = "SELECT `session_data` FROM `{$this->getTableName('sessions')}`
-                WHERE `session_id` = :session_id
-                AND `expires_at` > :current_time";
+        $sql = "SELECT `{$this->getField('sessions', 'session_data')}` FROM `{$this->getTableName('sessions')}`
+                WHERE `{$this->getField('sessions', 'session_id')}` = :session_id
+                AND `{$this->getField('sessions', 'expires_at')}` > :current_time";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
@@ -327,7 +343,7 @@ class DatabaseStorage implements StorageInterface
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($result) {
-            return json_decode($result['session_data'], true);
+            return json_decode($result[$this->getField('sessions', 'session_data')], true);
         }
 
         return null;
@@ -343,7 +359,7 @@ class DatabaseStorage implements StorageInterface
         $currentTime = $this->getCurrentTimestamp();
 
         $sql = "DELETE FROM `{$this->getTableName('sessions')}`
-                WHERE `expires_at` < :current_time";
+                WHERE `{$this->getField('sessions', 'expires_at')}` < :current_time";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':current_time' => $currentTime]);
         $cleaned += $stmt->rowCount();
@@ -359,7 +375,7 @@ class DatabaseStorage implements StorageInterface
      */
     public function getOAuthClient(string $clientId): ?array
     {
-        $sql = "SELECT * FROM `{$this->getTableName('oauth_clients')}` WHERE `client_id` = :client_id LIMIT 1";
+        $sql = "SELECT * FROM `{$this->getTableName('oauth_clients')}` WHERE `{$this->getField('oauth_clients', 'client_id')}` = :client_id LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':client_id' => $clientId]);
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -372,7 +388,7 @@ class DatabaseStorage implements StorageInterface
     public function storeOAuthClient(array $clientData): bool
     {
         $sql = "INSERT INTO `{$this->getTableName('oauth_clients')}`
-                (`client_id`, `client_secret`, `client_name`, `redirect_uris`, `grant_types`, `response_types`, `created_at`)
+                (`{$this->getField('oauth_clients', 'client_id')}`, `{$this->getField('oauth_clients', 'client_secret')}`, `{$this->getField('oauth_clients', 'client_name')}`, `{$this->getField('oauth_clients', 'redirect_uris')}`, `{$this->getField('oauth_clients', 'grant_types')}`, `{$this->getField('oauth_clients', 'response_types')}`, `{$this->getField('oauth_clients', 'created_at')}`)
                 VALUES (:client_id, :client_secret, :client_name, :redirect_uris, :grant_types, :response_types, :created_at)";
 
         $stmt = $this->pdo->prepare($sql);
@@ -394,8 +410,8 @@ class DatabaseStorage implements StorageInterface
     public function storeAuthorizationCode(string $code, array $data): bool
     {
         $sql = "INSERT INTO `{$this->getTableName('oauth_tokens')}`
-                (`client_id`, `access_token`, `token_type`, `scope`, `expires_at`, `revoked`,
-                 `code_challenge`, `code_challenge_method`, `agency_id`, `user_id`, `created_at`)
+                (`{$this->getField('oauth_tokens', 'client_id')}`, `{$this->getField('oauth_tokens', 'access_token')}`, `{$this->getField('oauth_tokens', 'token_type')}`, `{$this->getField('oauth_tokens', 'scope')}`, `{$this->getField('oauth_tokens', 'expires_at')}`, `{$this->getField('oauth_tokens', 'revoked')}`,
+                 `{$this->getField('oauth_tokens', 'code_challenge')}`, `{$this->getField('oauth_tokens', 'code_challenge_method')}`, `{$this->getField('oauth_tokens', 'agency_id')}`, `{$this->getField('oauth_tokens', 'user_id')}`, `{$this->getField('oauth_tokens', 'created_at')}`)
                 VALUES (:client_id, :auth_code, 'authorization_code', :scope,
                         :expires_at, 0, :code_challenge, :code_challenge_method,
                         :agency_id, :user_id, :created_at)";
@@ -420,11 +436,11 @@ class DatabaseStorage implements StorageInterface
     public function getAuthorizationCode(string $code, string $clientId): ?array
     {
         $sql = "SELECT * FROM `{$this->getTableName('oauth_tokens')}`
-                WHERE `access_token` = :code
-                AND `client_id` = :client_id
-                AND `token_type` = 'authorization_code'
-                AND `expires_at` > :current_time
-                AND `revoked` = 0
+                WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :code
+                AND `{$this->getField('oauth_tokens', 'client_id')}` = :client_id
+                AND `{$this->getField('oauth_tokens', 'token_type')}` = 'authorization_code'
+                AND `{$this->getField('oauth_tokens', 'expires_at')}` > :current_time
+                AND `{$this->getField('oauth_tokens', 'revoked')}` = 0
                 LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
@@ -443,7 +459,7 @@ class DatabaseStorage implements StorageInterface
      */
     public function revokeAuthorizationCode(string $code): bool
     {
-        $sql = "UPDATE `{$this->getTableName('oauth_tokens')}` SET `revoked` = 1 WHERE `access_token` = :code";
+        $sql = "UPDATE `{$this->getTableName('oauth_tokens')}` SET `{$this->getField('oauth_tokens', 'revoked')}` = 1 WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :code";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([':code' => $code]);
     }
@@ -454,8 +470,8 @@ class DatabaseStorage implements StorageInterface
     public function storeAccessToken(array $tokenData): bool
     {
         $sql = "INSERT INTO `{$this->getTableName('oauth_tokens')}`
-            (`client_id`, `access_token`, `refresh_token`, `token_type`, `scope`, `expires_at`,
-             `agency_id`, `user_id`, `revoked`, `created_at`)
+            (`{$this->getField('oauth_tokens', 'client_id')}`, `{$this->getField('oauth_tokens', 'access_token')}`, `{$this->getField('oauth_tokens', 'refresh_token')}`, `{$this->getField('oauth_tokens', 'token_type')}`, `{$this->getField('oauth_tokens', 'scope')}`, `{$this->getField('oauth_tokens', 'expires_at')}`,
+             `{$this->getField('oauth_tokens', 'agency_id')}`, `{$this->getField('oauth_tokens', 'user_id')}`, `{$this->getField('oauth_tokens', 'revoked')}`, `{$this->getField('oauth_tokens', 'created_at')}`)
             VALUES (:client_id, :access_token, :refresh_token, 'Bearer', :scope,
                     :expires_at, :agency_id, :user_id, 0, :created_at)";
 
@@ -490,9 +506,9 @@ class DatabaseStorage implements StorageInterface
     public function getTokenByRefreshToken(string $refreshToken, string $clientId): ?array
     {
         $sql = "SELECT * FROM `{$this->getTableName('oauth_tokens')}`
-                WHERE `refresh_token` = :refresh_token
-                AND `client_id` = :client_id
-                AND `revoked` = 0
+                WHERE `{$this->getField('oauth_tokens', 'refresh_token')}` = :refresh_token
+                AND `{$this->getField('oauth_tokens', 'client_id')}` = :client_id
+                AND `{$this->getField('oauth_tokens', 'revoked')}` = 0
                 LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
@@ -511,8 +527,8 @@ class DatabaseStorage implements StorageInterface
     public function revokeToken(string $token): bool
     {
         $sql = "UPDATE `{$this->getTableName('oauth_tokens')}`
-                SET `revoked` = 1
-                WHERE (`access_token` = :token OR `refresh_token` = :token)";
+                SET `{$this->getField('oauth_tokens', 'revoked')}` = 1
+                WHERE (`{$this->getField('oauth_tokens', 'access_token')}` = :token OR `{$this->getField('oauth_tokens', 'refresh_token')}` = :token)";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([':token' => $token]);
     }
@@ -524,9 +540,9 @@ class DatabaseStorage implements StorageInterface
      */
     public function getUserData(int $userId): ?array
     {
-        $sql = "SELECT u.id, u.agency_id, u.name, u.email
+        $sql = "SELECT u.{$this->getField('users', 'id')}, u.{$this->getField('users', 'agency_id')}, u.{$this->getField('users', 'name')}, u.{$this->getField('users', 'email')}
                 FROM `{$this->getTableName('users')}` u
-                WHERE u.id = :user_id LIMIT 1";
+                WHERE u.{$this->getField('users', 'id')} = :user_id LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':user_id' => $userId]);
@@ -542,24 +558,24 @@ class DatabaseStorage implements StorageInterface
      */
     public function verifyUserCredentials(string $email, string $password): ?array
     {
-        $sql = "SELECT u.id, u.password, u.agency_id, u.name, u.email
+        $sql = "SELECT u.{$this->getField('users', 'id')}, u.{$this->getField('users', 'password')}, u.{$this->getField('users', 'agency_id')}, u.{$this->getField('users', 'name')}, u.{$this->getField('users', 'email')}
                 FROM `{$this->getTableName('users')}` u
-                WHERE u.email = :email
+                WHERE u.{$this->getField('users', 'email')} = :email
                 LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':email' => $email]);
         $user = $stmt->fetch(\PDO::FETCH_ASSOC);
 
-        if (!$user || !password_verify($password, $user['password'])) {
+        if (!$user || !password_verify($password, $user[$this->getField('users', 'password')])) {
             return null;
         }
 
         return [
-            'user_id' => $user['id'],
-            'agency_id' => $user['agency_id'],
-            'name' => $user['name'],
-            'email' => $user['email']
+            'user_id' => $user[$this->getField('users', 'id')],
+            'agency_id' => $user[$this->getField('users', 'agency_id')],
+            'name' => $user[$this->getField('users', 'name')],
+            'email' => $user[$this->getField('users', 'email')]
         ];
     }
 
@@ -569,9 +585,9 @@ class DatabaseStorage implements StorageInterface
      */
     public function findUserByGoogleId(string $googleId): ?array
     {
-        $sql = "SELECT u.id, u.agency_id, u.name, u.email
+        $sql = "SELECT u.{$this->getField('users', 'id')}, u.{$this->getField('users', 'agency_id')}, u.{$this->getField('users', 'name')}, u.{$this->getField('users', 'email')}
                 FROM `{$this->getTableName('users')}` u
-                WHERE u.google_id = :google_id
+                WHERE u.{$this->getField('users', 'google_id')} = :google_id
                 LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
@@ -586,9 +602,9 @@ class DatabaseStorage implements StorageInterface
      */
     public function findUserByLinkedinId(string $linkedinId): ?array
     {
-        $sql = "SELECT u.id, u.agency_id, u.name, u.email
+        $sql = "SELECT u.{$this->getField('users', 'id')}, u.{$this->getField('users', 'agency_id')}, u.{$this->getField('users', 'name')}, u.{$this->getField('users', 'email')}
                 FROM `{$this->getTableName('users')}` u
-                WHERE u.linkedin_id = :linkedin_id
+                WHERE u.{$this->getField('users', 'linkedin_id')} = :linkedin_id
                 LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
@@ -603,9 +619,9 @@ class DatabaseStorage implements StorageInterface
      */
     public function findUserByGithubId(string $githubId): ?array
     {
-        $sql = "SELECT u.id, u.agency_id, u.name, u.email
+        $sql = "SELECT u.{$this->getField('users', 'id')}, u.{$this->getField('users', 'agency_id')}, u.{$this->getField('users', 'name')}, u.{$this->getField('users', 'email')}
                 FROM `{$this->getTableName('users')}` u
-                WHERE u.github_id = :github_id
+                WHERE u.{$this->getField('users', 'github_id')} = :github_id
                 LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
@@ -619,9 +635,9 @@ class DatabaseStorage implements StorageInterface
      */
     public function findUserByEmail(string $email): ?array
     {
-        $sql = "SELECT u.id, u.agency_id, u.name, u.email
+        $sql = "SELECT u.{$this->getField('users', 'id')}, u.{$this->getField('users', 'agency_id')}, u.{$this->getField('users', 'name')}, u.{$this->getField('users', 'email')}
                 FROM `{$this->getTableName('users')}` u
-                WHERE u.email = :email
+                WHERE u.{$this->getField('users', 'email')} = :email
                 LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
@@ -635,7 +651,7 @@ class DatabaseStorage implements StorageInterface
      */
     public function updateUserGoogleId(int $userId, string $googleId): bool
     {
-        $sql = "UPDATE `{$this->getTableName('users')}` SET `google_id` = :google_id WHERE `id` = :user_id";
+        $sql = "UPDATE `{$this->getTableName('users')}` SET `{$this->getField('users', 'google_id')}` = :google_id WHERE `{$this->getField('users', 'id')}` = :user_id";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([':google_id' => $googleId, ':user_id' => $userId]);
     }
@@ -645,7 +661,7 @@ class DatabaseStorage implements StorageInterface
      */
     public function updateUserLinkedinId(int $userId, string $linkedinId): bool
     {
-        $sql = "UPDATE `{$this->getTableName('users')}` SET `linkedin_id` = :linkedin_id WHERE `id` = :user_id";
+        $sql = "UPDATE `{$this->getTableName('users')}` SET `{$this->getField('users', 'linkedin_id')}` = :linkedin_id WHERE `{$this->getField('users', 'id')}` = :user_id";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([':linkedin_id' => $linkedinId, ':user_id' => $userId]);
     }
@@ -655,7 +671,7 @@ class DatabaseStorage implements StorageInterface
      */
     public function updateUserGithubId(int $userId, string $githubId): bool
     {
-        $sql = "UPDATE `{$this->getTableName('users')}` SET `github_id` = :github_id WHERE `id` = :user_id";
+        $sql = "UPDATE `{$this->getTableName('users')}` SET `{$this->getField('users', 'github_id')}` = :github_id WHERE `{$this->getField('users', 'id')}` = :user_id";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([':github_id' => $githubId, ':user_id' => $userId]);
     }
@@ -667,7 +683,7 @@ class DatabaseStorage implements StorageInterface
     public function storeSamplingResponse(string $sessionId, string $requestId, array $responseData): bool
     {
         $sql = "INSERT INTO `{$this->getTableName('sampling_responses')}`
-            (`session_id`, `request_id`, `response_data`, `created_at`)
+            (`{$this->getField('sampling_responses', 'session_id')}`, `{$this->getField('sampling_responses', 'request_id')}`, `{$this->getField('sampling_responses', 'response_data')}`, `{$this->getField('sampling_responses', 'created_at')}`)
             VALUES (:session_id, :request_id, :response_data, :created_at)";
 
         $stmt = $this->pdo->prepare($sql);
@@ -684,9 +700,9 @@ class DatabaseStorage implements StorageInterface
      */
     public function getSamplingResponse(string $sessionId, string $requestId): ?array
     {
-        $sql = "SELECT `response_data`, `created_at` FROM `{$this->getTableName('sampling_responses')}`
-            WHERE `session_id` = :session_id AND `request_id` = :request_id
-            ORDER BY `created_at` DESC LIMIT 1";
+        $sql = "SELECT `{$this->getField('sampling_responses', 'response_data')}`, `{$this->getField('sampling_responses', 'created_at')}` FROM `{$this->getTableName('sampling_responses')}`
+            WHERE `{$this->getField('sampling_responses', 'session_id')}` = :session_id AND `{$this->getField('sampling_responses', 'request_id')}` = :request_id
+            ORDER BY `{$this->getField('sampling_responses', 'created_at')}` DESC LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
@@ -697,8 +713,8 @@ class DatabaseStorage implements StorageInterface
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($result) {
             return [
-                'data' => json_decode($result['response_data'], true),
-                'created_at' => $result['created_at']
+                'data' => json_decode($result[$this->getField('sampling_responses', 'response_data')], true),
+                'created_at' => $result[$this->getField('sampling_responses', 'created_at')]
             ];
         }
 
@@ -710,10 +726,10 @@ class DatabaseStorage implements StorageInterface
      */
     public function getSamplingResponses(string $sessionId): array
     {
-        $sql = "SELECT `request_id`, `response_data`, `created_at`
+        $sql = "SELECT `{$this->getField('sampling_responses', 'request_id')}`, `{$this->getField('sampling_responses', 'response_data')}`, `{$this->getField('sampling_responses', 'created_at')}`
             FROM `{$this->getTableName('sampling_responses')}`
-            WHERE `session_id` = :session_id
-            ORDER BY `created_at` ASC";
+            WHERE `{$this->getField('sampling_responses', 'session_id')}` = :session_id
+            ORDER BY `{$this->getField('sampling_responses', 'created_at')}` ASC";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':session_id' => $sessionId]);
@@ -721,9 +737,9 @@ class DatabaseStorage implements StorageInterface
         $responses = [];
         while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
             $responses[] = [
-                'request_id' => $row['request_id'],
-                'data' => json_decode($row['response_data'], true),
-                'created_at' => $row['created_at']
+                'request_id' => $row[$this->getField('sampling_responses', 'request_id')],
+                'data' => json_decode($row[$this->getField('sampling_responses', 'response_data')], true),
+                'created_at' => $row[$this->getField('sampling_responses', 'created_at')]
             ];
         }
 
@@ -737,7 +753,7 @@ class DatabaseStorage implements StorageInterface
     public function storeRootsResponse(string $sessionId, string $requestId, array $responseData): bool
     {
         $sql = "INSERT INTO `{$this->getTableName('roots_responses')}`
-            (`session_id`, `request_id`, `response_data`, `created_at`)
+            (`{$this->getField('roots_responses', 'session_id')}`, `{$this->getField('roots_responses', 'request_id')}`, `{$this->getField('roots_responses', 'response_data')}`, `{$this->getField('roots_responses', 'created_at')}`)
             VALUES (:session_id, :request_id, :response_data, :created_at)";
 
         $stmt = $this->pdo->prepare($sql);
@@ -754,9 +770,9 @@ class DatabaseStorage implements StorageInterface
      */
     public function getRootsResponse(string $sessionId, string $requestId): ?array
     {
-        $sql = "SELECT `response_data`, `created_at` FROM `{$this->getTableName('roots_responses')}`
-            WHERE `session_id` = :session_id AND `request_id` = :request_id
-            ORDER BY `created_at` DESC LIMIT 1";
+        $sql = "SELECT `{$this->getField('roots_responses', 'response_data')}`, `{$this->getField('roots_responses', 'created_at')}` FROM `{$this->getTableName('roots_responses')}`
+            WHERE `{$this->getField('roots_responses', 'session_id')}` = :session_id AND `{$this->getField('roots_responses', 'request_id')}` = :request_id
+            ORDER BY `{$this->getField('roots_responses', 'created_at')}` DESC LIMIT 1";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
@@ -767,8 +783,8 @@ class DatabaseStorage implements StorageInterface
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($result) {
             return [
-                'data' => json_decode($result['response_data'], true),
-                'created_at' => $result['created_at']
+                'data' => json_decode($result[$this->getField('roots_responses', 'response_data')], true),
+                'created_at' => $result[$this->getField('roots_responses', 'created_at')]
             ];
         }
 
@@ -780,10 +796,10 @@ class DatabaseStorage implements StorageInterface
      */
     public function getRootsResponses(string $sessionId): array
     {
-        $sql = "SELECT `request_id`, `response_data`, `created_at`
+        $sql = "SELECT `{$this->getField('roots_responses', 'request_id')}`, `{$this->getField('roots_responses', 'response_data')}`, `{$this->getField('roots_responses', 'created_at')}`
             FROM `{$this->getTableName('roots_responses')}`
-            WHERE `session_id` = :session_id
-            ORDER BY `created_at` ASC";
+            WHERE `{$this->getField('roots_responses', 'session_id')}` = :session_id
+            ORDER BY `{$this->getField('roots_responses', 'created_at')}` ASC";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':session_id' => $sessionId]);
@@ -791,9 +807,9 @@ class DatabaseStorage implements StorageInterface
         $responses = [];
         while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
             $responses[] = [
-                'request_id' => $row['request_id'],
-                'data' => json_decode($row['response_data'], true),
-                'created_at' => $row['created_at']
+                'request_id' => $row[$this->getField('roots_responses', 'request_id')],
+                'data' => json_decode($row[$this->getField('roots_responses', 'response_data')], true),
+                'created_at' => $row[$this->getField('roots_responses', 'created_at')]
             ];
         }
 
@@ -807,7 +823,7 @@ class DatabaseStorage implements StorageInterface
     public function storeElicitationResponse(string $sessionId, string $requestId, array $responseData): bool
     {
         $sql = "INSERT INTO `{$this->getTableName('elicitation_responses')}`
-                (`session_id`, `request_id`, `response_data`, `created_at`)
+                (`{$this->getField('elicitation_responses', 'session_id')}`, `{$this->getField('elicitation_responses', 'request_id')}`, `{$this->getField('elicitation_responses', 'response_data')}`, `{$this->getField('elicitation_responses', 'created_at')}`)
                 VALUES (:session_id, :request_id, :response_data, :created_at)";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([
@@ -823,15 +839,15 @@ class DatabaseStorage implements StorageInterface
      */
     public function getElicitationResponse(string $sessionId, string $requestId): ?array
     {
-        $sql = "SELECT `response_data`, `created_at` FROM `{$this->getTableName('elicitation_responses')}`
-                WHERE `session_id` = :session_id AND `request_id` = :request_id
-                ORDER BY `created_at` DESC LIMIT 1";
+        $sql = "SELECT `{$this->getField('elicitation_responses', 'response_data')}`, `{$this->getField('elicitation_responses', 'created_at')}` FROM `{$this->getTableName('elicitation_responses')}`
+                WHERE `{$this->getField('elicitation_responses', 'session_id')}` = :session_id AND `{$this->getField('elicitation_responses', 'request_id')}` = :request_id
+                ORDER BY `{$this->getField('elicitation_responses', 'created_at')}` DESC LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':session_id' => $sessionId, ':request_id' => $requestId]);
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $result ? [
-            'data' => json_decode($result['response_data'], true),
-            'created_at' => $result['created_at']
+            'data' => json_decode($result[$this->getField('elicitation_responses', 'response_data')], true),
+            'created_at' => $result[$this->getField('elicitation_responses', 'created_at')]
         ] : null;
     }
 
@@ -840,18 +856,18 @@ class DatabaseStorage implements StorageInterface
      */
     public function getElicitationResponses(string $sessionId): array
     {
-        $sql = "SELECT `request_id`, `response_data`, `created_at`
+        $sql = "SELECT `{$this->getField('elicitation_responses', 'request_id')}`, `{$this->getField('elicitation_responses', 'response_data')}`, `{$this->getField('elicitation_responses', 'created_at')}`
                 FROM `{$this->getTableName('elicitation_responses')}`
-                WHERE `session_id` = :session_id
-                ORDER BY `created_at` ASC";
+                WHERE `{$this->getField('elicitation_responses', 'session_id')}` = :session_id
+                ORDER BY `{$this->getField('elicitation_responses', 'created_at')}` ASC";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([':session_id' => $sessionId]);
         $responses = [];
         while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
             $responses[] = [
-                'request_id' => $row['request_id'],
-                'data' => json_decode($row['response_data'], true),
-                'created_at' => $row['created_at']
+                'request_id' => $row[$this->getField('elicitation_responses', 'request_id')],
+                'data' => json_decode($row[$this->getField('elicitation_responses', 'response_data')], true),
+                'created_at' => $row[$this->getField('elicitation_responses', 'created_at')]
             ];
         }
         return $responses;
@@ -899,8 +915,8 @@ class DatabaseStorage implements StorageInterface
     {
         // Try update first
         $updateSql = "UPDATE `{$this->getTableName('sessions')}`
-                      SET `session_data` = :session_data, `expires_at` = :expires_at
-                      WHERE `session_id` = :session_id";
+                      SET `{$this->getField('sessions', 'session_data')}` = :session_data, `{$this->getField('sessions', 'expires_at')}` = :expires_at
+                      WHERE `{$this->getField('sessions', 'session_id')}` = :session_id";
 
         $updateStmt = $this->pdo->prepare($updateSql);
         $updateStmt->execute([
@@ -912,7 +928,7 @@ class DatabaseStorage implements StorageInterface
         // If no rows updated, insert new record
         if ($updateStmt->rowCount() === 0) {
             $insertSql = "INSERT INTO `{$this->getTableName('sessions')}`
-                          (`session_id`, `session_data`, `expires_at`, `created_at`)
+                          (`{$this->getField('sessions', 'session_id')}`, `{$this->getField('sessions', 'session_data')}`, `{$this->getField('sessions', 'expires_at')}`, `{$this->getField('sessions', 'created_at')}`)
                           VALUES (:session_id, :session_data, :expires_at, :created_at)";
 
             $insertStmt = $this->pdo->prepare($insertSql);
@@ -937,7 +953,91 @@ class DatabaseStorage implements StorageInterface
             'database' => [
                 'table_prefix' => 'mcp_',
                 'cleanup_interval' => 3600,
-                'table_mapping' => []
+                'table_mapping' => [],
+                'field_mapping' => [
+                    'agencies' => [
+                        'id' => 'id',
+                        'uuid' => 'uuid',
+                        'name' => 'name',
+                        'active' => 'active'
+                    ],
+
+                    'users' => [
+                        'id' => 'id',
+                        'uuid' => 'uuid',
+                        'agency_id' => 'agency_id',
+                        'name' => 'name',
+                        'email' => 'email',
+                        'password' => 'password',
+                        'google_id' => 'google_id',
+                        'linkedin_id' => 'linkedin_id',
+                        'github_id' => 'github_id'
+                    ],
+
+                    'oauth_clients' => [
+                        'client_id' => 'client_id',
+                        'client_secret' => 'client_secret',
+                        'client_name' => 'client_name',
+                        'redirect_uris' => 'redirect_uris',
+                        'grant_types' => 'grant_types',
+                        'response_types' => 'response_types',
+                        'created_at' => 'created_at'
+                    ],
+
+                    'oauth_tokens' => [
+                        'client_id' => 'client_id',
+                        'access_token' => 'access_token',
+                        'refresh_token' => 'refresh_token',
+                        'token_type' => 'token_type',
+                        'scope' => 'scope',
+                        'expires_at' => 'expires_at',
+                        'agency_id' => 'agency_id',
+                        'user_id' => 'user_id',
+                        'revoked' => 'revoked',
+                        'created_at' => 'created_at',
+                        'code_challenge' => 'code_challenge',
+                        'code_challenge_method' => 'code_challenge_method'
+                    ],
+
+                    'sessions' => [
+                        'session_id' => 'session_id',
+                        'session_data' => 'session_data',
+                        'expires_at' => 'expires_at',
+                        'created_at' => 'created_at'
+                    ],
+
+                    'messages' => [
+                        'id' => 'id',
+                        'session_id' => 'session_id',
+                        'message_data' => 'message_data',
+                        'context_data' => 'context_data',
+                        'created_at' => 'created_at'
+                    ],
+
+                    'sampling_responses' => [
+                        'id' => 'id',
+                        'session_id' => 'session_id',
+                        'request_id' => 'request_id',
+                        'response_data' => 'response_data',
+                        'created_at' => 'created_at'
+                    ],
+
+                    'roots_responses' => [
+                        'id' => 'id',
+                        'session_id' => 'session_id',
+                        'request_id' => 'request_id',
+                        'response_data' => 'response_data',
+                        'created_at' => 'created_at'
+                    ],
+
+                    'elicitation_responses' => [
+                        'id' => 'id',
+                        'session_id' => 'session_id',
+                        'request_id' => 'request_id',
+                        'response_data' => 'response_data',
+                        'created_at' => 'created_at'
+                    ]
+                ]
             ]
         ];
     }
