@@ -14,6 +14,7 @@ class ResponseManager
         $this->storage = $storage;
     }
 
+
     public function storeSuccessResponse(string $sessionId, mixed $result, mixed $id, Response $response): Response
     {
         $logFile = '/var/www/devsa/logs/uncaught.log';
