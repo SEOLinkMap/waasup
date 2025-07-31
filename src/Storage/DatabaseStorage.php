@@ -453,9 +453,7 @@ class DatabaseStorage implements StorageInterface
      */
     public function storeAccessToken(array $tokenData): bool
     {
-        $tableName = $this->getTableName('oauth_tokens');
-
-        $sql = "INSERT INTO `{$tableName}`
+        $sql = "INSERT INTO `{$this->getTableName('oauth_tokens')}`
             (`client_id`, `access_token`, `refresh_token`, `token_type`, `scope`, `expires_at`,
              `agency_id`, `user_id`, `revoked`, `created_at`)
             VALUES (:client_id, :access_token, :refresh_token, 'Bearer', :scope,
