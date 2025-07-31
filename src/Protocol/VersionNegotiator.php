@@ -8,10 +8,12 @@ namespace Seolinkmap\Waasup\Protocol;
 class VersionNegotiator
 {
     private array $supportedVersions;
+    private array $config;
 
-    public function __construct(array $supportedVersions = ['2025-06-18', '2025-03-26', '2024-11-05'])
+    public function __construct(array $config = [])
     {
-        $this->supportedVersions = $supportedVersions;
+        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
+        $this->supportedVersions = $this->config['supported_versions'];
     }
 
     /**
@@ -45,5 +47,12 @@ class VersionNegotiator
     public function getSupportedVersions(): array
     {
         return $this->supportedVersions;
+    }
+
+    private function getDefaultConfig(): array
+    {
+        return [
+            'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05']
+        ];
     }
 }
