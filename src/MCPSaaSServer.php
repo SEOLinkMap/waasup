@@ -309,7 +309,7 @@ class MCPSaaSServer
 
         // Extract from request URI
         $uri = $request->getUri();
-        $scheme = $uri->getScheme() ?: 'https';
+        $scheme = 'https';
         $host = $uri->getHost() ?: 'localhost';
         $port = $uri->getPort();
 

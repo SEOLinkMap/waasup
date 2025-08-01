@@ -367,10 +367,9 @@ class AuthMiddleware
         }
 
         $uri = $request->getUri();
-        $scheme = $uri->getScheme();
         $host = $uri->getHost();
 
-        return $scheme . '://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
+        return 'https://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
     /**
@@ -383,10 +382,9 @@ class AuthMiddleware
         }
 
         $uri = $request->getUri();
-        $scheme = $uri->getScheme();
         $host = $uri->getHost();
 
-        return $scheme . '://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
+        return 'https://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
     protected function getDefaultConfig(): array

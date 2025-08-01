@@ -107,7 +107,7 @@ class WellKnownProvider
         }
 
         $uri = $request->getUri();
-        return $uri->getScheme() . '://' . $uri->getHost() .
+        return 'https://' . $uri->getHost() .
                ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
@@ -121,7 +121,7 @@ class WellKnownProvider
         }
 
         $uri = $request->getUri();
-        return $uri->getScheme() . '://' . $uri->getHost() .
+        return 'https://' . $uri->getHost() .
                ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
