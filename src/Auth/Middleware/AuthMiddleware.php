@@ -49,6 +49,19 @@ class AuthMiddleware
                     $data = json_decode($body, true);
                     if (is_array($data) && isset($data['method']) && $data['method'] === 'initialize') {
                         file_put_contents($logFile, "[AUTH DEBUG] Initialize method detected, skipping auth\n", FILE_APPEND);
+                        $contextId = $this->extractContextId($request);
+                        if ($contextId) {
+                            $contextData = $this->validateContext($contextId);
+                            if ($contextData) {
+                                $context = [
+                                    'context_data' => $contextData,
+                                    'context_id' => $contextId,
+                                    'base_url' => $this->getMCPBaseUrl($request),
+                                    'initialize_request' => true
+                                ];
+                                $request = $request->withAttribute('mcp_context', $context);
+                            }
+                        }
                         if ($request->getBody()->isSeekable()) {
                             $request->getBody()->rewind();
                         }
