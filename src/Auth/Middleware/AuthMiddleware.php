@@ -33,22 +33,27 @@ class AuthMiddleware
     {
         $logFile = '/var/www/devsa/logs/uncaught.log';
 
+        // Just add server identification
+        $serverName = $this->config['server_info']['name'] ?? 'UNKNOWN';
+        $authMode = $this->config['auth']['authless'] ? 'AUTHLESS' : 'OAUTH';
+        $serverTag = "[AUTH DEBUG - {$serverName} - {$authMode}]";
+
         try {
-            file_put_contents($logFile, "[AUTH DEBUG] Starting AuthMiddleware\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Starting AuthMiddleware\n", FILE_APPEND);
 
             if ($this->config['auth']['authless']) {
-                file_put_contents($logFile, "[AUTH DEBUG] Authless mode enabled\n", FILE_APPEND);
+                file_put_contents($logFile, "{$serverTag} Authless mode enabled\n", FILE_APPEND);
                 return $this->handleAuthlessRequest($request, $handler);
             }
 
-            file_put_contents($logFile, "[AUTH DEBUG] OAuth mode - checking initialize method\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} OAuth mode - checking initialize method\n", FILE_APPEND);
 
             if ($request->getMethod() === 'POST') {
                 $body = (string) $request->getBody();
                 if (!empty($body)) {
                     $data = json_decode($body, true);
                     if (is_array($data) && isset($data['method']) && $data['method'] === 'initialize') {
-                        file_put_contents($logFile, "[AUTH DEBUG] Initialize method detected, skipping auth\n", FILE_APPEND);
+                        file_put_contents($logFile, "{$serverTag} Initialize method detected, skipping auth\n", FILE_APPEND);
                         $contextId = $this->extractContextId($request);
                         if ($contextId) {
                             $contextData = $this->validateContext($contextId);
@@ -73,39 +78,39 @@ class AuthMiddleware
                 }
             }
 
-            file_put_contents($logFile, "[AUTH DEBUG] Extracting context ID\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Extracting context ID\n", FILE_APPEND);
             $contextId = $this->extractContextId($request);
-            file_put_contents($logFile, "[AUTH DEBUG] Context ID: " . ($contextId ?? 'NULL') . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Context ID: " . ($contextId ?? 'NULL') . "\n", FILE_APPEND);
 
             if (!$contextId) {
-                file_put_contents($logFile, "[AUTH DEBUG] No context ID - throwing AuthenticationException\n", FILE_APPEND);
+                file_put_contents($logFile, "{$serverTag} No context ID - throwing AuthenticationException\n", FILE_APPEND);
                 throw new AuthenticationException('Missing context identifier');
             }
 
-            file_put_contents($logFile, "[AUTH DEBUG] Validating context\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Validating context\n", FILE_APPEND);
             $contextData = $this->validateContext($contextId);
-            file_put_contents($logFile, "[AUTH DEBUG] Context data: " . json_encode($contextData) . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Context data: " . json_encode($contextData) . "\n", FILE_APPEND);
 
             if (!$contextData) {
-                file_put_contents($logFile, "[AUTH DEBUG] Invalid context - throwing AuthenticationException\n", FILE_APPEND);
+                file_put_contents($logFile, "{$serverTag} Invalid context - throwing AuthenticationException\n", FILE_APPEND);
                 throw new AuthenticationException('Invalid or inactive context');
             }
 
-            file_put_contents($logFile, "[AUTH DEBUG] Extracting access token\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Extracting access token\n", FILE_APPEND);
             $accessToken = $this->extractAccessToken($request);
-            file_put_contents($logFile, "[AUTH DEBUG] Actual token value: " . $accessToken . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Actual token value: " . $accessToken . "\n", FILE_APPEND);
 
             if (!$accessToken) {
-                file_put_contents($logFile, "[AUTH DEBUG] No access token - returning OAuth discovery\n", FILE_APPEND);
+                file_put_contents($logFile, "{$serverTag} No access token - returning OAuth discovery\n", FILE_APPEND);
                 return $this->createOAuthDiscoveryResponse($request);
             }
 
-            file_put_contents($logFile, "[AUTH DEBUG] Validating token\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Validating token\n", FILE_APPEND);
             $tokenData = $this->validateToken($accessToken, $contextData);
-            file_put_contents($logFile, "[AUTH DEBUG] Token data: " . json_encode($tokenData) . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Token data: " . json_encode($tokenData) . "\n", FILE_APPEND);
 
             if (!$tokenData) {
-                file_put_contents($logFile, "[AUTH DEBUG] Invalid token - returning OAuth discovery\n", FILE_APPEND);
+                file_put_contents($logFile, "{$serverTag} Invalid token - returning OAuth discovery\n", FILE_APPEND);
                 return $this->createOAuthDiscoveryResponse($request);
             }
 
@@ -127,17 +132,17 @@ class AuthMiddleware
                 'protocol_version' => $protocolVersion
             ];
 
-            file_put_contents($logFile, "[AUTH DEBUG] Setting context and continuing: " . json_encode($context) . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Setting context and continuing: " . json_encode($context) . "\n", FILE_APPEND);
 
             $request = $request->withAttribute('mcp_context', $context);
 
             return $handler->handle($request);
 
         } catch (AuthenticationException $e) {
-            file_put_contents($logFile, "[AUTH DEBUG] AuthenticationException caught: " . $e->getMessage() . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} AuthenticationException caught: " . $e->getMessage() . "\n", FILE_APPEND);
             return $this->createOAuthDiscoveryResponse($request);
         } catch (\Exception $e) {
-            file_put_contents($logFile, "[AUTH DEBUG] Other exception caught: " . $e->getMessage() . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Other exception caught: " . $e->getMessage() . "\n", FILE_APPEND);
             return $this->createErrorResponse('Internal authentication error', 500);
         }
     }
@@ -146,19 +151,23 @@ class AuthMiddleware
     {
         $logFile = '/var/www/devsa/logs/uncaught.log';
 
-        file_put_contents($logFile, "[EXTRACT DEBUG] Starting extractContextId\n", FILE_APPEND);
+        $serverName = $this->config['server_info']['name'] ?? 'UNKNOWN';
+        $authMode = $this->config['auth']['authless'] ? 'AUTHLESS' : 'OAUTH';
+        $serverTag = "[EXTRACT DEBUG - {$serverName} - {$authMode}]";
+
+        file_put_contents($logFile, "{$serverTag} Starting extractContextId\n", FILE_APPEND);
 
         $route = $request->getAttribute('__route__');
-        file_put_contents($logFile, "[EXTRACT DEBUG] Route object: " . ($route ? get_class($route) : 'NULL') . "\n", FILE_APPEND);
+        file_put_contents($logFile, "{$serverTag} Route object: " . ($route ? get_class($route) : 'NULL') . "\n", FILE_APPEND);
 
         if ($route && method_exists($route, 'getArgument')) {
             $agencyUuid = $route->getArgument('agencyUuid');
             $userId = $route->getArgument('userId');
             $contextId = $route->getArgument('contextId');
 
-            file_put_contents($logFile, "[EXTRACT DEBUG] agencyUuid from route: " . ($agencyUuid ?? 'NULL') . "\n", FILE_APPEND);
-            file_put_contents($logFile, "[EXTRACT DEBUG] userId from route: " . ($userId ?? 'NULL') . "\n", FILE_APPEND);
-            file_put_contents($logFile, "[EXTRACT DEBUG] contextId from route: " . ($contextId ?? 'NULL') . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} agencyUuid from route: " . ($agencyUuid ?? 'NULL') . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} userId from route: " . ($userId ?? 'NULL') . "\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} contextId from route: " . ($contextId ?? 'NULL') . "\n", FILE_APPEND);
 
             if ($agencyUuid) {
                 return $agencyUuid;
@@ -174,18 +183,18 @@ class AuthMiddleware
         $path = $request->getUri()->getPath();
         $segments = explode('/', trim($path, '/'));
 
-        file_put_contents($logFile, "[EXTRACT DEBUG] Path: $path\n", FILE_APPEND);
-        file_put_contents($logFile, "[EXTRACT DEBUG] Segments: " . json_encode($segments) . "\n", FILE_APPEND);
+        file_put_contents($logFile, "{$serverTag} Path: $path\n", FILE_APPEND);
+        file_put_contents($logFile, "{$serverTag} Segments: " . json_encode($segments) . "\n", FILE_APPEND);
 
         foreach ($segments as $segment) {
-            file_put_contents($logFile, "[EXTRACT DEBUG] Checking segment: $segment\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Checking segment: $segment\n", FILE_APPEND);
             if ($this->isValidUuid($segment)) {
-                file_put_contents($logFile, "[EXTRACT DEBUG] Found valid UUID: $segment\n", FILE_APPEND);
+                file_put_contents($logFile, "{$serverTag} Found valid UUID: $segment\n", FILE_APPEND);
                 return $segment;
             }
         }
 
-        file_put_contents($logFile, "[EXTRACT DEBUG] No context ID found\n", FILE_APPEND);
+        file_put_contents($logFile, "{$serverTag} No context ID found\n", FILE_APPEND);
         return null;
     }
 
