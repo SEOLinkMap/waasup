@@ -93,7 +93,7 @@ class AuthMiddleware
 
             file_put_contents($logFile, "[AUTH DEBUG] Extracting access token\n", FILE_APPEND);
             $accessToken = $this->extractAccessToken($request);
-            file_put_contents($logFile, "[AUTH DEBUG] Access token: " . ($accessToken ? 'PRESENT' : 'NULL') . "\n", FILE_APPEND);
+            file_put_contents($logFile, "[AUTH DEBUG] Actual token value: " . $accessToken . "\n", FILE_APPEND);
 
             if (!$accessToken) {
                 file_put_contents($logFile, "[AUTH DEBUG] No access token - returning OAuth discovery\n", FILE_APPEND);
