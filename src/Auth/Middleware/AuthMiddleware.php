@@ -33,13 +33,21 @@ class AuthMiddleware
     {
         $logFile = '/var/www/devsa/logs/uncaught.log';
 
-        // Just add server identification
         $serverName = $this->config['server_info']['name'] ?? 'UNKNOWN';
         $authMode = $this->config['auth']['authless'] ? 'AUTHLESS' : 'OAUTH';
         $serverTag = "[AUTH DEBUG - {$serverName} - {$authMode}]";
 
         try {
-            file_put_contents($logFile, "{$serverTag} Starting AuthMiddleware\n", FILE_APPEND);
+            // LOG ALL REQUEST DETAILS
+            file_put_contents($logFile, "{$serverTag} === REQUEST START ===\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} Method: {$request->getMethod()}\n", FILE_APPEND);
+            file_put_contents($logFile, "{$serverTag} URI: {$request->getUri()}\n", FILE_APPEND);
+
+            // LOG ALL HEADERS
+            file_put_contents($logFile, "{$serverTag} Headers:\n", FILE_APPEND);
+            foreach ($request->getHeaders() as $name => $values) {
+                file_put_contents($logFile, "{$serverTag}   {$name}: " . implode(', ', $values) . "\n", FILE_APPEND);
+            }
 
             if ($this->config['auth']['authless']) {
                 file_put_contents($logFile, "{$serverTag} Authless mode enabled\n", FILE_APPEND);
@@ -51,6 +59,7 @@ class AuthMiddleware
             if ($request->getMethod() === 'POST') {
                 $body = (string) $request->getBody();
                 if (!empty($body)) {
+                    file_put_contents($logFile, "{$serverTag} Request body: {$body}\n", FILE_APPEND);
                     $data = json_decode($body, true);
                     if (is_array($data) && isset($data['method']) && $data['method'] === 'initialize') {
                         file_put_contents($logFile, "{$serverTag} Initialize method detected, skipping auth\n", FILE_APPEND);
@@ -379,9 +388,6 @@ class AuthMiddleware
         return preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $uuid) === 1;
     }
 
-    /**
-     * Get MCP base URL for resource operations (tenant-specific)
-     */
     protected function getMCPBaseUrl(Request $request): string
     {
         if (!empty($this->config['base_url'])) {
@@ -394,9 +400,6 @@ class AuthMiddleware
         return 'https://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
-    /**
-     * Get OAuth base URL for auth operations (shared infrastructure)
-     */
     protected function getOAuthBaseUrl(Request $request): string
     {
         if (!empty($this->config['oauth']['base_url'])) {
