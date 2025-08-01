@@ -23,14 +23,13 @@ class SystemHandler
 
     public function handleInitialize(array $params, mixed $id, ?string $sessionId, $selectedVersion, Response $response): Response
     {
+        file_put_contents('/var/www/devsa/logs/uncaught.log', "[INITIALIZE DEBUG] sessionId received: " . var_export($sessionId, true) . "\n", FILE_APPEND);
+
         if ($sessionId) {
             $this->protocolManager->storeSessionVersion($sessionId, $selectedVersion);
         }
 
-        $serverInfo = $this->config['server_info'] ?? [
-        'name' => 'WaaSuP MCP SaaS Server',
-        'version' => '1.1.0'
-        ];
+        $serverInfo = $this->config['server_info'];
 
         $capabilities = [
             'logging' => new \stdClass()
