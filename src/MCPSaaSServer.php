@@ -595,10 +595,6 @@ class MCPSaaSServer
             ],
             'oauth' => [
                 'base_url' => '', // OAuth base url
-                'wellknown' => [
-                    'auth_server' => '/.well-known/oauth-authorization-server',
-                    'protected_resource' => '/.well-known/oauth-protected-resource'
-                ],
                 'auth_server' => [
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',

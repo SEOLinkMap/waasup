@@ -14,54 +14,10 @@ class WellKnownProvider
         $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
     }
 
-    public function protectedResource(Request $request, Response $response): Response
-    {
-        $mcpBaseUrl = $this->getMCPBaseUrl($request);
-        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: $this->detectProtocolFromPath($request);
-
-        $discovery = [
-            'resource' => $mcpBaseUrl,
-            'authorization_servers' => [$this->getOAuthBaseUrl($request)],
-            'bearer_methods_supported' => ['header'],
-            'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read', 'mcp:write']
-        ];
-
-        if ($protocolVersion === '2025-06-18') {
-            $discovery['resource_server'] = true;
-            $discovery['resource_indicators_supported'] = true;
-            $discovery['token_binding_supported'] = true;
-            $discovery['audience_validation_required'] = true;
-            $discovery['resource_indicator_endpoint'] = $this->getOAuthBaseUrl($request) . $this->config['oauth']['resource_server']['endpoints']['resource'];
-            $discovery['token_endpoint_auth_methods_supported'] = ['client_secret_post', 'private_key_jwt'];
-            $discovery['token_binding_methods_supported'] = ['resource_indicator'];
-            $discovery['content_types_supported'] = ['application/json', 'text/event-stream'];
-            $discovery['mcp_features_supported'] = [
-                'tools', 'prompts', 'resources', 'sampling', 'roots', 'ping',
-                'progress_notifications', 'tool_annotations', 'audio_content',
-                'completions', 'elicitation', 'structured_outputs', 'resource_links'
-            ];
-        } elseif ($protocolVersion === '2025-03-26') {
-            $discovery['streamable_http_supported'] = true;
-            $discovery['json_rpc_batching_supported'] = true;
-            $discovery['mcp_features_supported'] = [
-                'tools', 'prompts', 'resources', 'sampling', 'roots', 'ping',
-                'progress_notifications', 'tool_annotations', 'audio_content', 'completions'
-            ];
-        } else {
-            $discovery['http_sse_supported'] = true;
-            $discovery['mcp_features_supported'] = [
-                'tools', 'prompts', 'resources', 'sampling', 'roots', 'ping', 'progress_notifications'
-            ];
-        }
-
-        $response->getBody()->write(json_encode($discovery));
-        return $response->withHeader('Content-Type', 'application/json');
-    }
-
     public function authorizationServer(Request $request, Response $response): Response
     {
         $oauthBaseUrl = $this->getOAuthBaseUrl($request);
-        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: '2024-11-05';
+        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: $this->detectProtocolFromPath($request);
 
         $discovery = [
             'issuer' => $oauthBaseUrl,
@@ -73,7 +29,7 @@ class WellKnownProvider
             'code_challenge_methods_supported' => ['S256'],
             'response_modes_supported' => ['query'],
             'registration_endpoint' => $oauthBaseUrl . $this->config['oauth']['auth_server']['endpoints']['register'],
-            'scopes_supported' => $this->config['scopes_supported'] ?? ['mcp:read']
+            'scopes_supported' => $this->config['scopes_supported']
         ];
 
         if (!empty($this->config['oauth']['auth_server']['endpoints']['revoke'])) {
@@ -91,6 +47,51 @@ class WellKnownProvider
         if (in_array($protocolVersion, ['2024-11-05', '2025-03-26', '2025-06-18'])) {
             $discovery['pkce_required'] = true;
             $discovery['authorization_response_iss_parameter_supported'] = true;
+        }
+
+        $response->getBody()->write(json_encode($discovery));
+        return $response->withHeader('Content-Type', 'application/json');
+    }
+
+    public function protectedResource(Request $request, Response $response): Response
+    {
+        $mcpBaseUrl = $this->getMCPBaseUrl($request);
+        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: $this->detectProtocolFromPath($request);
+
+        $discovery = [
+            'resource' => $mcpBaseUrl,
+            'authorization_servers' => [$this->getOAuthBaseUrl($request)],
+            'bearer_methods_supported' => ['header'],
+            'scopes_supported' => $this->config['scopes_supported']
+        ];
+
+        if ($protocolVersion === '2025-06-18') {
+            $discovery['resource_server'] = true;
+            $discovery['resource_indicators_supported'] = true;
+            $discovery['token_binding_supported'] = true;
+            $discovery['audience_validation_required'] = true;
+            $discovery['resource_indicator_endpoint'] = $this->getOAuthBaseUrl($request) . $this->config['oauth']['resource_server']['endpoints']['resource'];
+            $discovery['token_endpoint_auth_methods_supported'] = ['client_secret_post', 'private_key_jwt'];
+            $discovery['token_binding_methods_supported'] = ['resource_indicator'];
+            $discovery['content_types_supported'] = ['application/json', 'text/event-stream'];
+            $discovery['streamable_http_supported'] = true;
+            $discovery['mcp_features_supported'] = [
+                'tools', 'prompts', 'resources', 'sampling', 'roots', 'ping',
+                'progress_notifications', 'tool_annotations', 'audio_content',
+                'completions', 'elicitation', 'structured_outputs', 'resource_links'
+            ];
+        } elseif ($protocolVersion === '2025-03-26') {
+            $discovery['streamable_http_supported'] = true;
+            $discovery['json_rpc_batching_supported'] = true;
+            $discovery['mcp_features_supported'] = [
+                'tools', 'prompts', 'resources', 'sampling', 'roots', 'ping',
+                'progress_notifications', 'tool_annotations', 'audio_content', 'completions'
+            ];
+        } else {
+            $discovery['http_sse_supported'] = true;
+            $discovery['mcp_features_supported'] = [
+                'tools', 'prompts', 'resources', 'sampling', 'roots', 'ping', 'progress_notifications'
+            ];
         }
 
         $response->getBody()->write(json_encode($discovery));

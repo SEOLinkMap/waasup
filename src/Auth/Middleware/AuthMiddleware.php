@@ -269,16 +269,28 @@ class AuthMiddleware
 
     protected function createOAuthDiscoveryResponse(Request $request): Response
     {
-        $logFile = '/var/www/devsa/logs/uncaught.log'; // Define the variable properly
+        $logFile = '/var/www/devsa/logs/uncaught.log';
 
         $oauthBaseUrl = $this->getOAuthBaseUrl($request);
         $mcpResourceUrl = $this->getMCPBaseUrl($request) . $request->getUri()->getPath();
-
 
         file_put_contents($logFile, "[OAUTH-DISCOVERY] OAuth Base URL: {$oauthBaseUrl}\n", FILE_APPEND);
         file_put_contents($logFile, "[OAUTH-DISCOVERY] MCP Resource URL: {$mcpResourceUrl}\n", FILE_APPEND);
 
         $oauthEndpoints = $this->config['oauth']['auth_server']['endpoints'];
+
+        // Build RFC 8414 well-known URLs
+        $uri = $request->getUri();
+        $requestDomain = 'https://' . $uri->getHost() . ($uri->getPort() ? ':' . $uri->getPort() : '');
+
+        $oauthPath = '';
+        if (!empty($this->config['oauth']['base_url'])) {
+            $parsed = parse_url($this->config['oauth']['base_url']);
+            $oauthPath = ltrim($parsed['path'] ?? '', '/');
+        }
+
+        $authServerMetadataUrl = $requestDomain . '/.well-known/oauth-authorization-server' . ($oauthPath ? '/' . $oauthPath : '');
+        $resourceMetadataUrl = $requestDomain . '/.well-known/oauth-protected-resource' . ($oauthPath ? '/' . $oauthPath : '');
 
         $responseData = [
             'jsonrpc' => '2.0',
@@ -289,18 +301,15 @@ class AuthMiddleware
                     'oauth' => [
                         'authorization_endpoint' => $oauthBaseUrl . $oauthEndpoints['authorize'],
                         'token_endpoint' => $oauthBaseUrl . $oauthEndpoints['token'],
-                        'registration_endpoint' => $oauthBaseUrl . $oauthEndpoints['register']
+                        'registration_endpoint' => $oauthBaseUrl . $oauthEndpoints['register'],
+                        'resource' => $mcpResourceUrl,
+                        'resource_metadata_endpoint' => $resourceMetadataUrl,
+                        'authorization_server_metadata_endpoint' => $authServerMetadataUrl
                     ]
                 ]
             ],
             'id' => null
         ];
-
-        $wellknownEndpoints = $this->config['oauth']['wellknown'];
-
-        $responseData['error']['data']['oauth']['resource'] = $mcpResourceUrl;
-        $responseData['error']['data']['oauth']['resource_metadata_endpoint'] = $oauthBaseUrl . $wellknownEndpoints['protected_resource'];
-        $responseData['error']['data']['oauth']['authorization_server_metadata_endpoint'] = $oauthBaseUrl . $wellknownEndpoints['auth_server'];
 
         $jsonContent = json_encode($responseData);
         if ($jsonContent === false) {
@@ -316,7 +325,6 @@ class AuthMiddleware
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Access-Control-Allow-Origin', '*');
 
-        $resourceMetadataUrl = $oauthBaseUrl . $wellknownEndpoints['protected_resource'];
         $response = $response->withHeader(
             'WWW-Authenticate',
             'Bearer realm="MCP Server", resource_metadata="' . $resourceMetadataUrl . '"'
@@ -479,10 +487,6 @@ class AuthMiddleware
             ],
             'oauth' => [
                 'base_url' => '',
-                'wellknown' => [
-                    'auth_server' => '/.well-known/oauth-authorization-server',
-                    'protected_resource' => '/.well-known/oauth-protected-resource'
-                ],
                 'auth_server' => [
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',
