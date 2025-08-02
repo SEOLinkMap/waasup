@@ -275,12 +275,6 @@ class MCPSaaSServer
             }
         }
 
-        // Also check direct route arguments (Slim 4 compatibility)
-        $routeArgs = $request->getAttribute('routeInfo')[2] ?? [];
-        if (isset($routeArgs['sessID'])) {
-            return $routeArgs['sessID'];
-        }
-
         // Generic URI path extraction - look for protocolVersion_sessionId format
         $path = $request->getUri()->getPath();
         $pathSegments = explode('/', trim($path, '/'));
@@ -289,8 +283,6 @@ class MCPSaaSServer
         foreach ($pathSegments as $segment) {
             if (preg_match('/^[a-zA-Z0-9.-]+_[a-zA-Z0-9]+$/', $segment)) {
                 return $segment; // Return full protocolVersion_sessionId
-            } elseif (preg_match('/^[a-zA-Z0-9]{16,}$/', $segment)) {
-                return $segment; // Handle standalone session ID (for backwards compatibility)
             }
         }
 
