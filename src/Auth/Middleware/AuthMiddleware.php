@@ -145,6 +145,12 @@ class AuthMiddleware
 
             $request = $request->withAttribute('mcp_context', $context);
 
+
+file_put_contents($logFile, "[AUTH-HANDOFF] Headers being passed to handler:\n", FILE_APPEND);
+foreach ($request->getHeaders() as $name => $values) {
+    file_put_contents($logFile, "[AUTH-HANDOFF] '$name' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
+}
+
             return $handler->handle($request);
 
         } catch (AuthenticationException $e) {

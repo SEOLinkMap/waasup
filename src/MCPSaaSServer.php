@@ -58,6 +58,11 @@ class MCPSaaSServer
      */
     public function handle(Request $request, Response $response): Response
     {
+        $logFile = '/var/www/devsa/logs/uncaught.log';
+        file_put_contents($logFile, "[MCP-SERVER] Headers received:\n", FILE_APPEND);
+        foreach ($request->getHeaders() as $name => $values) {
+            file_put_contents($logFile, "[MCP-SERVER] '$name' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
+        }
         try {
             $this->contextData = $request->getAttribute('mcp_context') ?? [];
             $isAuthless = $this->config['auth']['authless'];
