@@ -1146,14 +1146,40 @@ class OAuthServer
             $data['error_description'] = $description;
         }
 
+        // OAuth 2.1 Section 5.3 status code mapping
+        $status = match($error) {
+            'invalid_token' => 401,
+            'insufficient_scope' => 403,
+            'invalid_client' => 401,
+            'unauthorized_client' => 401,
+            'invalid_grant' => 400,
+            'unsupported_grant_type' => 400,
+            'invalid_request' => 400,
+            'unsupported_response_type' => 400,
+            'server_error' => 500,
+            default => 400
+        };
+
+        // OAuth 2.1 Section 5.3.1 - WWW-Authenticate header required
+        $wwwAuth = 'Bearer realm="OAuth Server"';
+        if ($error) {
+            $wwwAuth .= ', error="' . $error . '"';
+            if ($description) {
+                $wwwAuth .= ', error_description="' . $description . '"';
+            }
+        }
+
         $jsonContent = json_encode($data);
         if ($jsonContent === false) {
-            $jsonContent = '{"error":"JSON encoding failed"}';
+            $jsonContent = '{"error":"invalid_request","error_description":"JSON encoding failed"}';
         }
+
         $stream = $this->streamFactory->createStream($jsonContent);
-        return $this->responseFactory->createResponse(400)
+
+        return $this->responseFactory->createResponse($status)
             ->withBody($stream)
-            ->withHeader('Content-Type', 'application/json');
+            ->withHeader('Content-Type', 'application/json')
+            ->withHeader('WWW-Authenticate', $wwwAuth);
     }
 
     /**

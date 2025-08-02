@@ -146,10 +146,10 @@ class AuthMiddleware
             $request = $request->withAttribute('mcp_context', $context);
 
 
-file_put_contents($logFile, "[AUTH-HANDOFF] Headers being passed to handler:\n", FILE_APPEND);
-foreach ($request->getHeaders() as $name => $values) {
-    file_put_contents($logFile, "[AUTH-HANDOFF] '$name' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
-}
+            file_put_contents($logFile, "[AUTH-HANDOFF] Headers being passed to handler:\n", FILE_APPEND);
+            foreach ($request->getHeaders() as $name => $values) {
+                file_put_contents($logFile, "[AUTH-HANDOFF] '$name' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
+            }
 
             return $handler->handle($request);
 
@@ -367,6 +367,33 @@ foreach ($request->getHeaders() as $name => $values) {
 
     protected function createErrorResponse(string $message, int $status): Response
     {
+        // For OAuth authentication errors (401/403), use OAuth 2.1 Section 5.3 format
+        if ($status === 401 || $status === 403) {
+            $errorCode = $status === 401 ? 'invalid_token' : 'insufficient_scope';
+            $responseData = [
+                'error' => $errorCode,
+                'error_description' => $message
+            ];
+
+            $wwwAuth = 'Bearer realm="MCP Server"';
+            $wwwAuth .= ', error="' . $errorCode . '"';
+            $wwwAuth .= ', error_description="' . $message . '"';
+
+            $jsonContent = json_encode($responseData);
+            if ($jsonContent === false) {
+                $jsonContent = '{"error":"invalid_request","error_description":"JSON encoding error"}';
+            }
+
+            $stream = $this->streamFactory->createStream($jsonContent);
+
+            return $this->responseFactory->createResponse($status)
+                ->withBody($stream)
+                ->withHeader('Content-Type', 'application/json')
+                ->withHeader('WWW-Authenticate', $wwwAuth)
+                ->withHeader('Access-Control-Allow-Origin', '*');
+        }
+
+        // Keep existing JSONRPC format for non-OAuth errors
         $responseData = [
             'jsonrpc' => '2.0',
             'error' => [
