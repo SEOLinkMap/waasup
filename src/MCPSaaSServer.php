@@ -266,7 +266,7 @@ class MCPSaaSServer
             }
         }
 
-        // Check route parameters with multiple methods
+        // Check route parameters
         $route = $request->getAttribute('__route__');
         if ($route && method_exists($route, 'getArgument')) {
             $routeSessionId = $route->getArgument('sessID');
@@ -279,10 +279,9 @@ class MCPSaaSServer
         $path = $request->getUri()->getPath();
         $pathSegments = explode('/', trim($path, '/'));
 
-        // Look for session ID in path segments (handle protocolVersion_sessionId format)
         foreach ($pathSegments as $segment) {
             if (preg_match('/^[a-zA-Z0-9.-]+_[a-zA-Z0-9]+$/', $segment)) {
-                return $segment; // Return full protocolVersion_sessionId
+                return $segment;
             }
         }
 
