@@ -272,10 +272,11 @@ class AuthMiddleware
         $logFile = '/var/www/devsa/logs/uncaught.log'; // Define the variable properly
 
         $oauthBaseUrl = $this->getOAuthBaseUrl($request);
-        $mcpBaseUrl = $this->getMCPBaseUrl($request);
+        $mcpResourceUrl = $this->getMCPBaseUrl($request) . $request->getUri()->getPath();
+
 
         file_put_contents($logFile, "[OAUTH-DISCOVERY] OAuth Base URL: {$oauthBaseUrl}\n", FILE_APPEND);
-        file_put_contents($logFile, "[OAUTH-DISCOVERY] MCP Base URL: {$mcpBaseUrl}\n", FILE_APPEND);
+        file_put_contents($logFile, "[OAUTH-DISCOVERY] MCP Resource URL: {$mcpResourceUrl}\n", FILE_APPEND);
 
         $oauthEndpoints = $this->config['oauth']['auth_server']['endpoints'];
 
@@ -297,7 +298,7 @@ class AuthMiddleware
 
         $wellknownEndpoints = $this->config['oauth']['wellknown'];
 
-        $responseData['error']['data']['oauth']['resource'] = $mcpBaseUrl;
+        $responseData['error']['data']['oauth']['resource'] = $mcpResourceUrl;
         $responseData['error']['data']['oauth']['resource_metadata_endpoint'] = $oauthBaseUrl . $wellknownEndpoints['protected_resource'];
         $responseData['error']['data']['oauth']['authorization_server_metadata_endpoint'] = $oauthBaseUrl . $wellknownEndpoints['auth_server'];
 
