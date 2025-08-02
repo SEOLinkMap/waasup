@@ -269,8 +269,13 @@ class AuthMiddleware
 
     protected function createOAuthDiscoveryResponse(Request $request): Response
     {
+        $logFile = '/var/www/devsa/logs/uncaught.log'; // Define the variable properly
+
         $oauthBaseUrl = $this->getOAuthBaseUrl($request);
         $mcpBaseUrl = $this->getMCPBaseUrl($request);
+
+        file_put_contents($logFile, "[OAUTH-DISCOVERY] OAuth Base URL: {$oauthBaseUrl}\n", FILE_APPEND);
+        file_put_contents($logFile, "[OAUTH-DISCOVERY] MCP Base URL: {$mcpBaseUrl}\n", FILE_APPEND);
 
         $oauthEndpoints = $this->config['oauth']['auth_server']['endpoints'];
 
@@ -301,6 +306,8 @@ class AuthMiddleware
             $jsonContent = '{"jsonrpc":"2.0","error":{"code":-32000,"message":"JSON encoding error"},"id":null}';
         }
 
+        file_put_contents($logFile, "[OAUTH-DISCOVERY] Response JSON: {$jsonContent}\n", FILE_APPEND);
+
         $stream = $this->streamFactory->createStream($jsonContent);
 
         $response = $this->responseFactory->createResponse(401)
@@ -313,6 +320,8 @@ class AuthMiddleware
             'WWW-Authenticate',
             'Bearer realm="MCP Server", resource_metadata="' . $resourceMetadataUrl . '"'
         );
+
+        file_put_contents($logFile, "[OAUTH-DISCOVERY] WWW-Authenticate: Bearer realm=\"MCP Server\", resource_metadata=\"{$resourceMetadataUrl}\"\n", FILE_APPEND);
 
         return $response;
     }
