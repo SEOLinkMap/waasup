@@ -159,21 +159,39 @@ class DatabaseStorage implements StorageInterface
      * - session_id (varchar): MCP session identifier
      * - message_data (text): JSON-encoded message data
      * - context_data (text): JSON-encoded context information
-     * - created_at (datetime): Message creation timestamp
      */
     public function storeMessage(string $sessionId, array $messageData, array $context = []): bool
     {
+        $logFile = '/var/www/devsa/logs/uncaught.log';
+
         $sql = "INSERT INTO `{$this->getTableName('messages')}`
                 (`{$this->getField('messages', 'session_id')}`, `{$this->getField('messages', 'message_data')}`, `{$this->getField('messages', 'context_data')}`, `{$this->getField('messages', 'created_at')}`)
                 VALUES (:session_id, :message_data, :context_data, :created_at)";
 
-        $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([
+        $params = [
             ':session_id' => $sessionId,
             ':message_data' => json_encode($messageData),
             ':context_data' => json_encode($context),
             ':created_at' => $this->getCurrentTimestamp()
-        ]);
+        ];
+
+        file_put_contents($logFile, "[DB-INSERT] Table: {$this->getTableName('messages')}\n", FILE_APPEND);
+        file_put_contents($logFile, "[DB-INSERT] SessionId: {$sessionId}\n", FILE_APPEND);
+        file_put_contents($logFile, "[DB-INSERT] MessageData: " . $params[':message_data'] . "\n", FILE_APPEND);
+        file_put_contents($logFile, "[DB-INSERT] ContextData: " . $params[':context_data'] . "\n", FILE_APPEND);
+        file_put_contents($logFile, "[DB-INSERT] SQL: {$sql}\n", FILE_APPEND);
+
+        $stmt = $this->pdo->prepare($sql);
+        $result = $stmt->execute($params);
+
+        if ($result) {
+            file_put_contents($logFile, "[DB-INSERT] SUCCESS: Message inserted successfully\n", FILE_APPEND);
+        } else {
+            $errorInfo = $stmt->errorInfo();
+            file_put_contents($logFile, "[DB-INSERT] FAILED: " . json_encode($errorInfo) . "\n", FILE_APPEND);
+        }
+
+        return $result;
     }
 
     /**
