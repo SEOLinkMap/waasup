@@ -75,7 +75,14 @@ class SystemHandler
         'id' => $id
         ];
 
-        $response->getBody()->write(json_encode($responseData));
+        // $response->getBody()->write(json_encode($responseData));
+        $jsonData = json_encode($responseData);
+
+        file_put_contents('/var/www/devsa/logs/uncaught.log', "[INITIALIZE-ERROR] Data: " . print_r($responseData, true) . "\n", FILE_APPEND);
+
+
+
+        $response->getBody()->write($jsonData);
 
         return $response
             ->withHeader('Content-Type', 'application/json')
