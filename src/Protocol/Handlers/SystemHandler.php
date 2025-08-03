@@ -79,7 +79,7 @@ class SystemHandler
 
         return $response
             ->withHeader('Content-Type', 'application/json')
-            ->withHeader('Mcp-Session-Id', $this->responseManager->sanitizeHeaderValue($sessionId))
+            ->withHeader('Mcp-Session-Id', $sessionId)
             ->withHeader('Access-Control-Allow-Origin', '*')
             ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version')
             ->withHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')

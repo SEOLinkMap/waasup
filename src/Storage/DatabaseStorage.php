@@ -175,7 +175,6 @@ class DatabaseStorage implements StorageInterface
             ':created_at' => $this->getCurrentTimestamp()
         ];
 
-        file_put_contents($logFile, "[DB-INSERT] Table: {$this->getTableName('messages')}\n", FILE_APPEND);
         file_put_contents($logFile, "[DB-INSERT] SessionId: {$sessionId}\n", FILE_APPEND);
         file_put_contents($logFile, "[DB-INSERT] MessageData: " . $params[':message_data'] . "\n", FILE_APPEND);
         file_put_contents($logFile, "[DB-INSERT] ContextData: " . $params[':context_data'] . "\n", FILE_APPEND);
