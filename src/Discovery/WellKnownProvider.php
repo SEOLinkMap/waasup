@@ -32,9 +32,7 @@ class WellKnownProvider
             'scopes_supported' => $this->config['scopes_supported']
         ];
 
-        if (!empty($this->config['oauth']['auth_server']['endpoints']['revoke'])) {
-            $discovery['revocation_endpoint'] = $oauthBaseUrl . $this->config['oauth']['auth_server']['endpoints']['revoke'];
-        }
+        $discovery['revocation_endpoint'] = $oauthBaseUrl . $this->config['oauth']['auth_server']['endpoints']['revoke'];
 
         if ($protocolVersion === '2025-06-18') {
             $discovery['resource_indicators_supported'] = true;
@@ -55,11 +53,11 @@ class WellKnownProvider
 
     public function protectedResource(Request $request, Response $response): Response
     {
-        $mcpBaseUrl = $this->getMCPBaseUrl($request);
+        $resourceUrl = $this->extractResourceIdentifier($request);
         $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: $this->detectProtocolFromPath($request);
 
         $discovery = [
-            'resource' => $mcpBaseUrl,
+            'resource' => $resourceUrl,
             'authorization_servers' => [$this->getOAuthBaseUrl($request)],
             'bearer_methods_supported' => ['header'],
             'scopes_supported' => $this->config['scopes_supported']
@@ -96,6 +94,47 @@ class WellKnownProvider
 
         $response->getBody()->write(json_encode($discovery));
         return $response->withHeader('Content-Type', 'application/json');
+    }
+
+    /**
+     * RFC 9728 Section 3.3: Extract resource identifier from request URL
+     * The resource identifier is reconstructed by removing the well-known path
+     */
+    private function extractResourceIdentifier(Request $request): string
+    {
+        $uri = $request->getUri();
+        $scheme = $uri->getScheme() ?: 'https';
+        $host = $uri->getHost();
+        $port = $uri->getPort();
+        $path = $uri->getPath();
+        $query = $uri->getQuery();
+
+        // Build base URL
+        $baseUrl = $scheme . '://' . $host;
+        if ($port && (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443))) {
+            $baseUrl .= ':' . $port;
+        }
+
+        // Remove the well-known path component to get the original resource identifier
+        // Example: /.well-known/oauth-protected-resource/some/path -> /some/path
+        $wellKnownPattern = '/^\/\.well-known\/oauth-protected-resource(\/.*)?$/';
+        if (preg_match($wellKnownPattern, $path, $matches)) {
+            $resourcePath = $matches[1] ?? '';
+            // If there's a path after the well-known part, that's the resource path
+            if (!empty($resourcePath)) {
+                $baseUrl .= $resourcePath;
+            }
+        } else {
+            // If the pattern doesn't match, include the full path (fallback)
+            $baseUrl .= $path;
+        }
+
+        // Add query string if present
+        if (!empty($query)) {
+            $baseUrl .= '?' . $query;
+        }
+
+        return $baseUrl;
     }
 
     /**

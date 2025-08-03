@@ -247,18 +247,12 @@ class AuthMiddleware
 
         $oauthEndpoints = $this->config['oauth']['auth_server']['endpoints'];
 
-        // Build RFC 8414 well-known URLs
-        $uri = $request->getUri();
-        $requestDomain = 'https://' . $uri->getHost() . ($uri->getPort() ? ':' . $uri->getPort() : '');
+        // RFC 9728 Section 3.1: Build proper metadata URLs
+        $resourceMetadataUrl = $this->buildResourceMetadataUrl($request);
+        $authServerMetadataUrl = $this->buildAuthServerMetadataUrl($request);
 
-        $oauthPath = '';
-        if (!empty($this->config['oauth']['base_url'])) {
-            $parsed = parse_url($this->config['oauth']['base_url']);
-            $oauthPath = ltrim($parsed['path'] ?? '', '/');
-        }
-
-        $authServerMetadataUrl = $requestDomain . '/.well-known/oauth-authorization-server' . ($oauthPath ? '/' . $oauthPath : '');
-        $resourceMetadataUrl = $requestDomain . '/.well-known/oauth-protected-resource' . ($oauthPath ? '/' . $oauthPath : '');
+        file_put_contents($logFile, "[OAUTH-DISCOVERY] Resource Metadata URL: {$resourceMetadataUrl}\n", FILE_APPEND);
+        file_put_contents($logFile, "[OAUTH-DISCOVERY] Auth Server Metadata URL: {$authServerMetadataUrl}\n", FILE_APPEND);
 
         $responseData = [
             'jsonrpc' => '2.0',
@@ -293,6 +287,7 @@ class AuthMiddleware
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Access-Control-Allow-Origin', '*');
 
+        // RFC 9728 Section 5.1: WWW-Authenticate header with resource_metadata parameter
         $response = $response->withHeader(
             'WWW-Authenticate',
             'Bearer realm="MCP Server", resource_metadata="' . $resourceMetadataUrl . '"'
@@ -301,6 +296,71 @@ class AuthMiddleware
         file_put_contents($logFile, "[OAUTH-DISCOVERY] WWW-Authenticate: Bearer realm=\"MCP Server\", resource_metadata=\"{$resourceMetadataUrl}\"\n", FILE_APPEND);
 
         return $response;
+    }
+
+    /**
+     * RFC 9728 Section 3.1: Build resource metadata URL by inserting well-known between host and MCP resource path
+     */
+    private function buildResourceMetadataUrl(Request $request): string
+    {
+        $uri = $request->getUri();
+        $scheme = 'https'; // Force HTTPS as per RFC 9728
+        $host = $uri->getHost();
+        $port = $uri->getPort();
+        $path = $uri->getPath();
+        $query = $uri->getQuery();
+
+        // Build base host URL
+        $hostUrl = $scheme . '://' . $host;
+        if ($port && (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443))) {
+            $hostUrl .= ':' . $port;
+        }
+
+        // RFC 9728: Insert /.well-known/oauth-protected-resource between host and MCP resource path
+        $metadataUrl = $hostUrl . '/.well-known/oauth-protected-resource';
+
+        // Add the MCP resource path (e.g., /mcp-repo-private/uuid)
+        if (!empty($path) && $path !== '/') {
+            $metadataUrl .= $path;
+        }
+
+        // Add query component if present
+        if (!empty($query)) {
+            $metadataUrl .= '?' . $query;
+        }
+
+        return $metadataUrl;
+    }
+
+    /**
+     * RFC 8414: Build authorization server metadata URL by inserting well-known between host and OAuth server path
+     */
+    private function buildAuthServerMetadataUrl(Request $request): string
+    {
+        $uri = $request->getUri();
+        $scheme = 'https'; // Force HTTPS
+        $host = $uri->getHost();
+        $port = $uri->getPort();
+
+        // Build base host URL
+        $hostUrl = $scheme . '://' . $host;
+        if ($port && (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443))) {
+            $hostUrl .= ':' . $port;
+        }
+
+        // Check if we have a custom OAuth base URL configured
+        if (!empty($this->config['oauth']['base_url'])) {
+            $parsed = parse_url($this->config['oauth']['base_url']);
+            $oauthPath = ltrim($parsed['path'] ?? '', '/');
+
+            // If OAuth has a path component, insert well-known correctly
+            if (!empty($oauthPath)) {
+                return $hostUrl . '/.well-known/oauth-authorization-server/' . $oauthPath;
+            }
+        }
+
+        // Default: no path for OAuth server
+        return $hostUrl . '/.well-known/oauth-authorization-server';
     }
 
     protected function validateToken(string $accessToken, array $contextData): ?array
