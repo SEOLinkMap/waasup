@@ -54,39 +54,7 @@ class AuthMiddleware
                 return $this->handleAuthlessRequest($request, $handler);
             }
 
-            file_put_contents($logFile, "{$serverTag} OAuth mode - checking initialize method\n", FILE_APPEND);
-            /*
-                        if ($request->getMethod() === 'POST') {
-                            $body = (string) $request->getBody();
-                            if (!empty($body)) {
-                                file_put_contents($logFile, "{$serverTag} Request body: {$body}\n", FILE_APPEND);
-                                $data = json_decode($body, true);
-                                if (is_array($data) && isset($data['method']) && $data['method'] === 'initialize') {
-                                    file_put_contents($logFile, "{$serverTag} Initialize method detected, skipping auth\n", FILE_APPEND);
-                                    $contextId = $this->extractContextId($request);
-                                    if ($contextId) {
-                                        $contextData = $this->validateContext($contextId);
-                                        if ($contextData) {
-                                            $context = [
-                                                'context_data' => $contextData,
-                                                'context_id' => $contextId,
-                                                'base_url' => $this->getMCPBaseUrl($request),
-                                                'initialize_request' => true
-                                            ];
-                                            $request = $request->withAttribute('mcp_context', $context);
-                                        }
-                                    }
-                                    if ($request->getBody()->isSeekable()) {
-                                        $request->getBody()->rewind();
-                                    }
-                                    return $handler->handle($request);
-                                }
-                                if ($request->getBody()->isSeekable()) {
-                                    $request->getBody()->rewind();
-                                }
-                            }
-                        }
-            */
+
             file_put_contents($logFile, "{$serverTag} Extracting context ID\n", FILE_APPEND);
             $contextId = $this->extractContextId($request);
             file_put_contents($logFile, "{$serverTag} Context ID: " . ($contextId ?? 'NULL') . "\n", FILE_APPEND);
