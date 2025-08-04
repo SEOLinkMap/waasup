@@ -183,7 +183,7 @@ class AuthMiddleware
 
     private function handleAuthlessRequest(Request $request, RequestHandler $handler): Response
     {
-        $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version');
+        $protocolVersion = $this->detectProtocolVersion($request);
         $contextId = $this->extractContextId($request) ?? $this->config['auth']['authless_context_id'];
 
         $contextData = $this->config['auth']['authless_context_data'];
@@ -361,6 +361,25 @@ class AuthMiddleware
 
         // Default: no path for OAuth server
         return $hostUrl . '/.well-known/oauth-authorization-server';
+    }
+
+    private function detectProtocolVersion(Request $request): ?string
+    {
+        // Check MCP-Protocol-Version header first
+        $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
+        if ($headerVersion) {
+            return $headerVersion;
+        }
+
+        // Fallback to path detection
+        $path = $request->getUri()->getPath();
+        if (strpos($path, '2025-06-18') !== false) {
+            return '2025-06-18';
+        } elseif (strpos($path, '2025-03-26') !== false) {
+            return '2025-03-26';
+        }
+
+        return null;
     }
 
     protected function validateToken(string $accessToken, array $contextData): ?array
