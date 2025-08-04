@@ -48,7 +48,7 @@ class MessageHandler
         $this->resourceRegistry = $resourceRegistry;
         $this->storage = $storage;
         $this->config = $config;
-        $this->versionNegotiator = $versionNegotiator ?? new VersionNegotiator($config['supported_versions'] ?? ['2025-06-18', '2025-03-26', '2024-11-05']);
+        $this->versionNegotiator = $versionNegotiator ?? new VersionNegotiator($config);
 
         // Initialize delegated handlers
         $this->protocolManager = new ProtocolManager($this->versionNegotiator, $storage, $config);
@@ -226,8 +226,8 @@ class MessageHandler
                 $batchResponses[] = [
                     'jsonrpc' => '2.0',
                     'error' => [
-                        'code' => $e->getCode(),
-                        'message' => $e->getMessage()
+                        'code' => '',
+                        'message' => ''
                     ],
                     'id' => $requestData['id'] ?? null
                 ];
