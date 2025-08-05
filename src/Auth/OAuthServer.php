@@ -79,35 +79,24 @@ class OAuthServer
         }
 
         // RFC 8707 Resource Indicators validation for MCP 2025-06-18
-        $protocolVersion = $this->detectProtocolVersion($request);
-        if ($protocolVersion === '2025-06-18') {
-            if (empty($resource)) {
-                return $this->errorResponse('invalid_request', 'Resource parameter required for MCP 2025-06-18');
-            }
+        // Get the configured base URL (same as what resource server uses)
+        $expectedBaseUrl = $this->config['base_url'];
 
-            // Validate resource URL format
-            if (!filter_var($resource, FILTER_VALIDATE_URL)) {
-                return $this->errorResponse('invalid_request', 'Resource parameter must be a valid URL');
-            }
-
-            // Get the configured base URL (same as what resource server uses)
-            $expectedBaseUrl = $this->config['base_url'];
-
-            // Ensure resource URL matches the expected base URL
-            if (!str_starts_with($resource, $expectedBaseUrl)) {
-                return $this->errorResponse('invalid_request', 'Resource parameter must be for this resource server');
-            }
-
-            // Basic security validation: ensure resource URL doesn't have suspicious patterns
-            $parsedResource = parse_url($resource);
-            if (
-                !$parsedResource ||
-                !empty($parsedResource['fragment']) ||
-                str_contains($resource, '..')
-            ) {
-                return $this->errorResponse('invalid_request', 'Invalid resource URL format');
-            }
+        // Ensure resource URL matches the expected base URL
+        if (!str_starts_with($resource, $expectedBaseUrl)) {
+            return $this->errorResponse('invalid_request', 'Resource parameter must be for this resource server');
         }
+
+        // Basic security validation: ensure resource URL doesn't have suspicious patterns
+        $parsedResource = parse_url($resource);
+        if (
+            !$parsedResource ||
+            !empty($parsedResource['fragment']) ||
+            str_contains($resource, '..')
+        ) {
+            return $this->errorResponse('invalid_request', 'Invalid resource URL format');
+        }
+
 
         // Store OAuth request in session
         if (session_status() !== PHP_SESSION_ACTIVE) {
@@ -814,22 +803,6 @@ class OAuthServer
             return $this->errorResponse('invalid_grant', 'Invalid code_verifier');
         }
 
-        // RFC 8707 Resource Indicators validation for 2025-06-18
-        $protocolVersion = $this->detectProtocolVersion($request);
-        if ($protocolVersion === '2025-06-18') {
-            // If authorization code has resource binding, token request MUST include resource parameter
-            if (isset($authCode['resource'])) {
-                if (empty($resource)) {
-                    return $this->errorResponse('invalid_request', 'Resource parameter required when authorization code has resource binding');
-                }
-
-                // Resource parameter must match the one from authorization code
-                if ($resource !== $authCode['resource']) {
-                    return $this->errorResponse('invalid_grant', 'Resource parameter must match authorization request');
-                }
-            }
-        }
-
         $accessToken = bin2hex(random_bytes(32));
         $refreshToken = bin2hex(random_bytes(32));
 
@@ -958,28 +931,6 @@ class OAuthServer
         return $this->responseFactory->createResponse(200)
             ->withBody($stream)
             ->withHeader('Content-Type', 'application/json');
-    }
-
-    /**
-     * Detect protocol version from request
-     */
-    private function detectProtocolVersion(Request $request): string
-    {
-        // Check MCP-Protocol-Version header first
-        $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
-        if ($headerVersion) {
-            return $headerVersion;
-        }
-
-        // Fallback to path detection or default
-        $path = $request->getUri()->getPath();
-        if (strpos($path, '2025-06-18') !== false) {
-            return '2025-06-18';
-        } elseif (strpos($path, '2025-03-26') !== false) {
-            return '2025-03-26';
-        }
-
-        return '2024-11-05';
     }
 
     /**
