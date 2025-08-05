@@ -90,19 +90,23 @@ class OAuthServer
                 return $this->errorResponse('invalid_request', 'Resource parameter must be a valid URL');
             }
 
-            // Ensure resource is for this server
-            $baseUrl = $this->getBaseUrl($request);
-            if (!str_starts_with($resource, $baseUrl)) {
-                return $this->errorResponse('invalid_request', 'Resource parameter must be for this authorization server');
-            }
-        }
+            // Get the configured base URL (same as what resource server uses)
+            $expectedBaseUrl = $this->config['base_url'];
 
-        // Handle direct MCP callback pattern
-        $parsed = parse_url($redirectUri);
-        $path = $parsed['path'] ?? '';
-        if (strpos($path, '/mcp') === 0 && strpos($path, '/mcp-private') === false) {
-            return $this->responseFactory->createResponse(302)
-                ->withHeader('Location', $redirectUri);
+            // Ensure resource URL matches the expected base URL
+            if (!str_starts_with($resource, $expectedBaseUrl)) {
+                return $this->errorResponse('invalid_request', 'Resource parameter must be for this resource server');
+            }
+
+            // Basic security validation: ensure resource URL doesn't have suspicious patterns
+            $parsedResource = parse_url($resource);
+            if (
+                !$parsedResource ||
+                !empty($parsedResource['fragment']) ||
+                str_contains($resource, '..')
+            ) {
+                return $this->errorResponse('invalid_request', 'Invalid resource URL format');
+            }
         }
 
         // Store OAuth request in session
@@ -122,8 +126,9 @@ class OAuthServer
         ];
 
         // Check if user already authenticated
-        if (isset($_SESSION['userID']) && $_SESSION['userID']) {
-            $userData = $this->storage->getUserData($_SESSION['userID']);
+        $sessionUserIdKey = $this->config['session_user_id'];
+        if ($sessionUserIdKey !== null && isset($_SESSION[$sessionUserIdKey]) && $_SESSION[$sessionUserIdKey]) {
+            $userData = $this->storage->getUserData($_SESSION[$sessionUserIdKey]);
             if ($userData) {
                 $_SESSION['oauth_user'] = [
                     'user_id' => $userData['id'],
@@ -812,13 +817,16 @@ class OAuthServer
         // RFC 8707 Resource Indicators validation for 2025-06-18
         $protocolVersion = $this->detectProtocolVersion($request);
         if ($protocolVersion === '2025-06-18') {
-            if (empty($resource)) {
-                return $this->errorResponse('invalid_request', 'Resource parameter required for MCP 2025-06-18');
-            }
+            // If authorization code has resource binding, token request MUST include resource parameter
+            if (isset($authCode['resource'])) {
+                if (empty($resource)) {
+                    return $this->errorResponse('invalid_request', 'Resource parameter required when authorization code has resource binding');
+                }
 
-            // Resource must match the one from authorization code
-            if (isset($authCode['resource']) && $resource !== $authCode['resource']) {
-                return $this->errorResponse('invalid_grant', 'Resource parameter must match authorization request');
+                // Resource parameter must match the one from authorization code
+                if ($resource !== $authCode['resource']) {
+                    return $this->errorResponse('invalid_grant', 'Resource parameter must match authorization request');
+                }
             }
         }
 
@@ -827,7 +835,7 @@ class OAuthServer
 
         $this->storage->revokeAuthorizationCode($code);
 
-        // Store access token with resource binding for 2025-06-18
+        // Store access token with resource binding if present
         $tokenData = [
             'client_id' => $clientId,
             'access_token' => $accessToken,
@@ -838,10 +846,10 @@ class OAuthServer
             'user_id' => $authCode['user_id']
         ];
 
-        // Add resource binding for 2025-06-18
-        if ($resource) {
-            $tokenData['resource'] = $resource;
-            $tokenData['aud'] = [$resource]; // Audience claim for token validation
+        // Add resource binding from authorization code (authoritative source)
+        if (isset($authCode['resource'])) {
+            $tokenData['resource'] = $authCode['resource'];
+            $tokenData['aud'] = [$authCode['resource']]; // Audience claim for token validation
         }
 
         if (!$this->storage->storeAccessToken($tokenData)) {
@@ -874,6 +882,7 @@ class OAuthServer
         $refreshToken = $data['refresh_token'] ?? null;
         $clientId = $data['client_id'] ?? null;
         $clientSecret = $data['client_secret'] ?? null;
+        $resource = $data['resource'] ?? null; // RFC 8707 - optional validation parameter
 
         if (!$refreshToken || !$clientId) {
             return $this->errorResponse('invalid_request', 'Missing required parameters');
@@ -897,13 +906,20 @@ class OAuthServer
             return $this->errorResponse('invalid_grant', 'Invalid refresh token');
         }
 
+        // Validate client-passed resource parameter against stored token data
+        if ($resource !== null && isset($tokenData['resource'])) {
+            if ($resource !== $tokenData['resource']) {
+                return $this->errorResponse('invalid_grant', 'Resource parameter must match token binding');
+            }
+        }
+
         $newAccessToken = bin2hex(random_bytes(32));
         $newRefreshToken = bin2hex(random_bytes(32));
 
         $this->storage->revokeToken($tokenData['access_token']);
         $this->storage->revokeToken($refreshToken);
 
-        // Preserve resource binding in new token for 2025-06-18
+        // Preserve all metadata from original token - only change tokens and expiration
         $newTokenData = [
             'client_id' => $clientId,
             'access_token' => $newAccessToken,
@@ -914,10 +930,12 @@ class OAuthServer
             'user_id' => $tokenData['user_id']
         ];
 
-        // Preserve resource binding if present
+        // Preserve resource binding metadata without modification
         if (isset($tokenData['resource'])) {
             $newTokenData['resource'] = $tokenData['resource'];
-            $newTokenData['aud'] = $tokenData['aud'] ?? [$tokenData['resource']];
+        }
+        if (isset($tokenData['aud'])) {
+            $newTokenData['aud'] = $tokenData['aud'];
         }
 
         if (!$this->storage->storeAccessToken($newTokenData)) {
@@ -1189,6 +1207,7 @@ class OAuthServer
     {
         return [
             'base_url' => null,
+            'session_user_id' => null,
             'oauth' => [
                 'auth_server' => [
                     'providers' => [

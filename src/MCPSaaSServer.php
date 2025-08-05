@@ -613,6 +613,7 @@ class MCPSaaSServer
             // Core MCP Protocol Configuration
             'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
             'base_url' => null, // MCP base url
+            'session_user_id' => null, // key name for session validation around "is the user logged in?"
             'scopes_supported' => ['mcp:read', 'mcp:write'],
             'session_lifetime' => 3600,    // seconds
             'test_mode' => false,           // set to true in tests

@@ -244,10 +244,10 @@ class DatabaseStorage implements StorageInterface
         file_put_contents($logFile, "[TOKEN DEBUG] Starting validateToken\n", FILE_APPEND);
 
         $sql = "SELECT * FROM `{$this->getTableName('oauth_tokens')}`
-        WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :token
-        AND `{$this->getField('oauth_tokens', 'expires_at')}` > :current_time
-        AND `{$this->getField('oauth_tokens', 'revoked')}` = 0
-        AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
+    WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :token
+    AND `{$this->getField('oauth_tokens', 'expires_at')}` > :current_time
+    AND `{$this->getField('oauth_tokens', 'revoked')}` = 0
+    AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
 
         $params = [
             ':token' => $accessToken,
@@ -284,6 +284,14 @@ class DatabaseStorage implements StorageInterface
         foreach ($this->config['database']['field_mapping']['oauth_tokens'] as $logicalField => $dbField) {
             if (isset($result[$dbField])) {
                 $normalizedResult[$logicalField] = $result[$dbField];
+            }
+        }
+
+        // Convert aud field from JSON string back to array
+        if (isset($normalizedResult['aud']) && $normalizedResult['aud'] !== null) {
+            $decodedAud = json_decode($normalizedResult['aud'], true);
+            if ($decodedAud !== null) {
+                $normalizedResult['aud'] = $decodedAud;
             }
         }
 
@@ -516,10 +524,10 @@ class DatabaseStorage implements StorageInterface
     public function storeAccessToken(array $tokenData): bool
     {
         $sql = "INSERT INTO `{$this->getTableName('oauth_tokens')}`
-            (`{$this->getField('oauth_tokens', 'client_id')}`, `{$this->getField('oauth_tokens', 'access_token')}`, `{$this->getField('oauth_tokens', 'refresh_token')}`, `{$this->getField('oauth_tokens', 'token_type')}`, `{$this->getField('oauth_tokens', 'scope')}`, `{$this->getField('oauth_tokens', 'expires_at')}`,
-             `{$this->getField('oauth_tokens', 'agency_id')}`, `{$this->getField('oauth_tokens', 'user_id')}`, `{$this->getField('oauth_tokens', 'revoked')}`, `{$this->getField('oauth_tokens', 'created_at')}`)
-            VALUES (:client_id, :access_token, :refresh_token, 'Bearer', :scope,
-                    :expires_at, :agency_id, :user_id, 0, :created_at)";
+        (`{$this->getField('oauth_tokens', 'client_id')}`, `{$this->getField('oauth_tokens', 'access_token')}`, `{$this->getField('oauth_tokens', 'refresh_token')}`, `{$this->getField('oauth_tokens', 'token_type')}`, `{$this->getField('oauth_tokens', 'scope')}`, `{$this->getField('oauth_tokens', 'expires_at')}`,
+         `{$this->getField('oauth_tokens', 'agency_id')}`, `{$this->getField('oauth_tokens', 'user_id')}`, `{$this->getField('oauth_tokens', 'revoked')}`, `{$this->getField('oauth_tokens', 'resource')}`, `{$this->getField('oauth_tokens', 'aud')}`, `{$this->getField('oauth_tokens', 'created_at')}`)
+        VALUES (:client_id, :access_token, :refresh_token, 'Bearer', :scope,
+                :expires_at, :agency_id, :user_id, 0, :resource, :aud, :created_at)";
 
         try {
             $stmt = $this->pdo->prepare($sql);
@@ -531,15 +539,12 @@ class DatabaseStorage implements StorageInterface
                 ':expires_at' => date('Y-m-d H:i:s', $tokenData['expires_at']),
                 ':agency_id' => $tokenData['agency_id'],
                 ':user_id' => $tokenData['user_id'],
+                ':resource' => $tokenData['resource'] ?? null,
+                ':aud' => isset($tokenData['aud']) ? json_encode($tokenData['aud']) : null,
                 ':created_at' => $this->getCurrentTimestamp()
             ];
 
             $result = $stmt->execute($params);
-
-            if (!$result) {
-                $errorInfo = $stmt->errorInfo();
-            }
-
             return $result;
         } catch (\Exception $e) {
             return false;

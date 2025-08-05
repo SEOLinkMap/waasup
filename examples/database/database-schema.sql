@@ -65,8 +65,7 @@ CREATE TABLE `mcp_users` (
     INDEX `idx_active` (`active`),
     INDEX `idx_google_id` (`google_id`),
     INDEX `idx_linkedin_id` (`linkedin_id`),
-    INDEX `idx_github_id` (`github_id`),
-    CONSTRAINT `fk_users_agency` FOREIGN KEY (`agency_id`) REFERENCES `mcp_agencies` (`id`) ON DELETE CASCADE
+    INDEX `idx_github_id` (`github_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- OAuth clients table
@@ -105,10 +104,7 @@ CREATE TABLE `mcp_oauth_tokens` (
     INDEX `idx_expires_revoked` (`expires_at`, `revoked`),
     INDEX `idx_agency_id` (`agency_id`),
     INDEX `idx_refresh_token` (`refresh_token`),
-    INDEX `idx_client_id` (`client_id`),
-    CONSTRAINT `fk_tokens_agency` FOREIGN KEY (`agency_id`) REFERENCES `mcp_agencies` (`id`) ON DELETE CASCADE,
-    CONSTRAINT `fk_tokens_user` FOREIGN KEY (`user_id`) REFERENCES `mcp_users` (`id`) ON DELETE SET NULL,
-    CONSTRAINT `fk_tokens_client` FOREIGN KEY (`client_id`) REFERENCES `mcp_oauth_clients` (`client_id`) ON DELETE SET NULL
+    INDEX `idx_client_id` (`client_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `mcp_sampling_responses` (

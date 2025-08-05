@@ -212,7 +212,7 @@ class AuthMiddleware
             throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
         }
 
-        if (!isset($tokenData['aud']) || !in_array($expectedResource, (array)$tokenData['aud'])) {
+        if (!isset($tokenData['aud']) || !is_array($tokenData['aud']) || !in_array($expectedResource, $tokenData['aud'])) {
             throw new AuthenticationException('Token audience validation failed');
         }
 
@@ -494,8 +494,10 @@ class AuthMiddleware
 
         $uri = $request->getUri();
         $host = $uri->getHost();
+        $path = $uri->getPath();
+        $baseUrl = 'https://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
 
-        return 'https://' . $host . ($uri->getPort() ? ':' . $uri->getPort() : '');
+        return $baseUrl . $path;
     }
 
     protected function getOAuthBaseUrl(Request $request): string
