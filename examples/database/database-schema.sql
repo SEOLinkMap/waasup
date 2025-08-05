@@ -94,6 +94,8 @@ CREATE TABLE `mcp_oauth_tokens` (
     `revoked` TINYINT(1) NOT NULL DEFAULT 0,
     `agency_id` INT NOT NULL,
     `user_id` INT DEFAULT NULL,
+    `resource` VARCHAR(500) DEFAULT NULL COMMENT 'RFC 8707 Resource Indicator - MCP server URL this token is bound to',
+    `aud` TEXT DEFAULT NULL COMMENT 'JWT audience claim - resource server(s) this token is valid for',
     `code_challenge` VARCHAR(255) DEFAULT NULL,
     `code_challenge_method` VARCHAR(10) DEFAULT NULL,
     `client_id` VARCHAR(255) DEFAULT NULL,
