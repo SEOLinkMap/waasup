@@ -299,7 +299,17 @@ class DatabaseStorage implements StorageInterface
         $stmt->execute([':identifier' => $identifier]);
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
-        return $result ?: null;
+        if ($result) {
+            // Map database field names back to logical field names
+            $normalizedResult = [];
+            foreach ($this->config['database']['field_mapping'][$type] as $logicalField => $dbField) {
+                if (isset($result[$dbField])) {
+                    $normalizedResult[$logicalField] = $result[$dbField];
+                }
+            }
+            return $normalizedResult;
+        }
+        return null;
     }
 
     /**
