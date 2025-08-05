@@ -302,7 +302,8 @@ class DatabaseStorage implements StorageInterface
         if ($result) {
             // Map database field names back to logical field names
             $normalizedResult = [];
-            foreach ($this->config['database']['field_mapping'][$type] as $logicalField => $dbField) {
+            $tableName = $type === 'agency' ? 'agencies' : 'users';
+            foreach ($this->config['database']['field_mapping'][$tableName] as $logicalField => $dbField) {
                 if (isset($result[$dbField])) {
                     $normalizedResult[$logicalField] = $result[$dbField];
                 }
