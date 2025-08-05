@@ -1031,6 +1031,8 @@ class DatabaseStorage implements StorageInterface
                         'expires_at' => 'expires_at',
                         'agency_id' => 'agency_id',
                         'user_id' => 'user_id',
+                        'resource' => 'resource',
+                        'aud' => 'aud',
                         'revoked' => 'revoked',
                         'created_at' => 'created_at',
                         'code_challenge' => 'code_challenge',
