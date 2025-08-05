@@ -240,25 +240,25 @@ class DatabaseStorage implements StorageInterface
  */
     public function validateToken(string $accessToken, array $context = []): ?array
     {
+        $logFile = '/var/www/devsa/logs/uncaught.log';
+        file_put_contents($logFile, "[TOKEN DEBUG] Starting validateToken\n", FILE_APPEND);
+
         $sql = "SELECT * FROM `{$this->getTableName('oauth_tokens')}`
-            WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :token
-            AND `{$this->getField('oauth_tokens', 'expires_at')}` > :current_time
-            AND `{$this->getField('oauth_tokens', 'revoked')}` = 0
-            AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
+        WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :token
+        AND `{$this->getField('oauth_tokens', 'expires_at')}` > :current_time
+        AND `{$this->getField('oauth_tokens', 'revoked')}` = 0
+        AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
 
         $params = [
             ':token' => $accessToken,
             ':current_time' => $this->getCurrentTimestamp()
         ];
 
-        // SECURITY: Verify token belongs to the requested agency/context UUID from URL
         if (!empty($context) && isset($context['context_type']) && isset($context['uuid'])) {
             if ($context['context_type'] === 'agency') {
-                // Agency context - validate token's agency_id matches the UUID from URL
                 $sql .= " AND `{$this->getField('oauth_tokens', 'agency_id')}` = (SELECT `{$this->getField('agencies', 'id')}` FROM `{$this->getTableName('agencies')}` WHERE `{$this->getField('agencies', 'uuid')}` = :context_uuid AND `{$this->getField('agencies', 'active')}` = 1)";
                 $params[':context_uuid'] = $context['uuid'];
             } elseif ($context['context_type'] === 'user') {
-                // User context - validate token's user_id matches the UUID from URL
                 $sql .= " AND `{$this->getField('oauth_tokens', 'user_id')}` = (SELECT `{$this->getField('users', 'id')}` FROM `{$this->getTableName('users')}` WHERE `{$this->getField('users', 'uuid')}` = :context_uuid)";
                 $params[':context_uuid'] = $context['uuid'];
             }
@@ -266,13 +266,20 @@ class DatabaseStorage implements StorageInterface
 
         $sql .= " LIMIT 1";
 
+        file_put_contents($logFile, "[TOKEN DEBUG] SQL: $sql\n", FILE_APPEND);
+        file_put_contents($logFile, "[TOKEN DEBUG] Params: " . json_encode($params) . "\n", FILE_APPEND);
+
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
+        file_put_contents($logFile, "[TOKEN DEBUG] Raw result: " . json_encode($result) . "\n", FILE_APPEND);
+
         if (!$result) {
+            file_put_contents($logFile, "[TOKEN DEBUG] No result found\n", FILE_APPEND);
             return null;
         }
+
         $normalizedResult = [];
         foreach ($this->config['database']['field_mapping']['oauth_tokens'] as $logicalField => $dbField) {
             if (isset($result[$dbField])) {
@@ -280,6 +287,7 @@ class DatabaseStorage implements StorageInterface
             }
         }
 
+        file_put_contents($logFile, "[TOKEN DEBUG] Mapped result: " . json_encode($normalizedResult) . "\n", FILE_APPEND);
         return $normalizedResult;
     }
 
