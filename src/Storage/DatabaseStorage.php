@@ -480,7 +480,7 @@ class DatabaseStorage implements StorageInterface
             ':code_challenge_method' => $data['code_challenge_method'],
             ':agency_id' => $data['agency_id'],
             ':user_id' => $data['user_id'],
-            ':resource' => $data['resource'] ?? null,
+            ':resource' => $this->config['base_url'],
             ':created_at' => $this->getCurrentTimestamp()
         ]);
     }
@@ -553,8 +553,8 @@ class DatabaseStorage implements StorageInterface
                 ':expires_at' => date('Y-m-d H:i:s', $tokenData['expires_at']),
                 ':agency_id' => $tokenData['agency_id'],
                 ':user_id' => $tokenData['user_id'],
-                ':resource' => $tokenData['resource'] ?? null,
-                ':aud' => isset($tokenData['aud']) ? json_encode($tokenData['aud']) : null,
+                ':resource' => $this->config['base_url'],
+                ':aud' => json_encode($this->config['base_url']),
                 ':created_at' => $this->getCurrentTimestamp()
             ];
 

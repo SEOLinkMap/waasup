@@ -235,7 +235,7 @@ class AuthMiddleware
         $logFile = '/var/www/devsa/logs/uncaught.log';
 
         $oauthBaseUrl = $this->getOAuthBaseUrl($request);
-        $mcpResourceUrl = $this->getMCPBaseUrl($request) . $request->getUri()->getPath();
+        $mcpResourceUrl = $this->getMCPBaseUrl($request);
 
         file_put_contents($logFile, "[OAUTH-DISCOVERY] OAuth Base URL: {$oauthBaseUrl}\n", FILE_APPEND);
         file_put_contents($logFile, "[OAUTH-DISCOVERY] MCP Resource URL: {$mcpResourceUrl}\n", FILE_APPEND);
