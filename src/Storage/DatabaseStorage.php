@@ -465,10 +465,10 @@ class DatabaseStorage implements StorageInterface
     {
         $sql = "INSERT INTO `{$this->getTableName('oauth_tokens')}`
                 (`{$this->getField('oauth_tokens', 'client_id')}`, `{$this->getField('oauth_tokens', 'access_token')}`, `{$this->getField('oauth_tokens', 'token_type')}`, `{$this->getField('oauth_tokens', 'scope')}`, `{$this->getField('oauth_tokens', 'expires_at')}`, `{$this->getField('oauth_tokens', 'revoked')}`,
-                 `{$this->getField('oauth_tokens', 'code_challenge')}`, `{$this->getField('oauth_tokens', 'code_challenge_method')}`, `{$this->getField('oauth_tokens', 'agency_id')}`, `{$this->getField('oauth_tokens', 'user_id')}`, `{$this->getField('oauth_tokens', 'created_at')}`)
+                 `{$this->getField('oauth_tokens', 'code_challenge')}`, `{$this->getField('oauth_tokens', 'code_challenge_method')}`, `{$this->getField('oauth_tokens', 'agency_id')}`, `{$this->getField('oauth_tokens', 'user_id')}`, `{$this->getField('oauth_tokens', 'resource')}`, `{$this->getField('oauth_tokens', 'created_at')}`)
                 VALUES (:client_id, :auth_code, 'authorization_code', :scope,
                         :expires_at, 0, :code_challenge, :code_challenge_method,
-                        :agency_id, :user_id, :created_at)";
+                        :agency_id, :user_id, :resource, :created_at)";
 
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([
@@ -480,6 +480,7 @@ class DatabaseStorage implements StorageInterface
             ':code_challenge_method' => $data['code_challenge_method'],
             ':agency_id' => $data['agency_id'],
             ':user_id' => $data['user_id'],
+            ':resource' => $data['resource'] ?? null,
             ':created_at' => $this->getCurrentTimestamp()
         ]);
     }
@@ -505,7 +506,20 @@ class DatabaseStorage implements StorageInterface
         ]);
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
-        return $result ?: null;
+
+        if (!$result) {
+            return null;
+        }
+
+        // Map database field names back to logical field names
+        $normalizedResult = [];
+        foreach ($this->config['database']['field_mapping']['oauth_tokens'] as $logicalField => $dbField) {
+            if (isset($result[$dbField])) {
+                $normalizedResult[$logicalField] = $result[$dbField];
+            }
+        }
+
+        return $normalizedResult;
     }
 
     /**

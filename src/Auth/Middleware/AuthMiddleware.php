@@ -120,7 +120,6 @@ class AuthMiddleware
             }
 
             return $handler->handle($request);
-
         } catch (AuthenticationException $e) {
             file_put_contents($logFile, "{$serverTag} AuthenticationException caught: " . $e->getMessage() . "\n", FILE_APPEND);
             return $this->createOAuthDiscoveryResponse($request);
@@ -184,17 +183,13 @@ class AuthMiddleware
     private function handleAuthlessRequest(Request $request, RequestHandler $handler): Response
     {
         $protocolVersion = $this->detectProtocolVersion($request);
-        $contextId = $this->extractContextId($request) ?? $this->config['auth']['authless_context_id'];
-
-        $contextData = $this->config['auth']['authless_context_data'];
-        $tokenData = $this->config['auth']['authless_token_data'];
 
         $request = $request->withAttribute(
             'mcp_context',
             [
-                'context_data' => $contextData,
-                'token_data' => $tokenData,
-                'context_id' => $contextId,
+                'context_data' => 'public',
+                'token_data' => null,
+                'context_id' => 'public',
                 'base_url' => $this->getMCPBaseUrl($request),
                 'protocol_version' => $protocolVersion,
                 'authless' => true
@@ -379,7 +374,7 @@ class AuthMiddleware
             return '2025-03-26';
         }
 
-        return null;
+        return '2024-11-05';
     }
 
     protected function validateToken(string $accessToken, array $contextData): ?array

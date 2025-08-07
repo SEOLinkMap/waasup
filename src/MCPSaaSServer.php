@@ -275,14 +275,12 @@ class MCPSaaSServer
         file_put_contents($logFile, "{$serverTag} URI: {$request->getUri()}\n", FILE_APPEND);
 
         // Check headers first (case-insensitive) - expect protocolVersion_sessionId format
-        file_put_contents($logFile, "{$serverTag} Checking headers for session ID...\n", FILE_APPEND);
         file_put_contents($logFile, "{$serverTag} Total headers found: " . count($request->getHeaders()) . "\n", FILE_APPEND);
 
         foreach ($request->getHeaders() as $name => $values) {
             file_put_contents($logFile, "{$serverTag} Header: '{$name}' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
 
             $lowerName = strtolower($name);
-            file_put_contents($logFile, "{$serverTag} Lowercased header name: '{$lowerName}'\n", FILE_APPEND);
 
             if ($lowerName === 'mcp-session-id') {
                 file_put_contents($logFile, "{$serverTag} FOUND MCP-SESSION-ID HEADER!\n", FILE_APPEND);

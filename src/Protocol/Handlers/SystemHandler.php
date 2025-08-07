@@ -78,17 +78,19 @@ class SystemHandler
         // $response->getBody()->write(json_encode($responseData));
         $jsonData = json_encode($responseData);
 
-        file_put_contents('/var/www/devsa/logs/uncaught.log', "[INITIALIZE-ERROR] Data: " . print_r($responseData, true) . "\n", FILE_APPEND);
+        file_put_contents('/var/www/devsa/logs/uncaught.log', "[INITIALIZE] Data: " . print_r($responseData, true) . "\n", FILE_APPEND);
 
 
 
         $response->getBody()->write($jsonData);
 
+
+
         return $response
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Mcp-Session-Id', $sessionId)
             ->withHeader('Access-Control-Allow-Origin', '*')
-            ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version')
+            ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version')
             ->withHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
             ->withStatus(200);
     }

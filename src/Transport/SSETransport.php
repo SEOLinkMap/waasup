@@ -51,7 +51,7 @@ class SSETransport implements TransportInterface
             ->withHeader('Connection', 'keep-alive')
             ->withHeader('X-Accel-Buffering', 'no')
             ->withHeader('Access-Control-Allow-Origin', '*')
-            ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id')
+            ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version')
             ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 
         $body = $response->getBody();
@@ -76,7 +76,11 @@ class SSETransport implements TransportInterface
         // Build endpoint URL from context
         $baseUrl = $context['base_url'] ?? 'https://localhost';
         $contextId = $context['context_id'] ?? 'unknown';
-        $endpointUrl = "{$baseUrl}/mcp/{$contextId}/{$sessionId}";
+        $endpointUrl = "{$baseUrl}/{$contextId}";
+
+        if (!empty($sessionId)) {
+            $endpointUrl = $endpointUrl . "/{$sessionId}";
+        }
 
         $endpointData = sprintf(
             "event: endpoint\ndata: %s\n\n",
