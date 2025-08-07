@@ -83,7 +83,7 @@ class OAuthServer
         $expectedBaseUrl = $this->config['base_url'];
 
         // Ensure resource URL matches the expected base URL
-        if (!str_starts_with($resource, $expectedBaseUrl)) {
+        if (!empty($resource) && !str_starts_with($resource, $expectedBaseUrl)) {
             return $this->errorResponse('invalid_request', 'Resource parameter must be for this resource server');
         }
 
