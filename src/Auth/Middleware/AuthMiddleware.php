@@ -203,11 +203,11 @@ class AuthMiddleware
     {
         $expectedResource = $this->getMCPBaseUrl($request);
 
-        if (!isset($tokenData['resource']) || $tokenData['resource'] !== $expectedResource) {
+        if (!empty($tokenData['resource']) && $tokenData['resource'] !== $expectedResource) {
             throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
         }
 
-        if (!isset($tokenData['aud']) || !is_array($tokenData['aud']) || !in_array($expectedResource, $tokenData['aud'])) {
+        if (!empty($tokenData['aud']) || !is_array($tokenData['aud']) || !in_array($expectedResource, $tokenData['aud'])) {
             throw new AuthenticationException('Token audience validation failed');
         }
 
