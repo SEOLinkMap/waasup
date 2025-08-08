@@ -270,6 +270,11 @@ class MCPSaaSServer
         $logFile = '/var/www/devsa/logs/uncaught.log';
         $serverTag = "[SESSION-EXTRACT-DEBUG]";
 
+        $sessID = $request->getHeaderLine('mcp-session-id');
+        if (!empty($sessID)) {
+            return $sessID;
+        }
+
         file_put_contents($logFile, "{$serverTag} === STARTING SESSION ID EXTRACTION ===\n", FILE_APPEND);
         file_put_contents($logFile, "{$serverTag} Method: {$request->getMethod()}\n", FILE_APPEND);
         file_put_contents($logFile, "{$serverTag} URI: {$request->getUri()}\n", FILE_APPEND);
