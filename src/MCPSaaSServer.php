@@ -274,9 +274,6 @@ class MCPSaaSServer
         file_put_contents($logFile, "{$serverTag} Method: {$request->getMethod()}\n", FILE_APPEND);
         file_put_contents($logFile, "{$serverTag} URI: {$request->getUri()}\n", FILE_APPEND);
 
-        // Check headers first (case-insensitive) - expect protocolVersion_sessionId format
-        file_put_contents($logFile, "{$serverTag} Total headers found: " . count($request->getHeaders()) . "\n", FILE_APPEND);
-
         foreach ($request->getHeaders() as $name => $values) {
             file_put_contents($logFile, "{$serverTag} Header: '{$name}' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
 

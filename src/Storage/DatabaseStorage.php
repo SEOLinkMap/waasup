@@ -543,6 +543,24 @@ class DatabaseStorage implements StorageInterface
         VALUES (:client_id, :access_token, :refresh_token, 'Bearer', :scope,
                 :expires_at, :agency_id, :user_id, 0, :resource, :aud, :created_at)";
 
+        $baseUrl = $this->config['base_url'];
+        if ($baseUrl === null || $baseUrl === '') {
+            $resourceValue = null;
+            $audValue = null;
+        } else {
+            $resourceValue = $baseUrl;
+
+            if (isset($tokenData['aud']) && $tokenData['aud'] !== null) {
+                if (is_array($tokenData['aud'])) {
+                    $audValue = json_encode($tokenData['aud']);
+                } else {
+                    $audValue = json_encode([$tokenData['aud']]);
+                }
+            } else {
+                $audValue = json_encode([$baseUrl]);
+            }
+        }
+
         try {
             $stmt = $this->pdo->prepare($sql);
             $params = [
@@ -553,8 +571,8 @@ class DatabaseStorage implements StorageInterface
                 ':expires_at' => date('Y-m-d H:i:s', $tokenData['expires_at']),
                 ':agency_id' => $tokenData['agency_id'],
                 ':user_id' => $tokenData['user_id'],
-                ':resource' => $this->config['base_url'],
-                ':aud' => json_encode($this->config['base_url']),
+                ':resource' => $resourceValue,
+                ':aud' => $audValue,
                 ':created_at' => $this->getCurrentTimestamp()
             ];
 
