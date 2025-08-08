@@ -61,11 +61,6 @@ class MCPSaaSServer
         try {
             $this->contextData = $request->getAttribute('mcp_context') ?? [];
             $isAuthless = $this->config['auth']['authless'];
-            $this->logger->info("DEBUG authless check", [
-                'isAuthless' => $isAuthless,
-                'contextData_empty' => empty($this->contextData),
-                'auth_config' => $this->config['auth']
-            ]);
 
             if ($request->getMethod() === 'OPTIONS') {
                 return $this->handleCorsPreflightRequest($response);
@@ -413,16 +408,6 @@ class MCPSaaSServer
      */
     private function handleStreamConnection(Request $request, Response $response, string $protocolVersion): Response
     {
-        $this->logger->info(
-            'Stream connection established',
-            [
-            'session_id' => $this->sessionId,
-            'protocol_version' => $protocolVersion,
-            'transport' => $this->shouldUseStreamableHTTP($protocolVersion) ? 'streamable_http' : 'sse',
-            'context' => $this->contextData
-            ]
-        );
-
         if ($this->shouldUseStreamableHTTP($protocolVersion)) {
             try {
                 $streamableResponse = $this->streamableTransport->handleConnection(
