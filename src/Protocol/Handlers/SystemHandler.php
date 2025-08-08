@@ -23,8 +23,6 @@ class SystemHandler
 
     public function handleInitialize(array $params, mixed $id, ?string $sessionId, $selectedVersion, Response $response): Response
     {
-        file_put_contents('/var/www/devsa/logs/uncaught.log', "[INITIALIZE DEBUG] sessionId received: " . var_export($sessionId, true) . "\n", FILE_APPEND);
-
         if ($sessionId) {
             $this->protocolManager->storeSessionVersion($sessionId, $selectedVersion);
         }
@@ -78,13 +76,7 @@ class SystemHandler
         // $response->getBody()->write(json_encode($responseData));
         $jsonData = json_encode($responseData);
 
-        file_put_contents('/var/www/devsa/logs/uncaught.log', "[INITIALIZE] Data: " . print_r($responseData, true) . "\n", FILE_APPEND);
-
-
-
         $response->getBody()->write($jsonData);
-
-
 
         return $response
             ->withHeader('Content-Type', 'application/json')

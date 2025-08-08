@@ -162,8 +162,6 @@ class DatabaseStorage implements StorageInterface
      */
     public function storeMessage(string $sessionId, array $messageData, array $context = []): bool
     {
-        $logFile = '/var/www/devsa/logs/uncaught.log';
-
         $sql = "INSERT INTO `{$this->getTableName('messages')}`
                 (`{$this->getField('messages', 'session_id')}`, `{$this->getField('messages', 'message_data')}`, `{$this->getField('messages', 'context_data')}`, `{$this->getField('messages', 'created_at')}`)
                 VALUES (:session_id, :message_data, :context_data, :created_at)";
@@ -175,20 +173,8 @@ class DatabaseStorage implements StorageInterface
             ':created_at' => $this->getCurrentTimestamp()
         ];
 
-        file_put_contents($logFile, "[DB-INSERT] SessionId: {$sessionId}\n", FILE_APPEND);
-        file_put_contents($logFile, "[DB-INSERT] MessageData: " . $params[':message_data'] . "\n", FILE_APPEND);
-        file_put_contents($logFile, "[DB-INSERT] ContextData: " . $params[':context_data'] . "\n", FILE_APPEND);
-        file_put_contents($logFile, "[DB-INSERT] SQL: {$sql}\n", FILE_APPEND);
-
         $stmt = $this->pdo->prepare($sql);
         $result = $stmt->execute($params);
-
-        if ($result) {
-            file_put_contents($logFile, "[DB-INSERT] SUCCESS: Message inserted successfully\n", FILE_APPEND);
-        } else {
-            $errorInfo = $stmt->errorInfo();
-            file_put_contents($logFile, "[DB-INSERT] FAILED: " . json_encode($errorInfo) . "\n", FILE_APPEND);
-        }
 
         return $result;
     }
@@ -240,9 +226,6 @@ class DatabaseStorage implements StorageInterface
  */
     public function validateToken(string $accessToken, array $context = []): ?array
     {
-        $logFile = '/var/www/devsa/logs/uncaught.log';
-        file_put_contents($logFile, "[TOKEN DEBUG] Starting validateToken\n", FILE_APPEND);
-
         $sql = "SELECT * FROM `{$this->getTableName('oauth_tokens')}`
     WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :token
     AND `{$this->getField('oauth_tokens', 'expires_at')}` > :current_time
@@ -266,17 +249,12 @@ class DatabaseStorage implements StorageInterface
 
         $sql .= " LIMIT 1";
 
-        file_put_contents($logFile, "[TOKEN DEBUG] SQL: $sql\n", FILE_APPEND);
-        file_put_contents($logFile, "[TOKEN DEBUG] Params: " . json_encode($params) . "\n", FILE_APPEND);
-
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
-        file_put_contents($logFile, "[TOKEN DEBUG] Raw result: " . json_encode($result) . "\n", FILE_APPEND);
 
         if (!$result) {
-            file_put_contents($logFile, "[TOKEN DEBUG] No result found\n", FILE_APPEND);
             return null;
         }
 
@@ -295,7 +273,6 @@ class DatabaseStorage implements StorageInterface
             }
         }
 
-        file_put_contents($logFile, "[TOKEN DEBUG] Mapped result: " . json_encode($normalizedResult) . "\n", FILE_APPEND);
         return $normalizedResult;
     }
 

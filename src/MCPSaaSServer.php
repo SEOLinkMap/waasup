@@ -58,11 +58,6 @@ class MCPSaaSServer
      */
     public function handle(Request $request, Response $response): Response
     {
-        $logFile = '/var/www/devsa/logs/uncaught.log';
-        file_put_contents($logFile, "[MCP-SERVER] Headers received:\n", FILE_APPEND);
-        foreach ($request->getHeaders() as $name => $values) {
-            file_put_contents($logFile, "[MCP-SERVER] '$name' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
-        }
         try {
             $this->contextData = $request->getAttribute('mcp_context') ?? [];
             $isAuthless = $this->config['auth']['authless'];
@@ -267,75 +262,43 @@ class MCPSaaSServer
  */
     private function extractSessionIdFromRequest(Request $request): ?string
     {
-        $logFile = '/var/www/devsa/logs/uncaught.log';
-        $serverTag = "[SESSION-EXTRACT-DEBUG]";
-
         $sessID = $request->getHeaderLine('mcp-session-id');
         if (!empty($sessID)) {
             return $sessID;
         }
 
-
-        file_put_contents($logFile, "{$serverTag} === STARTING SESSION ID EXTRACTION ===\n", FILE_APPEND);
-        file_put_contents($logFile, "{$serverTag} Method: {$request->getMethod()}\n", FILE_APPEND);
-        file_put_contents($logFile, "{$serverTag} URI: {$request->getUri()}\n", FILE_APPEND);
-
         foreach ($request->getHeaders() as $name => $values) {
-            file_put_contents($logFile, "{$serverTag} Header: '{$name}' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
 
             $lowerName = strtolower($name);
 
             if ($lowerName === 'mcp-session-id') {
-                file_put_contents($logFile, "{$serverTag} FOUND MCP-SESSION-ID HEADER!\n", FILE_APPEND);
-                file_put_contents($logFile, "{$serverTag} Header value array: " . json_encode($values) . "\n", FILE_APPEND);
-                file_put_contents($logFile, "{$serverTag} First value: '{$values[0]}'\n", FILE_APPEND);
-                file_put_contents($logFile, "{$serverTag} Returning session ID: '{$values[0]}'\n", FILE_APPEND);
-                return $values[0]; // Return the full protocolVersion_sessionId
+                return $values[0];
             }
         }
-
-        file_put_contents($logFile, "{$serverTag} No mcp-session-id header found, checking route parameters...\n", FILE_APPEND);
 
         // Check route parameters
         $route = $request->getAttribute('__route__');
-        file_put_contents($logFile, "{$serverTag} Route object: " . ($route ? get_class($route) : 'NULL') . "\n", FILE_APPEND);
 
         if ($route && method_exists($route, 'getArgument')) {
-            file_put_contents($logFile, "{$serverTag} Route has getArgument method, checking for sessID...\n", FILE_APPEND);
             $routeSessionId = $route->getArgument('sessID');
-            file_put_contents($logFile, "{$serverTag} Route sessID argument: " . ($routeSessionId ?? 'NULL') . "\n", FILE_APPEND);
 
             if ($routeSessionId) {
-                file_put_contents($logFile, "{$serverTag} Found session ID in route: '{$routeSessionId}'\n", FILE_APPEND);
                 return $routeSessionId;
             }
-        } else {
-            file_put_contents($logFile, "{$serverTag} Route is null or missing getArgument method\n", FILE_APPEND);
         }
-
-        file_put_contents($logFile, "{$serverTag} No session ID in route, checking URI path segments...\n", FILE_APPEND);
 
         // Generic URI path extraction - look for protocolVersion_sessionId format
         $path = $request->getUri()->getPath();
-        file_put_contents($logFile, "{$serverTag} URI Path: '{$path}'\n", FILE_APPEND);
 
         $pathSegments = explode('/', trim($path, '/'));
-        file_put_contents($logFile, "{$serverTag} Path segments: " . json_encode($pathSegments) . "\n", FILE_APPEND);
 
         foreach ($pathSegments as $index => $segment) {
-            file_put_contents($logFile, "{$serverTag} Checking segment[{$index}]: '{$segment}'\n", FILE_APPEND);
 
             // Look for protocolVersion_sessionId pattern
             if (preg_match('/^[a-zA-Z0-9.-]+_[a-zA-Z0-9]+$/', $segment)) {
-                file_put_contents($logFile, "{$serverTag} Segment matches protocolVersion_sessionId pattern!\n", FILE_APPEND);
-                file_put_contents($logFile, "{$serverTag} Found session ID in URI path: '{$segment}'\n", FILE_APPEND);
                 return $segment;
-            } else {
-                file_put_contents($logFile, "{$serverTag} Segment does not match pattern\n", FILE_APPEND);
             }
         }
-
-        file_put_contents($logFile, "{$serverTag} === NO SESSION ID FOUND - RETURNING NULL ===\n", FILE_APPEND);
         return null;
     }
 

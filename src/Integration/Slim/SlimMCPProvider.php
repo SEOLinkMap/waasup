@@ -70,11 +70,6 @@ class SlimMCPProvider
      */
     public function handleMCP(Request $request, Response $response): Response
     {
-        $logFile = '/var/www/devsa/logs/uncaught.log';
-        file_put_contents($logFile, "[SLIM-PROVIDER] Headers received:\n", FILE_APPEND);
-        foreach ($request->getHeaders() as $name => $values) {
-            file_put_contents($logFile, "[SLIM-PROVIDER] '$name' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
-        }
         return $this->mcpServer->handle($request, $response);
     }
 

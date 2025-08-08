@@ -31,63 +31,32 @@ class AuthMiddleware
 
     public function __invoke(Request $request, RequestHandler $handler): Response
     {
-        $logFile = '/var/www/devsa/logs/uncaught.log';
-
-        $serverName = $this->config['server_info']['name'] ?? 'UNKNOWN';
-        $authMode = $this->config['auth']['authless'] ? 'AUTHLESS' : 'OAUTH';
-        $serverTag = "[AUTH DEBUG - {$serverName} - {$authMode}]";
-
         try {
-            // LOG ALL REQUEST DETAILS
-            file_put_contents($logFile, "{$serverTag} === REQUEST START ===\n", FILE_APPEND);
-            file_put_contents($logFile, "{$serverTag} Method: {$request->getMethod()}\n", FILE_APPEND);
-            file_put_contents($logFile, "{$serverTag} URI: {$request->getUri()}\n", FILE_APPEND);
-
-            // LOG ALL HEADERS
-            file_put_contents($logFile, "{$serverTag} Headers:\n", FILE_APPEND);
-            foreach ($request->getHeaders() as $name => $values) {
-                file_put_contents($logFile, "{$serverTag}   {$name}: " . implode(', ', $values) . "\n", FILE_APPEND);
-            }
-
             if ($this->config['auth']['authless']) {
-                file_put_contents($logFile, "{$serverTag} Authless mode enabled\n", FILE_APPEND);
                 return $this->handleAuthlessRequest($request, $handler);
             }
 
-
-            file_put_contents($logFile, "{$serverTag} Extracting context ID\n", FILE_APPEND);
             $contextId = $this->extractContextId($request);
-            file_put_contents($logFile, "{$serverTag} Context ID: " . ($contextId ?? 'NULL') . "\n", FILE_APPEND);
 
             if (!$contextId) {
-                file_put_contents($logFile, "{$serverTag} No context ID - throwing AuthenticationException\n", FILE_APPEND);
                 throw new AuthenticationException('Missing context identifier');
             }
 
-            file_put_contents($logFile, "{$serverTag} Validating context\n", FILE_APPEND);
             $contextData = $this->validateContext($contextId);
-            file_put_contents($logFile, "{$serverTag} Context data: " . json_encode($contextData) . "\n", FILE_APPEND);
 
             if (!$contextData) {
-                file_put_contents($logFile, "{$serverTag} Invalid context - throwing AuthenticationException\n", FILE_APPEND);
                 throw new AuthenticationException('Invalid or inactive context');
             }
 
-            file_put_contents($logFile, "{$serverTag} Extracting access token\n", FILE_APPEND);
             $accessToken = $this->extractAccessToken($request);
-            file_put_contents($logFile, "{$serverTag} Actual token value: " . $accessToken . "\n", FILE_APPEND);
 
             if (!$accessToken) {
-                file_put_contents($logFile, "{$serverTag} No access token - returning OAuth discovery\n", FILE_APPEND);
                 return $this->createOAuthDiscoveryResponse($request);
             }
 
-            file_put_contents($logFile, "{$serverTag} Validating token\n", FILE_APPEND);
             $tokenData = $this->validateToken($accessToken, $contextData);
-            file_put_contents($logFile, "{$serverTag} Token data: " . json_encode($tokenData) . "\n", FILE_APPEND);
 
             if (!$tokenData) {
-                file_put_contents($logFile, "{$serverTag} Invalid token - returning OAuth discovery\n", FILE_APPEND);
                 return $this->createOAuthDiscoveryResponse($request);
             }
 
@@ -112,47 +81,24 @@ class AuthMiddleware
                 'sessionid' => $sessionId
             ];
 
-            file_put_contents($logFile, "{$serverTag} Setting context and continuing: " . json_encode($context) . "\n", FILE_APPEND);
-
             $request = $request->withAttribute('mcp_context', $context);
-
-
-            file_put_contents($logFile, "[AUTH-HANDOFF] Headers being passed to handler:\n", FILE_APPEND);
-            foreach ($request->getHeaders() as $name => $values) {
-                file_put_contents($logFile, "[AUTH-HANDOFF] '$name' = '" . implode(', ', $values) . "'\n", FILE_APPEND);
-            }
 
             return $handler->handle($request);
         } catch (AuthenticationException $e) {
-            file_put_contents($logFile, "{$serverTag} AuthenticationException caught: " . $e->getMessage() . "\n", FILE_APPEND);
             return $this->createOAuthDiscoveryResponse($request);
         } catch (\Exception $e) {
-            file_put_contents($logFile, "{$serverTag} Other exception caught: " . $e->getMessage() . "\n", FILE_APPEND);
             return $this->createErrorResponse('Internal authentication error', 500);
         }
     }
 
     protected function extractContextId(Request $request): ?string
     {
-        $logFile = '/var/www/devsa/logs/uncaught.log';
-
-        $serverName = $this->config['server_info']['name'] ?? 'UNKNOWN';
-        $authMode = $this->config['auth']['authless'] ? 'AUTHLESS' : 'OAUTH';
-        $serverTag = "[EXTRACT DEBUG - {$serverName} - {$authMode}]";
-
-        file_put_contents($logFile, "{$serverTag} Starting extractContextId\n", FILE_APPEND);
-
         $route = $request->getAttribute('__route__');
-        file_put_contents($logFile, "{$serverTag} Route object: " . ($route ? get_class($route) : 'NULL') . "\n", FILE_APPEND);
 
         if ($route && method_exists($route, 'getArgument')) {
             $agencyUuid = $route->getArgument('agencyUuid');
             $userId = $route->getArgument('userId');
             $contextId = $route->getArgument('contextId');
-
-            file_put_contents($logFile, "{$serverTag} agencyUuid from route: " . ($agencyUuid ?? 'NULL') . "\n", FILE_APPEND);
-            file_put_contents($logFile, "{$serverTag} userId from route: " . ($userId ?? 'NULL') . "\n", FILE_APPEND);
-            file_put_contents($logFile, "{$serverTag} contextId from route: " . ($contextId ?? 'NULL') . "\n", FILE_APPEND);
 
             if ($agencyUuid) {
                 return $agencyUuid;
@@ -168,18 +114,12 @@ class AuthMiddleware
         $path = $request->getUri()->getPath();
         $segments = explode('/', trim($path, '/'));
 
-        file_put_contents($logFile, "{$serverTag} Path: $path\n", FILE_APPEND);
-        file_put_contents($logFile, "{$serverTag} Segments: " . json_encode($segments) . "\n", FILE_APPEND);
 
         foreach ($segments as $segment) {
-            file_put_contents($logFile, "{$serverTag} Checking segment: $segment\n", FILE_APPEND);
             if ($this->isValidUuid($segment)) {
-                file_put_contents($logFile, "{$serverTag} Found valid UUID: $segment\n", FILE_APPEND);
                 return $segment;
             }
         }
-
-        file_put_contents($logFile, "{$serverTag} No context ID found\n", FILE_APPEND);
         return null;
     }
 
@@ -235,22 +175,14 @@ class AuthMiddleware
 
     protected function createOAuthDiscoveryResponse(Request $request): Response
     {
-        $logFile = '/var/www/devsa/logs/uncaught.log';
-
         $oauthBaseUrl = $this->getOAuthBaseUrl($request);
         $mcpResourceUrl = $this->getMCPBaseUrl($request);
-
-        file_put_contents($logFile, "[OAUTH-DISCOVERY] OAuth Base URL: {$oauthBaseUrl}\n", FILE_APPEND);
-        file_put_contents($logFile, "[OAUTH-DISCOVERY] MCP Resource URL: {$mcpResourceUrl}\n", FILE_APPEND);
 
         $oauthEndpoints = $this->config['oauth']['auth_server']['endpoints'];
 
         // RFC 9728 Section 3.1: Build proper metadata URLs
         $resourceMetadataUrl = $this->buildResourceMetadataUrl($request);
         $authServerMetadataUrl = $this->buildAuthServerMetadataUrl($request);
-
-        file_put_contents($logFile, "[OAUTH-DISCOVERY] Resource Metadata URL: {$resourceMetadataUrl}\n", FILE_APPEND);
-        file_put_contents($logFile, "[OAUTH-DISCOVERY] Auth Server Metadata URL: {$authServerMetadataUrl}\n", FILE_APPEND);
 
         $responseData = [
             'jsonrpc' => '2.0',
@@ -276,8 +208,6 @@ class AuthMiddleware
             $jsonContent = '{"jsonrpc":"2.0","error":{"code":-32000,"message":"JSON encoding error"},"id":null}';
         }
 
-        file_put_contents($logFile, "[OAUTH-DISCOVERY] Response JSON: {$jsonContent}\n", FILE_APPEND);
-
         $stream = $this->streamFactory->createStream($jsonContent);
 
         $response = $this->responseFactory->createResponse(401)
@@ -290,8 +220,6 @@ class AuthMiddleware
             'WWW-Authenticate',
             'Bearer realm="MCP Server", resource_metadata="' . $resourceMetadataUrl . '"'
         );
-
-        file_put_contents($logFile, "[OAUTH-DISCOVERY] WWW-Authenticate: Bearer realm=\"MCP Server\", resource_metadata=\"{$resourceMetadataUrl}\"\n", FILE_APPEND);
 
         return $response;
     }
