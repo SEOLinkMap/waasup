@@ -101,12 +101,15 @@ class AuthMiddleware
                 }
             }
 
+            $sessionId = $request->getHeaderLine('mcp-session-id');
+
             $context = [
                 'context_data' => $contextData,
                 'token_data' => $tokenData,
                 'context_id' => $contextId,
                 'base_url' => $this->getMCPBaseUrl($request),
-                'protocol_version' => $protocolVersion
+                'protocol_version' => $protocolVersion,
+                'sessionid' => $sessionId
             ];
 
             file_put_contents($logFile, "{$serverTag} Setting context and continuing: " . json_encode($context) . "\n", FILE_APPEND);
@@ -207,7 +210,7 @@ class AuthMiddleware
             throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
         }
 
-        if (!empty($tokenData['aud']) || !is_array($tokenData['aud']) || !in_array($expectedResource, $tokenData['aud'])) {
+        if (!empty($tokenData['aud']) && !is_array($tokenData['aud']) || !in_array($expectedResource, $tokenData['aud'])) {
             throw new AuthenticationException('Token audience validation failed');
         }
 
