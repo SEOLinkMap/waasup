@@ -52,8 +52,6 @@ class PromptsHandler
 
             return $this->responseManager->storeSuccessResponse($sessionId, $wrappedResult, $id, $response);
         } catch (\Exception $e) {
-            error_log("Prompt execution error: {$promptName} - " . $e->getMessage());
-
             $errorResult = [
                 'description' => '',
                 'messages' => [

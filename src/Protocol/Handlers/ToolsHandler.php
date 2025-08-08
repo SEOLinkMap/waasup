@@ -105,8 +105,6 @@ class ToolsHandler
 
             return $this->responseManager->storeSuccessResponse($sessionId, $wrappedResult, $id, $response);
         } catch (\Exception $e) {
-            error_log("Tool execution error: {$toolName} - " . $e->getMessage());
-
             $errorResult = [
             'content' => [
                 [

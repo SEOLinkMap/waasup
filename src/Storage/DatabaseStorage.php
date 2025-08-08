@@ -149,7 +149,18 @@ class DatabaseStorage implements StorageInterface
         }
 
         // Return the field mapping (either default or user override)
-        return $this->config['database']['field_mapping'][$logicalTableName][$logicalFieldName];
+        $field = $this->config['database']['field_mapping'][$logicalTableName][$logicalFieldName];
+        return $this->validateFieldName($field);
+    }
+
+
+    private function validateFieldName(string $fieldName): string
+    {
+        // Only allow alphanumeric, underscores, and common database chars
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $fieldName)) {
+            throw new \InvalidArgumentException("Invalid field name: {$fieldName}");
+        }
+        return $fieldName;
     }
 
     /**

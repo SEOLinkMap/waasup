@@ -24,6 +24,7 @@ class MessageHandler
     private ResourceRegistry $resourceRegistry;
     private StorageInterface $storage;
     private array $config;
+    private array $sessionVersionCache = [];
     private VersionNegotiator $versionNegotiator;
     private array $sessionRequestIds = [];
     private ProtocolManager $protocolManager;
@@ -92,7 +93,11 @@ class MessageHandler
         array $context,
         Response $response
     ): Response {
-        $protocolVersion = $this->protocolManager->getSessionVersion($sessionId);
+        if (!isset($this->sessionVersionCache[$sessionId])) {
+            $this->sessionVersionCache[$sessionId] =
+                $this->protocolManager->getSessionVersion($sessionId);
+        }
+        $protocolVersion = $this->sessionVersionCache[$sessionId];
 
         // MCP 2025-06-18 requires protocol version header validation (skip for authless)
         if ($protocolVersion === '2025-06-18' && !($context['authless'] ?? false)) {
@@ -150,7 +155,11 @@ class MessageHandler
 
     public function sendProgressNotification(string $sessionId, int $progress, string $message = ''): void
     {
-        $protocolVersion = $this->protocolManager->getSessionVersion($sessionId);
+        if (!isset($this->sessionVersionCache[$sessionId])) {
+            $this->sessionVersionCache[$sessionId] =
+                $this->protocolManager->getSessionVersion($sessionId);
+        }
+        $protocolVersion = $this->sessionVersionCache[$sessionId];
 
         if (!$this->protocolManager->isFeatureSupported('progress_notifications', $protocolVersion)) {
             return;

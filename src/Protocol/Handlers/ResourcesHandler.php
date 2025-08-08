@@ -50,8 +50,6 @@ class ResourcesHandler
 
             return $this->responseManager->storeSuccessResponse($sessionId, $wrappedResult, $id, $response);
         } catch (\Exception $e) {
-            error_log("Resource read error: {$uri} - " . $e->getMessage());
-
             $errorResult = [
                 'contents' => [
                     [
