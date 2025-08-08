@@ -275,6 +275,7 @@ class MCPSaaSServer
             return $sessID;
         }
 
+
         file_put_contents($logFile, "{$serverTag} === STARTING SESSION ID EXTRACTION ===\n", FILE_APPEND);
         file_put_contents($logFile, "{$serverTag} Method: {$request->getMethod()}\n", FILE_APPEND);
         file_put_contents($logFile, "{$serverTag} URI: {$request->getUri()}\n", FILE_APPEND);
