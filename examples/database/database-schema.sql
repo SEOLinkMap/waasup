@@ -129,13 +129,13 @@ CREATE TABLE `mcp_roots_responses` (
     KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE mcp_elicitation_responses (
+CREATE TABLE `mcp_elicitation_responses` (
     id INT AUTO_INCREMENT PRIMARY KEY,
     session_id VARCHAR(255) NOT NULL,
-    elicitation_id VARCHAR(255) NOT NULL,
+    request_id VARCHAR(255) NOT NULL,
     response_data JSON NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_session_elicitation (session_id, elicitation_id),
+    INDEX idx_session_elicitation (session_id, request_id),
     INDEX idx_created_at (created_at)
 );
 
