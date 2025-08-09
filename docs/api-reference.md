@@ -1,1133 +1,550 @@
 # API Reference
 
-Complete reference for the MCP SaaS Server API implementation, covering all JSON-RPC 2.0 endpoints, message formats, and **asynchronous response delivery system**.
+[Installation](getting-started.md) | [Configuration](configuration.md) | [Authentication](authentication.md) | [Building Tools](tools.md) | **API Reference**
 
-## Table of Contents
+---
 
-- [Protocol Overview](#protocol-overview)
-- [Asynchronous Response System](#asynchronous-response-system)
-- [Message Format](#message-format)
-- [Session Management](#session-management)
-- [Core Methods](#core-methods)
-- [Tools API](#tools-api)
-- [Prompts API](#prompts-api)
-- [Resources API](#resources-api)
-- [Advanced Features](#advanced-features)
-- [Transport Methods](#transport-methods)
-- [Error Handling](#error-handling)
-- [Examples](#examples)
+## Get Help Building with WaaSuP
 
-## Protocol Overview
+**Live AI-Powered Support**: Connect to `https://seolinkmap.com/mcp-repo` with your AI assistant to get instant help with WaaSuP integration. This public MCP server has access to the entire WaaSuP codebase and can help you with:
+- Complete configuration reference and troubleshooting
+- API endpoint setup and routing
+- Database schema design and field mapping
+- Authentication flow implementation
+- Protocol version compatibility
+- Performance tuning and optimization
 
-The MCP SaaS Server implements the Model Context Protocol using JSON-RPC 2.0 over HTTP with **Server-Sent Events (SSE) or Streamable HTTP for asynchronous response delivery**. All communication follows MCP specification versions 2024-11-05, 2025-03-26, and 2025-06-18 with automatic feature gating.
+**Learn MCP Integration**: Visit [How to Connect to MCP Servers](https://seolinkmap.com/documentation/how-to-connect-to-mcp-servers) for step-by-step instructions on connecting your AI tools to MCP servers.
 
-### Base URL Pattern
-```
-POST https://your-server.com/mcp/{agencyUuid}[/{sessionId}]
-GET  https://your-server.com/mcp/{agencyUuid} (for streaming connection)
-```
+---
 
-### Headers
-- `Authorization: Bearer <access_token>` - Required for all requests
-- `Content-Type: application/json` - Required for POST requests
-- `Mcp-Session-Id: <session_id>` - Required after initialization (alternative to URL parameter)
-- `MCP-Protocol-Version: <version>` - Required for 2025-06-18 requests
+## Overview
 
-### Protocol Flow
-1. **Initialize** - Establish session, get session ID in response header
-2. **Connect Streaming** - Establish SSE (2024-11-05) or Streamable HTTP (2025-03-26+) connection for receiving responses
-3. **Operate** - Send requests (get `{"status": "queued"}`), receive responses via streaming
-4. **Cleanup** - Session expires or explicit termination
+WaaSuP uses a comprehensive configuration system that provides sensible defaults for all settings. You only need to configure values that differ from the defaults - the system automatically merges your configuration with the internal defaults.
 
-## Asynchronous Response System
+All configuration is passed as an array to the `MCPSaaSServer` constructor or framework integration classes.
 
-**CRITICAL**: This server uses an asynchronous response system that differs from standard MCP implementations.
+## Complete Configuration Reference
 
-### Request Flow
-1. Client sends JSON-RPC request to HTTP endpoint
-2. Server validates request and queues response
-3. Server immediately returns `{"status": "queued"}` with HTTP 202
-4. Actual JSON-RPC response is delivered via streaming connection
+The WaaSuP configuration system is organized into logical sections. Here's the complete configuration array with all available options:
 
-### Example Request/Response Cycle
+```php
+$config = [
+    // ================================================================
+    // CORE MCP PROTOCOL CONFIGURATION
+    // ================================================================
+    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
+    'base_url' => null,                    // Your MCP server URL (auto-detected if null)
+    'session_user_id' => null,             // Session key for existing user login integration
+    'scopes_supported' => ['mcp:read', 'mcp:write'],
+    'session_lifetime' => 3600,            // MCP session lifetime in seconds
+    'test_mode' => false,                  // Set true for testing (disables some features)
 
-**Step 1: HTTP Request**
-```bash
-POST /mcp/550e8400-e29b-41d4-a716-446655440000
-Authorization: Bearer your-token
-Mcp-Session-Id: sess_123
-Content-Type: application/json
-
-{
-  "jsonrpc": "2.0",
-  "method": "tools/list",
-  "id": 1
-}
-```
-
-**Step 2: Immediate HTTP Response**
-```json
-HTTP/1.1 202 Accepted
-Content-Type: application/json
-
-{"status": "queued"}
-```
-
-**Step 3: Actual Response via Streaming**
-
-*SSE Format (2024-11-05):*
-```
-event: message
-data: {"jsonrpc":"2.0","result":{"tools":[...]},"id":1}
-```
-
-*Streamable HTTP Format (2025-03-26+):*
-```json
-{"jsonrpc":"2.0","result":{"tools":[...]},"id":1}
-```
-
-## Message Format
-
-All messages follow JSON-RPC 2.0 specification with MCP extensions.
-
-### Request Format
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "method_name",
-  "params": { ... },
-  "id": 1
-}
-```
-
-### Response Format (via Streaming)
-```json
-{
-  "jsonrpc": "2.0",
-  "result": { ... },
-  "id": 1
-}
-```
-
-### Error Format
-```json
-{
-  "jsonrpc": "2.0",
-  "error": {
-    "code": -32600,
-    "message": "Invalid Request",
-    "data": { ... }
-  },
-  "id": 1
-}
-```
-
-### Notification Format (via Streaming)
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "notifications/message",
-  "params": { ... }
-}
-```
-
-## Session Management
-
-Sessions are created during `initialize` and the session ID is returned in the `Mcp-Session-Id` response header.
-
-### Initialize Request
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "initialize",
-  "params": {
-    "protocolVersion": "2025-03-26",
-    "capabilities": {
-      "roots": {
-        "listChanged": true
-      }
-    },
-    "clientInfo": {
-      "name": "Example Client",
-      "version": "1.0.0"
-    }
-  },
-  "id": 1
-}
-```
-
-### Initialize Response (Direct HTTP - Only Exception)
-```json
-HTTP/1.1 200 OK
-Mcp-Session-Id: sess_1234567890abcdef
-Content-Type: application/json
-
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "protocolVersion": "2025-03-26",
-    "capabilities": {
-      "tools": {
-        "listChanged": true
-      },
-      "prompts": {
-        "listChanged": true
-      },
-      "resources": {
-        "subscribe": false,
-        "listChanged": true
-      },
-      "completions": true
-    },
-    "serverInfo": {
-      "name": "MCP SaaS Server",
-      "version": "1.0.0"
-    }
-  },
-  "id": 1
-}
-```
-
-**Note**: The `initialize` method is the ONLY method that returns a direct HTTP response. All other methods return `{"status": "queued"}` and deliver the actual response via streaming.
-
-### Session Validation
-All non-initialize requests require valid session:
-
-```bash
-POST /mcp/550e8400-e29b-41d4-a716-446655440000
-Authorization: Bearer your-access-token
-Mcp-Session-Id: sess_1234567890abcdef
-Content-Type: application/json
-
-{
-  "jsonrpc": "2.0",
-  "method": "ping",
-  "id": 2
-}
-
-# Response: {"status": "queued"}
-# Actual response via streaming: {"jsonrpc":"2.0","result":{"status":"pong","timestamp":"..."},"id":2}
-```
-
-### OAuth Endpoint Configuration
-
-To avoid collisions with existing OAuth systems on your server, you can configure custom OAuth endpoint URLs. If not configured, the server uses default `/oauth/*` paths.
-
-#### Configuration Structure
-
-```json
-{
-  "discovery": {
-    "oauth_endpoints": {
-      "authorize": "/mcp-auth/authorize",
-      "token": "/mcp-auth/token",
-      "register": "/mcp-auth/register",
-      "revoke": "/mcp-auth/revoke",
-      "resource": "/mcp-auth/resource"
-    }
-  }
-}
-```
-
-#### Default vs Custom Endpoints
-
-| Endpoint | Default Path | Custom Example | Purpose |
-|----------|-------------|----------------|---------|
-| Authorization | `/oauth/authorize` | `/mcp-auth/authorize` | User authorization with consent |
-| Token | `/oauth/token` | `/mcp-auth/token` | Token exchange and refresh |
-| Registration | `/oauth/register` | `/mcp-auth/register` | Dynamic client registration |
-| Revocation | `/oauth/revoke` | `/mcp-auth/revoke` | Token revocation |
-| Resource | `/oauth/resource` | `/mcp-auth/resource` | Resource indicator endpoint (2025-06-18) |
-
-#### Discovery Response Examples
-
-**With Custom Configuration:**
-```json
-{
-  "issuer": "https://server.com",
-  "authorization_endpoint": "https://server.com/mcp-auth/authorize",
-  "token_endpoint": "https://server.com/mcp-auth/token",
-  "registration_endpoint": "https://server.com/mcp-auth/register",
-  "revocation_endpoint": "https://server.com/mcp-auth/revoke"
-}
-```
-
-**Authentication Error Response (401) with Custom URLs:**
-```json
-{
-  "jsonrpc": "2.0",
-  "error": {
-    "code": -32000,
-    "message": "Authentication required",
-    "data": {
-      "oauth": {
-        "authorization_endpoint": "https://server.com/mcp-auth/authorize",
-        "token_endpoint": "https://server.com/mcp-auth/token",
-        "registration_endpoint": "https://server.com/mcp-auth/register"
-      }
-    }
-  },
-  "id": null
-}
-```
-
-## Core Methods
-
-### ping
-Test server connectivity and session validity.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "ping",
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "status": "pong",
-    "timestamp": "2024-01-15T10:30:00Z"
-  },
-  "id": 1
-}
-```
-
-## Tools API
-
-### tools/list
-List all available tools for the current context.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "tools/list",
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-
-*2024-11-05 Format:*
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "tools": [
-      {
-        "name": "echo",
-        "description": "Echo a message back",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "message": {
-              "type": "string",
-              "description": "Message to echo"
-            }
-          },
-          "required": ["message"]
-        }
-      }
-    ]
-  },
-  "id": 1
-}
-```
-
-*2025-03-26+ Format (with annotations):*
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "tools": [
-      {
-        "name": "echo",
-        "description": "Echo a message back",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "message": {
-              "type": "string",
-              "description": "Message to echo"
-            }
-          },
-          "required": ["message"]
-        },
-        "annotations": {
-          "readOnlyHint": true,
-          "destructiveHint": false,
-          "idempotentHint": true,
-          "openWorldHint": false
-        }
-      }
-    ]
-  },
-  "id": 1
-}
-```
-
-### tools/call
-Execute a specific tool with parameters.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "tools/call",
-  "params": {
-    "name": "echo",
-    "arguments": {
-      "message": "Hello MCP!"
-    }
-  },
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "content": [
-      {
-        "type": "text",
-        "text": "{\"message\":\"Hello MCP!\",\"received_params\":{\"message\":\"Hello MCP!\"},\"context_available\":true}"
-      }
-    ]
-  },
-  "id": 1
-}
-```
-
-**Note**: Tool results are JSON-encoded as text content, not structured objects.
-
-## Prompts API
-
-### prompts/list
-List all available prompts for the current context.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "prompts/list",
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "prompts": [
-      {
-        "name": "greeting",
-        "description": "Generate a friendly greeting prompt",
-        "arguments": [
-          {
-            "name": "name",
-            "description": "Name of the person to greet",
-            "required": false
-          }
-        ]
-      }
-    ]
-  },
-  "id": 1
-}
-```
-
-### prompts/get
-Get a specific prompt with arguments.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "prompts/get",
-  "params": {
-    "name": "greeting",
-    "arguments": {
-      "name": "Alice"
-    }
-  },
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "description": "A friendly greeting prompt",
-    "messages": [
-      {
-        "role": "user",
-        "content": [
-          {
-            "type": "text",
-            "text": "Please greet Alice in a friendly way."
-          }
-        ]
-      }
-    ]
-  },
-  "id": 1
-}
-```
-
-## Resources API
-
-### resources/list
-List all available resources for the current context.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "resources/list",
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "resources": [
-      {
-        "uri": "server://status",
-        "name": "Server Status",
-        "description": "Current server status and health information",
-        "mimeType": "application/json"
-      }
-    ]
-  },
-  "id": 1
-}
-```
-
-### resources/read
-Read the contents of a specific resource.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "resources/read",
-  "params": {
-    "uri": "server://status"
-  },
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "contents": [
-      {
-        "uri": "server://status",
-        "mimeType": "application/json",
-        "text": "{\"status\":\"healthy\",\"timestamp\":\"2024-01-15T10:30:00Z\",\"uptime\":12345}"
-      }
-    ]
-  },
-  "id": 1
-}
-```
-
-### resources/templates/list
-List available resource templates.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "resources/templates/list",
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "resourceTemplates": [
-      {
-        "uriTemplate": "file://{path}",
-        "name": "File Resource",
-        "description": "Read file contents from the server",
-        "mimeType": "text/plain"
-      }
-    ]
-  },
-  "id": 1
-}
-```
-
-## Advanced Features
-
-### completions/complete (2025-03-26+)
-Get completions for tool or prompt references.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "completions/complete",
-  "params": {
-    "ref": {
-      "type": "ref/tool",
-      "name": "echo"
-    },
-    "argument": "mes"
-  },
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "completions": [
-      {
-        "value": "message",
-        "description": "Message parameter"
-      }
-    ]
-  },
-  "id": 1
-}
-```
-
-### elicitation/create (2025-06-18)
-Request structured user input.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "elicitation/create",
-  "params": {
-    "message": "Please provide your contact information",
-    "requestedSchema": {
-      "type": "object",
-      "properties": {
-        "name": {"type": "string"},
-        "email": {"type": "string", "format": "email"}
-      },
-      "required": ["name", "email"]
-    }
-  },
-  "id": 1
-}
-```
-
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "type": "elicitation",
-    "prompt": "Please provide your contact information",
-    "requestedSchema": {
-      "type": "object",
-      "properties": {
-        "name": {"type": "string"},
-        "email": {"type": "string", "format": "email"}
-      },
-      "required": ["name", "email"]
-    },
-    "requestId": 1
-  },
-  "id": 1
-}
-```
-
-### sampling/createMessage
-Request LLM sampling from connected client.
-
-**Request:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "sampling/createMessage",
-  "params": {
-    "messages": [
-      {
-        "role": "user",
-        "content": [
-          {
-            "type": "text",
-            "text": "What is the capital of France?"
-          }
-        ]
-      }
+    // ================================================================
+    // SERVER INFORMATION
+    // ================================================================
+    'server_info' => [
+        'name' => 'WaaSuP MCP SaaS Server',     // Display name for your MCP server
+        'version' => '2.0.0'                    // Your server version
     ],
-    "includeContext": "none",
-    "temperature": 0.7,
-    "maxTokens": 100
-  },
-  "id": 1
-}
-```
 
-**Response (via Streaming):**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "received": true
-  },
-  "id": 1
-}
-```
+    // ================================================================
+    // AUTHENTICATION CONFIGURATION
+    // ================================================================
+    'auth' => [
+        'context_types' => ['agency', 'user'],          // Security context types for multi-tenancy
+        'validate_scope' => true,                       // Enforce OAuth scope validation
+        'required_scopes' => ['mcp:read'],              // Required OAuth scopes
+        'authless' => false,                            // true = public access, false = OAuth required
 
-### Audio Content (2025-03-26+)
+        // Public/Authless Mode Settings (only used when authless = true)
+        'authless_context_id' => 'public',
+        'authless_context_data' => [
+            'id' => 1,
+            'name' => 'Public Access',
+            'active' => true,
+            'type' => 'public'
+        ],
+        'authless_token_data' => [
+            'user_id' => 1,
+            'scope' => 'mcp:read',
+            'access_token' => 'authless-access'
+        ]
+    ],
 
-Tools can return audio content:
+    // ================================================================
+    // OAUTH 2.1 CONFIGURATION
+    // ================================================================
+    'oauth' => [
+        'base_url' => '',                               // OAuth server base URL (defaults to same as MCP)
 
-**Tool Response with Audio:**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "content": [
-      {
-        "type": "text",
-        "text": "Generated audio file:"
-      },
-      {
-        "type": "audio",
-        "data": "base64-encoded-audio-data",
-        "mimeType": "audio/mpeg",
-        "name": "speech.mp3"
-      }
+        // Authorization Server Configuration
+        'auth_server' => [
+            'endpoints' => [
+                'authorize' => '/oauth/authorize',       // Authorization endpoint path
+                'token' => '/oauth/token',               // Token endpoint path
+                'register' => '/oauth/register',         // Dynamic client registration path
+                'revoke' => '/oauth/revoke'              // Token revocation path
+            ],
+
+            // Social Authentication Providers
+            'providers' => [
+                'google' => [
+                    'client_id' => null,                 // Google OAuth client ID
+                    'client_secret' => null,             // Google OAuth client secret
+                    'redirect_uri' => null               // OAuth callback URL
+                ],
+                'linkedin' => [
+                    'client_id' => null,                 // LinkedIn OAuth client ID
+                    'client_secret' => null,             // LinkedIn OAuth client secret
+                    'redirect_uri' => null               // OAuth callback URL
+                ],
+                'github' => [
+                    'client_id' => null,                 // GitHub OAuth client ID
+                    'client_secret' => null,             // GitHub OAuth client secret
+                    'redirect_uri' => null               // OAuth callback URL
+                ]
+            ]
+        ],
+
+        // Resource Server Configuration (RFC 9728, MCP 2025-06-18)
+        'resource_server' => [
+            'enabled' => true,                          // Enable RFC 9728 resource server features
+            'resource_indicators_supported' => true,   // Support RFC 8707 resource indicators
+            'resource_indicator' => null,              // Specific resource indicator (auto-generated if null)
+            'metadata_enabled' => true,                // Enable well-known metadata endpoints
+            'require_resource_binding' => true         // Require tokens to be bound to resources
+        ]
+    ],
+
+    // ================================================================
+    // TRANSPORT CONFIGURATION
+    // ================================================================
+
+    // Server-Sent Events (MCP 2024-11-05)
+    'sse' => [
+        'keepalive_interval' => 1,                     // Seconds between keepalive messages
+        'max_connection_time' => 1800,                 // Maximum connection duration (30 minutes)
+        'switch_interval_after' => 60                  // Switch to longer intervals after inactivity
+    ],
+
+    // Streamable HTTP (MCP 2025-03-26+)
+    'streamable_http' => [
+        'keepalive_interval' => 1,                     // Seconds between keepalive messages
+        'max_connection_time' => 1800,                 // Maximum connection duration (30 minutes)
+        'switch_interval_after' => 60                  // Switch to longer intervals after inactivity
+    ],
+
+    // ================================================================
+    // DATABASE CONFIGURATION
+    // ================================================================
+    'database' => [
+        'table_prefix' => 'mcp_',                      // Prefix for auto-generated table names
+        'cleanup_interval' => 3600,                    // Automatic cleanup frequency (seconds)
+        'table_mapping' => [],                         // Map logical table names to existing tables
+        'field_mapping' => []                          // Map logical field names to existing columns
     ]
-  },
-  "id": 1
-}
+];
 ```
 
-### Progress Notifications
+## Configuration Sections Explained
 
-Server can send progress updates:
+### Core Protocol Settings
 
-*2024-11-05 Format:*
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "notifications/progress",
-  "params": {
-    "progress": 50,
-    "total": 100
-  }
-}
+**`supported_versions`**: Array of MCP protocol versions your server supports. Listed in preference order (newest first). The server automatically negotiates the best compatible version with each client.
+
+**`base_url`**: The base URL where your MCP server is accessible. If null, WaaSuP auto-detects from the request. For multi-tenant setups, include the `{agencyUuid}` placeholder.
+
+**`session_user_id`**: Key name in `$_SESSION` for existing user login integration. If your application already has user sessions, WaaSuP can use them to skip OAuth login.
+
+**`test_mode`**: Set to true in test environments to disable long-running SSE/StreamableHTTP connections and return responses immediately. Has nothing to do with authentication - use for faster test execution only.
+
+## Configuration Decision Guide
+
+### Step 1: Choose Your Access Model
+
+**Building a public service?** (documentation, status pages, public APIs)
+```php
+$config = [
+    'auth' => ['authless' => true]
+];
 ```
 
-*2025-03-26+ Format (with message):*
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "notifications/progress",
-  "params": {
-    "progress": 50,
-    "total": 100,
-    "message": "Processing data..."
-  }
-}
+**Building user/organization-specific tools?** (dashboards, private data)
+```php
+// Use defaults - no configuration needed for basic OAuth
+$config = [
+    'oauth' => [
+        'auth_server' => [
+            'providers' => [
+                'google' => [
+                    'client_id' => 'your-google-client-id',
+                    'client_secret' => 'your-google-client-secret',
+                    'redirect_uri' => 'https://yoursite.com/oauth/verify'
+                ]
+            ]
+        ]
+    ]
+];
 ```
 
-### JSON-RPC Batching (2025-03-26 only)
+### Step 2: Choose Your Data Context
 
-**Batch Request:**
-```json
-[
-  {
-    "jsonrpc": "2.0",
-    "method": "tools/list",
-    "id": 1
-  },
-  {
-    "jsonrpc": "2.0",
-    "method": "prompts/list",
-    "id": 2
-  }
+**Organization-based SaaS?** (each company gets their own space)
+```php
+$config = [
+    'base_url' => 'https://yoursite.com/mcp/{agencyUuid}',
+    'auth' => ['context_types' => ['agency']]
+];
+```
+
+**User-based application?** (each user gets their own space)
+```php
+$config = [
+    'base_url' => 'https://yoursite.com/mcp/{userUuid}',
+    'auth' => ['context_types' => ['user']]
+];
+```
+
+### Step 3: Database Integration
+
+**New application?** Let WaaSuP create tables:
+```php
+$config = [
+    'database' => ['table_prefix' => 'mcp_']
+];
+```
+
+**Existing user system?** Map to your tables:
+```php
+$config = [
+    'database' => [
+        'table_mapping' => [
+            'agencies' => 'your_organizations_table',
+            'users' => 'your_users_table'
+        ]
+    ]
+];
+```
+
+## When to Use Authless Mode
+
+Use `authless: true` for:
+- **Public documentation** - FAQ systems, help documentation, general information
+- **Marketing websites** - Product information, company details, public resources
+- **Public APIs** - Weather data, news feeds, publicly available information
+- **Support systems** - Public troubleshooting tools, status pages
+
+Use authenticated mode (default) for:
+- **User-specific data** - Personal dashboards, account information, private files
+- **Organization data** - Company-specific metrics, internal tools, customer data
+- **Any personalized content** - User preferences, saved states, private information
+
+**Important**: Even in development/testing, if your application needs to access user-specific or organization-specific data, you need authentication. Authless mode has nothing to do with development vs production.
+
+**`auth.authless`**:
+- `true`: Public access mode - like a public website, documentation, or FAQ system where anyone can access without authentication
+- Default (`false`): Requires OAuth 2.1 authentication for user/organization-specific data
+
+**`auth.context_types`**: Defines which database table to look up the UUID from the URL:
+- `['agency']`: Look up context UUID in the agencies table
+- `['user']`: Look up context UUID in the users table
+- `['agency', 'user']`: Try agencies table first, then users table
+
+**`auth.required_scopes`**: OAuth scopes required for MCP access. Standard scopes:
+- `mcp:read`: Read-only access to tools, prompts, resources
+- `mcp:write`: Full access including state-changing operations
+
+### OAuth Social Authentication
+
+Configure social login providers by setting their OAuth client credentials:
+
+```php
+'oauth' => [
+    'auth_server' => [
+        'providers' => [
+            'google' => [
+                'client_id' => 'your-google-oauth-client-id',
+                'client_secret' => 'your-google-oauth-client-secret',
+                'redirect_uri' => 'https://yoursite.com/oauth/verify'
+            ]
+        ]
+    ]
 ]
 ```
 
-**Batch Response:**
-```json
-[
-  {
-    "jsonrpc": "2.0",
-    "result": {"tools": [...]},
-    "id": 1
-  },
-  {
-    "jsonrpc": "2.0",
-    "result": {"prompts": [...]},
-    "id": 2
-  }
-]
+### Transport Performance Tuning
+
+Both SSE and Streamable HTTP transports use adaptive polling:
+
+**`keepalive_interval`**: How often to send keepalive messages (seconds). Lower values = more responsive, higher server load.
+
+**`max_connection_time`**: Maximum connection duration before automatic disconnect. Prevents resource leaks from abandoned connections.
+
+**`switch_interval_after`**: After this many seconds of inactivity, polling intervals automatically increase to reduce server load.
+
+## Database Configuration Reference
+
+WaaSuP provides flexible database integration through table and field mapping. Here's the complete database configuration structure:
+
+```php
+$config = [
+    'database' => [
+        // ================================================================
+        // BASIC DATABASE SETTINGS
+        // ================================================================
+        'table_prefix' => 'mcp_',                      // Prefix for default table names
+        'cleanup_interval' => 3600,                    // Cleanup expired data every hour
+        'table_mapping' => [],                         // Map logical names to your existing tables
+
+        // ================================================================
+        // COMPLETE FIELD MAPPING REFERENCE
+        // ================================================================
+        'field_mapping' => [
+            // Agency/Organization Table Fields
+            'agencies' => [
+                'id' => 'id',                           // Primary key (integer)
+                'uuid' => 'uuid',                       // Unique identifier for URLs (varchar)
+                'name' => 'name',                       // Organization name (varchar)
+                'active' => 'active'                    // Active status (boolean)
+            ],
+
+            // User Account Table Fields
+            'users' => [
+                'id' => 'id',                           // Primary key (integer)
+                'uuid' => 'uuid',                       // Unique identifier for URLs (varchar)
+                'agency_id' => 'agency_id',             // Foreign key to agencies (integer)
+                'name' => 'name',                       // User display name (varchar)
+                'email' => 'email',                     // Email address (varchar, unique)
+                'password' => 'password',               // Hashed password (varchar)
+                'google_id' => 'google_id',             // Google OAuth ID (varchar, nullable)
+                'linkedin_id' => 'linkedin_id',         // LinkedIn OAuth ID (varchar, nullable)
+                'github_id' => 'github_id'              // GitHub OAuth ID (varchar, nullable)
+            ],
+
+            // OAuth Client Registration Table Fields
+            'oauth_clients' => [
+                'client_id' => 'client_id',             // OAuth client identifier (varchar)
+                'client_secret' => 'client_secret',     // OAuth client secret (varchar, nullable)
+                'client_name' => 'client_name',         // Human-readable client name (varchar)
+                'redirect_uris' => 'redirect_uris',     // JSON array of allowed redirect URIs (text)
+                'grant_types' => 'grant_types',         // JSON array of allowed grant types (text)
+                'response_types' => 'response_types',   // JSON array of allowed response types (text)
+                'created_at' => 'created_at'            // Registration timestamp (datetime)
+            ],
+
+            // OAuth Token Storage Table Fields
+            'oauth_tokens' => [
+                'client_id' => 'client_id',             // OAuth client identifier (varchar)
+                'access_token' => 'access_token',       // Access token value (varchar, unique)
+                'refresh_token' => 'refresh_token',     // Refresh token value (varchar, nullable)
+                'token_type' => 'token_type',           // Token type (varchar, usually 'Bearer')
+                'scope' => 'scope',                     // Granted scopes (varchar)
+                'expires_at' => 'expires_at',           // Token expiration (datetime)
+                'agency_id' => 'agency_id',             // Bound agency (integer)
+                'user_id' => 'user_id',                 // Token owner (integer)
+                'resource' => 'resource',               // RFC 8707 resource binding (varchar, nullable)
+                'aud' => 'aud',                         // Audience claim JSON array (text, nullable)
+                'revoked' => 'revoked',                 // Revocation status (boolean)
+                'created_at' => 'created_at',           // Token creation timestamp (datetime)
+                'code_challenge' => 'code_challenge',   // PKCE code challenge (varchar, nullable)
+                'code_challenge_method' => 'code_challenge_method' // PKCE method (varchar, nullable)
+            ],
+
+            // MCP Session Storage Table Fields
+            'sessions' => [
+                'session_id' => 'session_id',           // MCP session identifier (varchar, unique)
+                'session_data' => 'session_data',       // JSON session data (text)
+                'expires_at' => 'expires_at',           // Session expiration (datetime)
+                'created_at' => 'created_at'            // Session creation timestamp (datetime)
+            ],
+
+            // MCP Message Queue Table Fields
+            'messages' => [
+                'id' => 'id',                           // Primary key (integer, auto-increment)
+                'session_id' => 'session_id',           // MCP session identifier (varchar)
+                'message_data' => 'message_data',       // JSON-RPC message data (text)
+                'context_data' => 'context_data',       // Context information (text)
+                'created_at' => 'created_at'            // Message timestamp (datetime)
+            ],
+
+            // MCP Sampling Response Storage Table Fields
+            'sampling_responses' => [
+                'id' => 'id',                           // Primary key (integer, auto-increment)
+                'session_id' => 'session_id',           // MCP session identifier (varchar)
+                'request_id' => 'request_id',           // Sampling request identifier (varchar)
+                'response_data' => 'response_data',     // JSON response data (text)
+                'created_at' => 'created_at'            // Response timestamp (datetime)
+            ],
+
+            // MCP Roots Response Storage Table Fields
+            'roots_responses' => [
+                'id' => 'id',                           // Primary key (integer, auto-increment)
+                'session_id' => 'session_id',           // MCP session identifier (varchar)
+                'request_id' => 'request_id',           // Roots request identifier (varchar)
+                'response_data' => 'response_data',     // JSON response data (text)
+                'created_at' => 'created_at'            // Response timestamp (datetime)
+            ],
+
+            // MCP Elicitation Response Storage Table Fields (2025-06-18+)
+            'elicitation_responses' => [
+                'id' => 'id',                           // Primary key (integer, auto-increment)
+                'session_id' => 'session_id',           // MCP session identifier (varchar)
+                'request_id' => 'request_id',           // Elicitation request identifier (varchar)
+                'response_data' => 'response_data',     // JSON response data (text)
+                'created_at' => 'created_at'            // Response timestamp (datetime)
+            ]
+        ]
+    ]
+];
 ```
 
-**Note**: Batching is NOT supported in 2025-06-18.
+## Database Integration Approaches
 
-## Transport Methods
+### Approach 1: Use Default Tables (Recommended)
 
-### Server-Sent Events (SSE) - 2024-11-05, Fallback
-The `SSETransport` class handles real-time response delivery.
+Let WaaSuP create its own tables with optional prefixing:
 
-**SSE Connection:**
-```bash
-GET /mcp/550e8400-e29b-41d4-a716-446655440000?session_id=sess_123
-Authorization: Bearer your-token
-Accept: text/event-stream
-Cache-Control: no-cache
+```php
+$config = [
+    'database' => [
+        'table_prefix' => 'mcp_'  // Creates: mcp_agencies, mcp_users, etc.
+    ]
+];
 ```
 
-**SSE Events:**
-```
-event: endpoint
-data: https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000/sess_123
+### Approach 2: Map to Existing Tables
 
-event: message
-data: {"jsonrpc":"2.0","result":{"tools":[...]},"id":1}
+Map WaaSuP's logical table names to your existing tables:
 
-: keepalive
-
-event: message
-data: {"jsonrpc":"2.0","result":{"status":"pong"},"id":2}
-```
-
-### Streamable HTTP - 2025-03-26+
-For newer protocol versions, uses chunked HTTP streaming.
-
-**Connection:**
-```bash
-GET /mcp/550e8400-e29b-41d4-a716-446655440000?session_id=sess_123
-Authorization: Bearer your-token
-MCP-Protocol-Version: 2025-03-26
+```php
+$config = [
+    'database' => [
+        'table_prefix' => '',  // Empty since using custom mappings
+        'table_mapping' => [
+            'agencies' => 'client_organizations',    // Your existing organization table
+            'users' => 'app_users',                  // Your existing user table
+            'oauth_clients' => 'oauth_applications', // Your existing OAuth clients
+            // Leave sessions, messages unmapped - these are always new
+        ]
+    ]
+];
 ```
 
-**Response Stream:**
-```json
-{"jsonrpc":"2.0","method":"notifications/connection","params":{"status":"connected","sessionId":"sess_123"}}
-{"jsonrpc":"2.0","result":{"tools":[...]},"id":1}
-{"jsonrpc":"2.0","method":"notifications/ping","params":{"timestamp":"2024-01-15T10:30:00Z"}}
+### Approach 3: Custom Field Names
+
+Map field names when your existing tables use different column names:
+
+```php
+$config = [
+    'database' => [
+        'table_mapping' => [
+            'agencies' => 'client_organizations'
+        ],
+        'field_mapping' => [
+            'agencies' => [
+                'uuid' => 'organization_uuid',       // Your field -> WaaSuP expected field
+                'name' => 'organization_name',
+                'active' => 'is_active'
+            ]
+        ]
+    ]
+];
 ```
 
-## Error Handling
+## Protocol Version Features
 
-### Authentication Errors (HTTP Response)
-When authentication fails, the server returns OAuth discovery information:
+WaaSuP automatically gates features based on the negotiated MCP protocol version:
 
-```json
-HTTP/1.1 401 Unauthorized
-Content-Type: application/json
+| Feature | 2024-11-05 | 2025-03-26 | 2025-06-18 |
+|---------|------------|------------|------------|
+| Tools, Prompts, Resources | ✅ | ✅ | ✅ |
+| Progress Notifications | ✅ | ✅ | ✅ |
+| Tool Annotations | ❌ | ✅ | ✅ |
+| Audio Content | ❌ | ✅ | ✅ |
+| JSON-RPC Batching | ❌ | ✅ | ❌ |
+| Completions | ❌ | ✅ | ✅ |
+| Elicitation | ❌ | ❌ | ✅ |
+| Structured Outputs | ❌ | ❌ | ✅ |
+| Resource Links | ❌ | ❌ | ✅ |
+| OAuth Resource Indicators | ❌ | ❌ | ✅ |
 
-{
-  "jsonrpc": "2.0",
-  "error": {
-    "code": -32000,
-    "message": "Authentication required",
-    "data": {
-      "oauth": {
-        "authorization_endpoint": "https://server.com/oauth/authorize",
-        "token_endpoint": "https://server.com/oauth/token",
-        "registration_endpoint": "https://server.com/oauth/register"
-      }
-    }
-  },
-  "id": null
-}
+## Environment-Specific Configuration
+
+### Development Configuration
+
+```php
+$config = [
+    'test_mode' => true,                     // Faster test execution - kills connections quickly
+    'session_lifetime' => 86400,            // 24-hour sessions for easier debugging
+    'auth' => ['authless' => true],          // ONLY if building public tools (documentation, etc.)
+    'sse' => ['keepalive_interval' => 5],    // Less aggressive polling during development
+];
 ```
 
-### Protocol Errors (via Streaming)
-```json
-{
-  "jsonrpc": "2.0",
-  "error": {
-    "code": -32601,
-    "message": "Method not found"
-  },
-  "id": 1
-}
+### Production Configuration
+
+```php
+$config = [
+    'session_lifetime' => 3600,                     // 1-hour sessions for security
+    'sse' => ['keepalive_interval' => 1],           // Real-time responses
+    'database' => ['cleanup_interval' => 1800],     // Clean up every 30 minutes
+    'oauth' => [
+        'auth_server' => [
+            'providers' => [
+                'google' => [
+                    'client_id' => env('GOOGLE_CLIENT_ID'),
+                    'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+                    'redirect_uri' => env('APP_URL') . '/oauth/verify'
+                ]
+            ]
+        ]
+    ]
+];
 ```
 
-### Error Code Reference
-| Code | Name | Description |
-|------|------|-------------|
-| -32700 | Parse error | Invalid JSON received |
-| -32600 | Invalid Request | JSON is not valid Request object |
-| -32601 | Method not found | Method does not exist or not supported in protocol version |
-| -32602 | Invalid params | Invalid method parameters |
-| -32603 | Internal error | Internal JSON-RPC error |
-| -32000 | Authentication required | Valid authentication required |
-| -32001 | Session required | Valid session required |
-| -32002 | Method not allowed | HTTP method not supported |
+## Configuration Validation
 
-## Examples
+WaaSuP validates configuration values and provides helpful error messages for common issues:
 
-### Complete Session Flow
+- Invalid protocol versions are rejected with supported alternatives
+- Missing OAuth credentials show setup instructions
+- Database connection errors include troubleshooting guidance
+- Invalid field mappings suggest correct table structures
 
-**Step 1: Initialize Session**
-```bash
-curl -X POST https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000 \
-  -H "Authorization: Bearer your-access-token" \
-  -H "Content-Type: application/json" \
-  -H "MCP-Protocol-Version: 2025-03-26" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "initialize",
-    "params": {
-      "protocolVersion": "2025-03-26",
-      "capabilities": {},
-      "clientInfo": {
-        "name": "Test Client",
-        "version": "1.0.0"
-      }
-    },
-    "id": 1
-  }'
+## Performance Considerations
 
-# Response includes: Mcp-Session-Id header
+### High-Traffic Servers
+
+For servers handling many concurrent connections:
+
+```php
+$config = [
+    'sse' => [
+        'keepalive_interval' => 2,          // Reduce polling frequency
+        'max_connection_time' => 900,       // Shorter max connection time
+        'switch_interval_after' => 30       // Switch to longer intervals faster
+    ],
+    'database' => [
+        'cleanup_interval' => 1800          // More frequent cleanup
+    ]
+];
 ```
 
-**Step 2: Establish Streaming Connection**
-```bash
-curl -N https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000 \
-  -H "Authorization: Bearer your-access-token" \
-  -H "MCP-Protocol-Version: 2025-03-26" \
-  -G -d "session_id=sess_1234567890abcdef"
+### Real-Time Applications
+
+For applications requiring immediate responsiveness:
+
+```php
+$config = [
+    'sse' => [
+        'keepalive_interval' => 1,          // Maximum responsiveness
+        'max_connection_time' => 3600,      // Longer connections allowed
+        'switch_interval_after' => 120      // Stay responsive longer
+    ]
+];
 ```
 
-**Step 3: Send Request (Separate Terminal)**
-```bash
-curl -X POST https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000 \
-  -H "Authorization: Bearer your-access-token" \
-  -H "Mcp-Session-Id: sess_1234567890abcdef" \
-  -H "Content-Type: application/json" \
-  -H "MCP-Protocol-Version: 2025-03-26" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "tools/list",
-    "id": 2
-  }'
+---
 
-# Returns: {"status": "queued"}
-# Actual response appears in streaming connection
-```
-
-### JavaScript Client Implementation
-```javascript
-class MCPClient {
-    constructor(baseUrl, accessToken, protocolVersion = '2025-03-26') {
-        this.baseUrl = baseUrl;
-        this.accessToken = accessToken;
-        this.protocolVersion = protocolVersion;
-        this.sessionId = null;
-        this.connection = null;
-        this.pendingRequests = new Map();
-        this.requestIdCounter = 0;
-    }
-
-    async initialize(agencyId) {
-        const headers = {
-            'Authorization': `Bearer ${this.accessToken}`,
-            'Content-Type': 'application/json'
-        };
-
-        if (this.protocolVersion === '2025-06-18') {
-            headers['MCP-Protocol-Version'] = this.protocolVersion;
-        }
-
-        const response = await fetch(`${this.baseUrl}/mcp/${agencyId}`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({
-                jsonrpc: '2.0',
-                method: 'initialize',
-                params: {
-                    protocolVersion: this.protocolVersion,
-                    capabilities: {},
-                    clientInfo: { name: 'JS Client', version: '1.0.0' }
-                },
-                id: 1
-            })
-        });
-
-        if (!response.ok) {
-            if (response.status === 401) {
-                const error = await response.json();
-                if (error.error?.data?.oauth) {
-                    throw new Error('Authentication required - OAuth endpoints: ' +
-                                   JSON.stringify(error.error.data.oauth));
-                }
-            }
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        this.sessionId = response.headers.get('Mcp-Session-Id');
-        return response.json();
-    }
-
-    connectStreaming(agencyId) {
-        const url = `${this.baseUrl}/mcp/${agencyId}?session_id=${this.sessionId}`;
-
-        if (this.shouldUseStreamableHTTP()) {
-            this.connectStreamableHTTP(url);
-        } else {
-            this.connectSSE(url);
-        }
-    }
-
-    shouldUseStreamableHTTP() {
-        return ['2025-03-26', '2025-06-18'].includes(this.protocolVersion);
-    }
-
-    connectSSE(url) {
-        const headers = {
-            'Authorization': `Bearer ${this.accessToken}`
-        };
-
-        if (this.protocolVersion === '2025-06-18') {
-            headers['MCP-Protocol-Version'] = this.protocolVersion;
-        }
-
-        this.connection = new EventSource(url, { headers });
-
-        this.connection.addEventListener('message', (event) => {
-            const data = JSON.parse(event.data);
-            this.handleMessage(data);
-        });
-
-        this.connection.addEventListener('error', (event) => {
-            console.error('SSE connection error:', event);
-        });
-    }
-
-    connectStreamableHTTP(url) {
-        const headers = {
-            'Authorization': `Bearer ${this.accessToken}`
-        };
-
-        if (this.protocolVersion === '2025-06-18') {
-            headers['MCP-Protocol-Version'] = this.protocolVersion;
-        }
-
-        fetch(url, { headers })
-            .then(response => {
-                const reader = response.body.getReader();
-                this.processStreamableHTTP(reader);
-            })
-            .catch(error => {
-                console.error('Streamable HTTP connection error:', error);
-            });
-    }
-
-    async processStreamableHTTP(reader) {
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            const text = new TextDecoder().decode(value);
-            const lines = text.split('\n');
-
-            for (const line of lines) {
-                if (line.trim()) {
-                    try {
-                        const data = JSON.parse(line);
-                        this.handleMessage(data);
-                    } catch (e) {
-                        // Ignore parse errors for partial chunks
-                    }
-                }
-            }
-        }
-    }
-
-    handleMessage(data) {
-        if (data.id && this.pendingRequests.has(data.id)) {
-            const { resolve } = this.pendingRequests.get(data.id);
-            this.pendingRequests.delete(data.id);
-            resolve(data);
-        } else if (data.method === 'notifications/progress') {
-            console.log('Progress:', data.params);
-        } else if (data.method === 'notifications/connection') {
-            console.log('Connection status:', data.params.status);
-        }
-    }
-
-    async call(agencyId, method, params = {}) {
-        const id = ++this.requestIdCounter;
-
-        const promise = new Promise((resolve, reject) => {
-            this.pendingRequests.set(id, { resolve, reject });
-
-            setTimeout(() => {
-                if (this.pendingRequests.has(id)) {
-                    this.pendingRequests.delete(id);
-                    reject(new Error('Request timeout'));
-                }
-            }, 30000);
-        });
-
-        const headers = {
-            'Authorization': `Bearer ${this.accessToken}`,
-            'Mcp-Session-Id': this.sessionId,
-            'Content-Type': 'application/json'
-        };
-
-        if (this.protocolVersion === '2025-06-18') {
-            headers['MCP-Protocol-Version'] = this.protocolVersion;
-        }
-
-        await fetch(`${this.baseUrl}/mcp/${agencyId}`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({
-                jsonrpc: '2.0',
-                method,
-                params,
-                id
-            })
-        });
-
-        return promise;
-    }
-
-    disconnect() {
-        if (this.connection) {
-            if (this.connection.close) {
-                this.connection.close();
-            }
-            this.connection = null;
-        }
-    }
-}
-
-// Usage
-const client = new MCPClient('https://server.com', 'your-token', '2025-03-26');
-await client.initialize('550e8400-e29b-41d4-a716-446655440000');
-client.connectStreaming('550e8400-e29b-41d4-a716-446655440000');
-
-const toolsList = await client.call('550e8400-e29b-41d4-a716-446655440000', 'tools/list');
-console.log(toolsList.result.tools);
-```
+Connect to `https://seolinkmap.com/mcp-repo` with your AI assistant for live help with configuration, troubleshooting, and integration guidance.

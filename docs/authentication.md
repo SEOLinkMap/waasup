@@ -1,939 +1,442 @@
-# Authentication & OAuth
+# Authentication & Security
 
-The MCP SaaS Server implements OAuth 2.1 with multi-tenant context-based authentication. This document covers the complete authentication flow, token management, and security implementation.
+[Installation](getting-started.md) | [Configuration](configuration.md) | **Authentication** | [Building Tools](tools.md) | [API Reference](api-reference.md)
+
+---
+
+## Get Help Building with WaaSuP
+
+**Live AI-Powered Support**: Connect to `https://seolinkmap.com/mcp-repo` with your AI assistant to get instant help with WaaSuP authentication setup. This public MCP server has access to the entire WaaSuP codebase and can help you with:
+- OAuth 2.1 configuration and troubleshooting
+- Multi-tenant security implementation
+- Database integration with existing user systems
+- Authentication flow debugging
+- RFC compliance validation
+
+**Learn MCP Integration**: Visit [How to Connect to MCP Servers](https://seolinkmap.com/documentation/how-to-connect-to-mcp-servers) for step-by-step instructions on connecting your AI tools to MCP servers.
+
+---
 
 ## Overview
 
-The authentication system provides:
+WaaSuP provides two distinct authentication modes to fit different use cases:
 
-- **OAuth 2.1 compliance** with authorization code flow and PKCE requirement
-- **RFC 8707 Resource Indicators** for token binding to specific MCP endpoints (2025-06-18)
-- **Multi-tenant architecture** with agency-based contexts
-- **Social provider integration** (Google, LinkedIn, GitHub)
-- **Discovery endpoints** for OAuth configuration
-- **PSR-15 middleware** for request authentication
-- **Flexible storage** supporting database and memory backends
+1. **Authless (Public) Mode** - Like a public website, anyone can access your MCP server
+2. **Private (OAuth) Mode** - Multi-tenant system with agency/user isolation and OAuth 2.1 authentication
 
-### Authentication Flow
+The library implements full **RFC compliance** including:
+- **RFC 8414**: OAuth 2.0 Authorization Server Metadata
+- **RFC 9728**: OAuth 2.0 Protected Resource Metadata
+- **RFC 8707**: OAuth 2.0 Resource Indicators (MCP 2025-06-18)
+- **OAuth 2.1** specification with PKCE requirements
 
-1. Client discovers OAuth endpoints via `.well-known/oauth-authorization-server`
-2. Client redirects user to authorization endpoint with resource parameter (2025-06-18)
-3. User authenticates via email/password or social providers
-4. User grants consent for specific agency context
-5. Server returns authorization code with resource binding
-6. Client exchanges code for access token with resource validation
-7. Client uses token for MCP API requests with context and resource validation
+## Authentication Modes
 
-## OAuth Server Implementation
+### Authless (Public) Mode
 
-The `OAuthServer` class handles the complete OAuth 2.1 flow with built-in social provider support.
-
-### Basic Setup
-
-```php
-use Seolinkmap\Waasup\Auth\OAuthServer;
-use Seolinkmap\Waasup\Storage\DatabaseStorage;
-use Psr\Http\Message\ResponseFactoryInterface;
-use Psr\Http\Message\StreamFactoryInterface;
-
-$storage = new DatabaseStorage($pdo, ['table_prefix' => 'mcp_']);
-
-$oauthConfig = [
-    'base_url' => 'https://your-server.com',
-    'google' => [
-        'client_id' => 'your-google-client-id',
-        'client_secret' => 'your-google-client-secret',
-        'redirect_uri' => 'https://your-server.com/oauth/google/callback'
-    ],
-    'linkedin' => [
-        'client_id' => 'your-linkedin-client-id',
-        'client_secret' => 'your-linkedin-client-secret',
-        'redirect_uri' => 'https://your-server.com/oauth/linkedin/callback'
-    ],
-    'github' => [
-        'client_id' => 'your-github-client-id',
-        'client_secret' => 'your-github-client-secret',
-        'redirect_uri' => 'https://your-server.com/oauth/github/callback'
-    ]
-];
-
-$oauthServer = new OAuthServer(
-    $storage,
-    $responseFactory,
-    $streamFactory,
-    $oauthConfig
-);
-```
-
-### Custom OAuth Endpoint Configuration
-
-#### Overview
-
-By default, the MCP SaaS Server uses standard `/oauth/*` paths for OAuth endpoints. To avoid conflicts with existing OAuth systems on your server, you can configure custom paths.
-
-#### Configuration Structure
-
-Configure custom OAuth endpoints through the discovery configuration:
+Perfect for documentation, support, FAQs, and public services - anyone can access your MCP server without authentication.
 
 ```php
 $config = [
-    'discovery' => [
-        'oauth_endpoints' => [
-            'authorize' => '/mcp-oauth/authorize',     // Custom authorization endpoint
-            'token' => '/mcp-oauth/token',             // Custom token endpoint
-            'register' => '/mcp-oauth/register',       // Custom registration endpoint
-            'revoke' => '/mcp-oauth/revoke',           // Custom revocation endpoint
-            'resource' => '/mcp-oauth/resource'        // Custom resource endpoint (2025-06-18)
-        ]
-    ],
+    'base_url' => 'https://yoursite.com/mcp-public',
     'auth' => [
-        'oauth_endpoints' => [
-            'authorize' => '/mcp-oauth/authorize',     // Must match discovery config
-            'token' => '/mcp-oauth/token',             // Must match discovery config
-            'register' => '/mcp-oauth/register',       // Must match discovery config
-            'revoke' => '/mcp-oauth/revoke',           // Must match discovery config
-            'resource' => '/mcp-oauth/resource'        // Must match discovery config
-        ]
+        'authless' => true  // Disables all authentication
     ]
 ];
+
+// Simple route - no authentication middleware needed
+$app->map(['GET', 'POST', 'OPTIONS'], '/mcp-public', [$mcpProvider, 'handleMCP']);
 ```
 
-#### Implementation Example
+**Security Note**: Authless mode provides a default public context. Only expose tools and data that are safe for public consumption.
+
+### Private (OAuth) Mode
+
+Multi-tenant system with agency-level or user-level isolation. Each organization gets their own isolated MCP server instance.
 
 ```php
-use Seolinkmap\Waasup\Auth\OAuthServer;
-use Seolinkmap\Waasup\Integration\Slim\SlimMCPProvider;
-
-// Configure custom OAuth paths to avoid conflicts with existing OAuth
 $config = [
-    'discovery' => [
-        'oauth_endpoints' => [
-            'authorize' => '/api/v2/mcp/authorize',
-            'token' => '/api/v2/mcp/token',
-            'register' => '/api/v2/mcp/register',
-            'revoke' => '/api/v2/mcp/revoke'
-        ]
-    ],
+    'base_url' => 'https://yoursite.com/mcp/{agencyUuid}',        // Tenant isolation via URL
     'auth' => [
-        'oauth_endpoints' => [
-            'authorize' => '/api/v2/mcp/authorize',
-            'token' => '/api/v2/mcp/token',
-            'register' => '/api/v2/mcp/register',
-            'revoke' => '/api/v2/mcp/revoke'
+        'authless' => false,                                      // OAuth required (default)
+        'context_types' => ['agency'],                            // or ['user'] or ['agency', 'user']
+        'validate_scope' => true,
+        'required_scopes' => ['mcp:read', 'mcp:write']
+    ],
+    'oauth' => [
+        'base_url' => 'https://yoursite.com/oauth'
+    ]
+];
+
+// Private endpoint with OAuth authentication
+$app->map(['GET', 'POST', 'OPTIONS'], '/mcp/{agencyUuid}[/{sessID}]',
+    [$mcpProvider, 'handleMCP'])
+    ->add($mcpProvider->getAuthMiddleware());  // Requires authentication
+```
+
+**Multi-Tenant Security**: The `{agencyUuid}` in the URL provides tenant isolation. Each agency/organization can only access their own data.
+
+## Database Integration
+
+WaaSuP works with your existing user and organization tables. You just need to ensure the required fields exist.
+
+### Approach 1: Use Your Existing Tables (Recommended)
+
+Map WaaSuP to your existing database structure:
+
+```php
+$config = [
+    'database' => [
+        'table_prefix' => '',  // Empty since using custom mappings
+        'table_mapping' => [
+            'agencies' => 'client_organizations',    // Your existing organization table
+            'users' => 'app_users',                  // Your existing user table
+            'oauth_clients' => 'oauth_applications', // Your existing OAuth clients
+            'oauth_tokens' => 'oauth_access_tokens', // Your existing OAuth tokens
+            // sessions, messages use default names (these are always new)
         ],
-        'context_types' => ['agency'],
-        'base_url' => 'https://your-server.com'
-    ]
-];
-
-// Register CUSTOM OAuth routes (not the default /oauth/* paths)
-$app->get('/api/v2/mcp/authorize', [$oauthServer, 'authorize']);
-$app->post('/api/v2/mcp/verify', [$oauthServer, 'verify']);
-$app->post('/api/v2/mcp/consent', [$oauthServer, 'consent']);
-$app->post('/api/v2/mcp/token', [$oauthServer, 'token']);
-$app->post('/api/v2/mcp/revoke', [$oauthServer, 'revoke']);
-$app->post('/api/v2/mcp/register', [$oauthServer, 'register']);
-```
-
-#### Common Use Cases
-
-**Avoiding Conflicts with Existing OAuth:**
-```php
-// Your existing OAuth system uses /oauth/*
-// Configure MCP to use completely different paths
-$config = [
-    'discovery' => [
-        'oauth_endpoints' => [
-            'authorize' => '/mcp-auth/authorize',
-            'token' => '/mcp-auth/token',
-            'register' => '/mcp-auth/register'
+        'field_mapping' => [
+            'agencies' => [
+                'uuid' => 'organization_uuid',       // Your field -> WaaSuP expected field
+                'name' => 'organization_name',
+                'active' => 'is_active'
+            ],
+            'users' => [
+                'uuid' => 'user_guid',
+                'agency_id' => 'organization_id',
+                'email' => 'email_address'
+            ]
         ]
     ]
 ];
 ```
 
-**API Versioning:**
+### Required Database Fields
+
+**For agencies/organizations table:**
+- `id` (int, primary key)
+- `uuid` (varchar, unique identifier used in URLs)
+- `name` (varchar)
+- `active` (boolean)
+
+**For users table:**
+- `id` (int, primary key)
+- `uuid` (varchar, unique identifier used in URLs)
+- `agency_id` (int, foreign key to agencies)
+- `name` (varchar)
+- `email` (varchar, unique)
+- `password` (varchar, hashed)
+
+**Optional social auth fields:**
+- `google_id`, `linkedin_id`, `github_id` (varchar)
+
+### Approach 2: Let WaaSuP Create Tables
+
+If you don't have existing user management, let WaaSuP create its own tables:
+
 ```php
-// Use versioned API paths
 $config = [
-    'discovery' => [
-        'oauth_endpoints' => [
-            'authorize' => '/api/v3/oauth/authorize',
-            'token' => '/api/v3/oauth/token',
-            'register' => '/api/v3/oauth/register'
+    'database' => [
+        'table_prefix' => 'mcp_'  // Creates: mcp_agencies, mcp_users, etc.
+    ]
+];
+```
+
+## OAuth 2.1 Server Setup
+
+WaaSuP includes a complete OAuth 2.1 authorization server with social authentication support.
+
+### Required OAuth Routes
+
+```php
+// OAuth Authorization Server Routes
+$app->group('/oauth', function (RouteCollectorProxy $group) use ($mcpProvider) {
+
+    // Authorization endpoint (where users go to login)
+    $group->get('/authorize', function (Request $request, Response $response) use ($mcpProvider) {
+        $oauthServer = new \Seolinkmap\Waasup\Auth\OAuthServer(
+            $storage, $responseFactory, $streamFactory, $config
+        );
+        return $oauthServer->authorize($request, $response);
+    });
+
+    // User verification (login form handling)
+    $group->post('/verify', function (Request $request, Response $response) use ($mcpProvider) {
+        $oauthServer = new \Seolinkmap\Waasup\Auth\OAuthServer(
+            $storage, $responseFactory, $streamFactory, $config
+        );
+        return $oauthServer->verify($request, $response);
+    });
+
+    // Consent screen handling
+    $group->post('/consent', function (Request $request, Response $response) use ($mcpProvider) {
+        $oauthServer = new \Seolinkmap\Waasup\Auth\OAuthServer(
+            $storage, $responseFactory, $streamFactory, $config
+        );
+        return $oauthServer->consent($request, $response);
+    });
+
+    // Token endpoint (authorization code exchange)
+    $group->post('/token', function (Request $request, Response $response) use ($mcpProvider) {
+        $oauthServer = new \Seolinkmap\Waasup\Auth\OAuthServer(
+            $storage, $responseFactory, $streamFactory, $config
+        );
+        return $oauthServer->token($request, $response);
+    });
+
+    // Token revocation
+    $group->post('/revoke', function (Request $request, Response $response) use ($mcpProvider) {
+        $oauthServer = new \Seolinkmap\Waasup\Auth\OAuthServer(
+            $storage, $responseFactory, $streamFactory, $config
+        );
+        return $oauthServer->revoke($request, $response);
+    });
+
+    // Dynamic client registration
+    $group->post('/register', function (Request $request, Response $response) use ($mcpProvider) {
+        $oauthServer = new \Seolinkmap\Waasup\Auth\OAuthServer(
+            $storage, $responseFactory, $streamFactory, $config
+        );
+        return $oauthServer->register($request, $response);
+    });
+});
+```
+
+### Social Authentication Setup
+
+Configure social providers for easier user login:
+
+```php
+$config = [
+    'oauth' => [
+        'auth_server' => [
+            'providers' => [
+                'google' => [
+                    'client_id' => 'your-google-client-id',
+                    'client_secret' => 'your-google-client-secret',
+                    'redirect_uri' => 'https://yoursite.com/oauth/verify'
+                ],
+                'linkedin' => [
+                    'client_id' => 'your-linkedin-client-id',
+                    'client_secret' => 'your-linkedin-client-secret',
+                    'redirect_uri' => 'https://yoursite.com/oauth/verify'
+                ],
+                'github' => [
+                    'client_id' => 'your-github-client-id',
+                    'client_secret' => 'your-github-client-secret',
+                    'redirect_uri' => 'https://yoursite.com/oauth/verify'
+                ]
+            ]
         ]
     ]
 ];
 ```
 
+## RFC-Compliant Discovery Endpoints
 
-### Authorization Endpoint
+WaaSuP automatically provides standards-compliant discovery endpoints for OAuth metadata.
 
-The authorization endpoint handles user authentication and consent with RFC 8707 Resource Indicators:
-
-```php
-// GET /oauth/authorize?response_type=code&client_id=...&redirect_uri=...&scope=...&state=...&resource=...
-public function handleAuthorize(Request $request, Response $response): Response
-{
-    return $this->oauthServer->authorize($request, $response);
-}
-```
-
-**MCP 2025-06-18 requires resource parameter:**
-```
-https://server.com/oauth/authorize?
-  response_type=code&
-  client_id=your_client_id&
-  redirect_uri=https://your-app.com/callback&
-  scope=mcp:read+mcp:write&
-  state=random_state&
-  resource=https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000
-```
-
-This will:
-1. Validate the OAuth parameters including resource URL
-2. Check if user is already authenticated
-3. Render authentication form with social provider options
-4. Handle consent after authentication
-5. Bind authorization code to specific resource
-
-### Authentication Verification
-
-Users can authenticate via email/password or social providers:
+### Authorization Server Discovery (RFC 8414)
 
 ```php
-// POST /oauth/verify
-public function handleVerify(Request $request, Response $response): Response
-{
-    return $this->oauthServer->verify($request, $response);
-}
-```
-
-**Email/Password Authentication:**
-```html
-<form method="POST" action="/oauth/verify">
-    <input type="email" name="email" required>
-    <input type="password" name="password" required>
-    <button type="submit" name="provider" value="email">Sign In</button>
-</form>
-```
-
-**Social Authentication:**
-```html
-<form method="POST" action="/oauth/verify">
-    <button type="submit" name="provider" value="google">Continue with Google</button>
-    <button type="submit" name="provider" value="linkedin">Continue with LinkedIn</button>
-    <button type="submit" name="provider" value="github">Continue with GitHub</button>
-</form>
-```
-
-### Consent Handling
-
-After authentication, users must consent to app access:
-
-```php
-// POST /oauth/consent
-public function handleConsent(Request $request, Response $response): Response
-{
-    return $this->oauthServer->consent($request, $response);
-}
-```
-
-The consent screen displays:
-- Application name requesting access
-- User information (name, email)
-- Requested permissions/scope
-- Resource being accessed (for 2025-06-18)
-
-### Token Exchange
-
-Exchange authorization code for access token with resource binding:
-
-```php
-// POST /oauth/token
-public function handleToken(Request $request, Response $response): Response
-{
-    return $this->oauthServer->token($request, $response);
-}
-```
-
-**Authorization Code Grant (with RFC 8707):**
-```bash
-curl -X POST https://server.com/oauth/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=authorization_code" \
-  -d "code=auth_code_here" \
-  -d "client_id=your_client_id" \
-  -d "redirect_uri=https://your-app.com/callback" \
-  -d "code_verifier=pkce_verifier" \
-  -d "resource=https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000"
-```
-
-**Response:**
-```json
-{
-  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-  "token_type": "Bearer",
-  "expires_in": 3600,
-  "refresh_token": "def50200...",
-  "scope": "mcp:read mcp:write"
-}
-```
-
-The token includes resource binding in database:
-```sql
-INSERT INTO mcp_oauth_tokens (
-    access_token, resource, aud, agency_id, scope
-) VALUES (
-    'token...',
-    'https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000',
-    '["https://server.com/mcp/550e8400-e29b-41d4-a716-446655440000"]',
-    1,
-    'mcp:read mcp:write'
+$app->get('/.well-known/oauth-authorization-server[/{path:.*}]',
+    function (Request $request, Response $response) use ($config) {
+        $discoveryProvider = new \Seolinkmap\Waasup\Discovery\WellKnownProvider($config);
+        return $discoveryProvider->authorizationServer($request, $response);
+    }
 );
 ```
 
-### Social Provider Callbacks
-
-Handle OAuth callbacks from social providers:
+### Resource Server Discovery (RFC 9728)
 
 ```php
-// GET /oauth/google/callback
-public function handleGoogleCallback(Request $request, Response $response): Response
-{
-    return $this->oauthServer->handleGoogleCallback($request, $response);
-}
-
-// GET /oauth/linkedin/callback
-public function handleLinkedinCallback(Request $request, Response $response): Response
-{
-    return $this->oauthServer->handleLinkedinCallback($request, $response);
-}
-
-// GET /oauth/github/callback
-public function handleGithubCallback(Request $request, Response $response): Response
-{
-    return $this->oauthServer->handleGithubCallback($request, $response);
-}
+$app->get('/.well-known/oauth-protected-resource[/{path:.*}]',
+    function (Request $request, Response $response) use ($config) {
+        $discoveryProvider = new \Seolinkmap\Waasup\Discovery\WellKnownProvider($config);
+        return $discoveryProvider->protectedResource($request, $response);
+    }
+);
 ```
 
-## Authentication Middleware
+These endpoints provide automatic OAuth metadata discovery for compliant clients.
 
-The PSR-15 middleware handles request authentication automatically with RFC 8707 validation.
+## Multi-Tenant Security Architecture
 
-### Middleware Setup
+### Agency-Level Isolation
+
+Each organization gets its own isolated MCP server instance via URL-based routing:
+
+```
+https://yoursite.com/mcp/550e8400-e29b-41d4-a716-446655440000  # Agency A
+https://yoursite.com/mcp/6ba7b810-9dad-11d1-80b4-00c04fd430c8  # Agency B
+```
+
+**Security Features:**
+- OAuth tokens are bound to specific agencies
+- Database queries automatically filter by agency context
+- Cross-agency data access is impossible
+- Session isolation per agency
+
+### User-Level Context
+
+For user-specific tools and data access:
 
 ```php
-use Seolinkmap\Waasup\Auth\Middleware\AuthMiddleware;
-
-$authMiddleware = new AuthMiddleware(
-    $storage,
-    $responseFactory,
-    $streamFactory,
-    [
-        'context_types' => ['agency'],
-        'base_url' => 'https://your-server.com',
-        'resource_server_metadata' => true,        // OAuth Resource Server (2025-06-18)
-        'require_resource_binding' => true,        // RFC 8707 compliance
-        'audience_validation_required' => true     // Token audience validation
+$config = [
+    'auth' => [
+        'context_types' => ['user'],  // User-level instead of agency-level
     ]
-);
+];
 
-// Add to Slim app
-$app->add($authMiddleware);
+// URL becomes: https://yoursite.com/mcp/{userUuid}
 ```
 
-### How It Works
+### Context Access in Tools
 
-The middleware:
-1. Extracts context identifier from route (agency UUID)
-2. Validates the context exists and is active
-3. Extracts Bearer token from Authorization header
-4. Validates token against storage with resource binding (2025-06-18)
-5. Validates audience claims and scope checking
-6. Adds context data to request attributes
-7. Returns OAuth discovery response if authentication fails
-
-### RFC 8707 Resource Indicators Validation (2025-06-18)
-
-For MCP 2025-06-18, the middleware performs strict resource validation:
+Access the authenticated context in your tools:
 
 ```php
-private function validateResourceServerRequirements(Request $request, array $tokenData): void
-{
-    $baseUrl = $this->getBaseUrl($request);
-    $contextId = $this->extractContextId($request);
-    $expectedResource = $baseUrl . '/mcp/' . $contextId;
+$toolRegistry->register('get_customer_data', function($params, $context) {
+    // $context contains authenticated agency/user information
+    $agencyId = $context['context_data']['id'];
+    $userId = $context['token_data']['user_id'];
 
-    // Token must be bound to this specific resource
-    if (!isset($tokenData['resource']) || $tokenData['resource'] !== $expectedResource) {
-        throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
-    }
-
-    // Audience validation prevents token mis-redemption
-    if (!isset($tokenData['aud']) || !in_array($expectedResource, (array)$tokenData['aud'])) {
-        throw new AuthenticationException('Token audience validation failed');
-    }
-
-    if (isset($tokenData['scope']) && !$this->validateTokenScope($tokenData['scope'])) {
-        throw new AuthenticationException('Token scope invalid for this resource server');
-    }
-}
+    // Your tool can safely access data for this agency/user only
+    return getCustomerDataForAgency($agencyId);
+}, [
+    'description' => 'Get customer data for authenticated organization'
+]);
 ```
 
-### Token Validation
+## Session Management
 
-Token validation is handled directly through the storage interface:
+Configure session behavior for your application:
 
 ```php
-// In DatabaseStorage implementation
-public function validateToken(string $accessToken, array $context = []): ?array
-{
-    $sql = "SELECT * FROM `{$this->tablePrefix}oauth_tokens`
-            WHERE `access_token` = :token
-            AND `expires_at` > :current_time
-            AND `revoked` = 0
-            LIMIT 1";
-
-    $stmt = $this->pdo->prepare($sql);
-    $stmt->execute([
-        ':token' => $accessToken,
-        ':current_time' => $this->getCurrentTimestamp()
-    ]);
-
-    return $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
-}
+$config = [
+    'session_lifetime' => 3600,          // 1 hour MCP sessions
+    'session_user_id' => 'user_id'       // Key name in $_SESSION for user validation
+];
 ```
 
-## Discovery Endpoints
+**Session Integration**: If a user is already logged into your application, WaaSuP can use that session to skip the OAuth login process.
 
-The `WellKnownProvider` implements OAuth discovery as per RFC 8414 with MCP-specific extensions.
+## Resource Indicators (MCP 2025-06-18)
 
-### OAuth Authorization Server Metadata
+For the latest MCP protocol version, WaaSuP supports RFC 8707 Resource Indicators for enhanced security:
 
 ```php
-use Seolinkmap\Waasup\Discovery\WellKnownProvider;
+// OAuth tokens are bound to specific MCP resource URLs
+// This prevents token misuse across different resource servers
+$expectedResource = 'https://yoursite.com/mcp/agency-uuid';
 
-$wellKnownProvider = new WellKnownProvider($config);
-
-// GET /.well-known/oauth-authorization-server
-public function handleAuthDiscovery(Request $request, Response $response): Response
-{
-    return $wellKnownProvider->authorizationServer($request, $response);
-}
-```
-
-**Response for 2025-06-18:**
-```json
-{
-  "issuer": "https://server.com",
-  "authorization_endpoint": "https://server.com/oauth/authorize",
-  "token_endpoint": "https://server.com/oauth/token",
-  "grant_types_supported": ["authorization_code", "refresh_token"],
-  "response_types_supported": ["code"],
-  "token_endpoint_auth_methods_supported": ["client_secret_post", "private_key_jwt", "none"],
-  "code_challenge_methods_supported": ["S256"],
-  "response_modes_supported": ["query"],
-  "registration_endpoint": "https://server.com/oauth/register",
-  "scopes_supported": ["mcp:read", "mcp:write"],
-  "resource_indicators_supported": true,
-  "token_binding_methods_supported": ["resource_indicator"],
-  "require_resource_parameter": true,
-  "pkce_required": true,
-  "authorization_response_iss_parameter_supported": true
-}
-```
-
-### OAuth Protected Resource Metadata (2025-06-18)
-
-```php
-// GET /.well-known/oauth-protected-resource
-public function handleResourceDiscovery(Request $request, Response $response): Response
-{
-    return $wellKnownProvider->protectedResource($request, $response);
-}
-```
-
-**Response:**
-```json
-{
-  "resource": "https://server.com",
-  "authorization_servers": ["https://server.com"],
-  "bearer_methods_supported": ["header"],
-  "scopes_supported": ["mcp:read", "mcp:write"],
-  "resource_server": true,
-  "resource_indicators_supported": true,
-  "token_binding_supported": true,
-  "audience_validation_required": true,
-  "resource_indicator_endpoint": "https://server.com/oauth/resource",
-  "token_binding_methods_supported": ["resource_indicator"],
-  "content_types_supported": ["application/json", "text/event-stream"],
-  "mcp_features_supported": [
-    "tools", "prompts", "resources", "sampling", "roots", "ping",
-    "progress_notifications", "tool_annotations", "audio_content",
-    "completions", "elicitation", "structured_outputs", "resource_links"
-  ]
-}
-```
-
-## Multi-Tenant Context
-
-The system supports agency-based isolation through context validation.
-
-### Context Management
-
-```php
-// Agency context is validated through storage
-public function getContextData(string $identifier, string $type = 'agency'): ?array
-{
-    $sql = "SELECT * FROM `{$this->tablePrefix}agencies`
-            WHERE `uuid` = :identifier AND `active` = 1";
-
-    $stmt = $this->pdo->prepare($sql);
-    $stmt->execute([':identifier' => $identifier]);
-
-    return $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
-}
-```
-
-### Context-Aware Operations
-
-```php
-// Access context in your MCP handlers
-public function handleToolCall(Request $request): Response
-{
-    $context = $request->getAttribute('mcp_context');
-    $agencyData = $context['context_data'];
-    $tokenData = $context['token_data'];
-
-    // Use agency data for business logic
-    $agencyId = $agencyData['id'];
-    $agencySettings = json_decode($agencyData['settings'], true);
-
-    // Resource validation for 2025-06-18
-    if ($context['protocol_version'] === '2025-06-18') {
-        $expectedResource = $context['base_url'] . '/mcp/' . $context['context_id'];
-        if ($tokenData['resource'] !== $expectedResource) {
-            throw new AuthenticationException('Token resource mismatch');
-        }
-    }
-
-    // Implement agency-specific rate limiting, feature access, etc.
-}
-```
-
-## Social Authentication Providers
-
-The system includes built-in social authentication providers.
-
-### Google Provider
-
-```php
-use Seolinkmap\Waasup\Auth\Providers\GoogleProvider;
-
-$googleProvider = new GoogleProvider(
-    'your-google-client-id',
-    'your-google-client-secret',
-    'https://your-server.com/oauth/google/callback'
-);
-
-// Get authorization URL
-$authUrl = $googleProvider->getAuthUrl();
-
-// Handle callback
-$result = $googleProvider->handleCallback($authorizationCode);
-// Returns: ['provider' => 'google', 'provider_id' => '...', 'email' => '...', 'name' => '...']
-```
-
-### LinkedIn Provider
-
-```php
-use Seolinkmap\Waasup\Auth\Providers\LinkedinProvider;
-
-$linkedinProvider = new LinkedinProvider(
-    'your-linkedin-client-id',
-    'your-linkedin-client-secret',
-    'https://your-server.com/oauth/linkedin/callback'
-);
-
-// Get authorization URL with state
-$state = bin2hex(random_bytes(16));
-$authUrl = $linkedinProvider->getAuthUrl($state);
-
-// Handle callback
-$result = $linkedinProvider->handleCallback($authorizationCode, $state);
-```
-
-### GitHub Provider
-
-```php
-use Seolinkmap\Waasup\Auth\Providers\GithubProvider;
-
-$githubProvider = new GithubProvider(
-    'your-github-client-id',
-    'your-github-client-secret',
-    'https://your-server.com/oauth/github/callback'
-);
-
-// Get authorization URL with state
-$state = bin2hex(random_bytes(16));
-$authUrl = $githubProvider->getAuthUrl($state);
-
-// Handle callback
-$result = $githubProvider->handleCallback($authorizationCode, $state);
-```
-
-## Storage Interface
-
-The authentication system uses the following storage methods:
-
-```php
-interface StorageInterface
-{
-    // Token management
-    public function validateToken(string $accessToken, array $context = []): ?array;
-    public function storeAccessToken(array $tokenData): bool;
-    public function getTokenByRefreshToken(string $refreshToken, string $clientId): ?array;
-    public function revokeToken(string $token): bool;
-
-    // OAuth flow
-    public function getOAuthClient(string $clientId): ?array;
-    public function storeOAuthClient(array $clientData): bool;
-    public function storeAuthorizationCode(string $code, array $codeData): bool;
-    public function getAuthorizationCode(string $code, string $clientId): ?array;
-    public function revokeAuthorizationCode(string $code): bool;
-
-    // Context management
-    public function getContextData(string $identifier, string $type = 'agency'): ?array;
-
-    // User management
-    public function verifyUserCredentials(string $email, string $password): ?array;
-    public function findUserByEmail(string $email): ?array;
-
-    // Social auth (optional methods - checked with method_exists)
-    public function findUserByGoogleId(string $googleId): ?array;
-    public function findUserByLinkedinId(string $linkedinId): ?array;
-    public function findUserByGithubId(string $githubId): ?array;
-    public function updateUserGoogleId(int $userId, string $googleId): bool;
-    public function updateUserLinkedinId(int $userId, string $linkedinId): bool;
-    public function updateUserGithubId(int $userId, string $githubId): bool;
-}
+// WaaSuP automatically validates:
+// - Token was issued for this specific resource
+// - Audience claim matches the resource server
+// - Scope is appropriate for the requested operations
 ```
 
 ## Integration Examples
 
-### Slim Framework Integration
+### Laravel Integration
 
 ```php
-use Slim\Factory\AppFactory;
-use Seolinkmap\Waasup\Integration\Slim\SlimMCPProvider;
-use Seolinkmap\Waasup\Auth\OAuthServer;
+// routes/web.php
+use Seolinkmap\Waasup\Integration\Laravel\LaravelMCPProvider;
 
-$app = AppFactory::create();
-
-// Create MCP provider with auth config
-$mcpProvider = new SlimMCPProvider(
-    $storage,
-    $toolRegistry,
-    $promptRegistry,
-    $resourceRegistry,
-    $responseFactory,
-    $streamFactory,
-    $config
+// Public endpoint
+Route::match(['GET', 'POST', 'OPTIONS'], '/mcp-public',
+    [LaravelMCPProvider::class, 'handleMCP']
 );
 
-// Create OAuth server
-$oauthServer = new OAuthServer($storage, $responseFactory, $streamFactory, $oauthConfig);
-
-// OAuth discovery endpoints
-$app->get('/.well-known/oauth-authorization-server',
-    [$mcpProvider, 'handleAuthDiscovery']);
-$app->get('/.well-known/oauth-protected-resource',
-    [$mcpProvider, 'handleResourceDiscovery']);
-
-// OAuth endpoints
-$app->get('/oauth/authorize', [$oauthServer, 'authorize']);
-$app->post('/oauth/verify', [$oauthServer, 'verify']);
-$app->post('/oauth/consent', [$oauthServer, 'consent']);
-$app->post('/oauth/token', [$oauthServer, 'token']);
-$app->post('/oauth/revoke', [$oauthServer, 'revoke']);
-$app->post('/oauth/register', [$oauthServer, 'register']);
-
-// Social provider callbacks
-$app->get('/oauth/google/callback', [$oauthServer, 'handleGoogleCallback']);
-$app->get('/oauth/linkedin/callback', [$oauthServer, 'handleLinkedinCallback']);
-$app->get('/oauth/github/callback', [$oauthServer, 'handleGithubCallback']);
-
-// Protected MCP endpoints
-$app->map(['GET', 'POST'], '/mcp/{agencyUuid}[/{sessID}]',
-    [$mcpProvider, 'handleMCP'])
-    ->add($mcpProvider->getAuthMiddleware());
+// Private endpoint with authentication
+Route::middleware('mcp.auth')->group(function () {
+    Route::match(['GET', 'POST', 'OPTIONS'], '/mcp/{agencyUuid}/{sessID?}',
+        [LaravelMCPProvider::class, 'handleMCP']
+    );
+});
 ```
 
-### Client-Side Integration
+### Existing User System Integration
 
-```javascript
-// OAuth 2.1 flow with RFC 8707 Resource Indicators
-class MCPClient {
-    constructor(config) {
-        this.config = config;
-        this.accessToken = null;
-        this.refreshToken = null;
-    }
-
-    async authenticate(agencyId, protocolVersion = '2025-06-18') {
-        const resource = `${this.config.mcpEndpoint}/${agencyId}`;
-
-        // Generate PKCE parameters
-        const codeVerifier = this.generateCodeVerifier();
-        const codeChallenge = await this.generateCodeChallenge(codeVerifier);
-
-        // Store for token exchange
-        sessionStorage.setItem('code_verifier', codeVerifier);
-
-        // Redirect to authorization endpoint
-        const authUrl = new URL(this.config.authorizationEndpoint);
-        authUrl.searchParams.set('response_type', 'code');
-        authUrl.searchParams.set('client_id', this.config.clientId);
-        authUrl.searchParams.set('redirect_uri', this.config.redirectUri);
-        authUrl.searchParams.set('scope', 'mcp:read mcp:write');
-        authUrl.searchParams.set('state', this.generateState());
-        authUrl.searchParams.set('code_challenge', codeChallenge);
-        authUrl.searchParams.set('code_challenge_method', 'S256');
-
-        // RFC 8707 Resource Indicators (required for 2025-06-18)
-        if (protocolVersion === '2025-06-18') {
-            authUrl.searchParams.set('resource', resource);
-        }
-
-        window.location.href = authUrl.toString();
-    }
-
-    async exchangeCodeForToken(code, agencyId, protocolVersion = '2025-06-18') {
-        const codeVerifier = sessionStorage.getItem('code_verifier');
-        sessionStorage.removeItem('code_verifier');
-
-        const body = new URLSearchParams({
-            grant_type: 'authorization_code',
-            code: code,
-            client_id: this.config.clientId,
-            redirect_uri: this.config.redirectUri,
-            code_verifier: codeVerifier
-        });
-
-        // Add resource parameter for 2025-06-18
-        if (protocolVersion === '2025-06-18') {
-            const resource = `${this.config.mcpEndpoint}/${agencyId}`;
-            body.append('resource', resource);
-        }
-
-        const response = await fetch(this.config.tokenEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body
-        });
-
-        if (!response.ok) {
-            throw new Error(`Token exchange failed: ${response.status}`);
-        }
-
-        const tokens = await response.json();
-        this.accessToken = tokens.access_token;
-        this.refreshToken = tokens.refresh_token;
-        return tokens;
-    }
-
-    async callMCP(agencyId, method, params = {}, protocolVersion = '2025-06-18') {
-        const headers = {
-            'Authorization': `Bearer ${this.accessToken}`,
-            'Content-Type': 'application/json'
-        };
-
-        // Add protocol version header for 2025-06-18
-        if (protocolVersion === '2025-06-18') {
-            headers['MCP-Protocol-Version'] = protocolVersion;
-        }
-
-        const response = await fetch(`${this.config.mcpEndpoint}/${agencyId}`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({
-                jsonrpc: '2.0',
-                method: method,
-                params: params,
-                id: Math.random()
-            })
-        });
-
-        if (response.status === 401) {
-            // Handle resource binding errors
-            const error = await response.json();
-            if (error.error?.message?.includes('resource')) {
-                throw new Error('Token not bound to this resource - re-authenticate required');
-            }
-        }
-
-        return response.json();
-    }
-
-    generateCodeVerifier() {
-        const array = new Uint8Array(32);
-        crypto.getRandomValues(array);
-        return btoa(String.fromCharCode.apply(null, array))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
-    }
-
-    async generateCodeChallenge(verifier) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(verifier);
-        const digest = await crypto.subtle.digest('SHA-256', data);
-        return btoa(String.fromCharCode.apply(null, new Uint8Array(digest)))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
-    }
-
-    generateState() {
-        const array = new Uint8Array(16);
-        crypto.getRandomValues(array);
-        return btoa(String.fromCharCode.apply(null, array));
-    }
-}
-```
-
-## Public/Authless MCP Servers
-
-For public MCP servers serving publicly available data, you can bypass authentication entirely.
-
-### Authless Server Setup
-
-#### Option 1: Skip Authentication Middleware
+If you already have user authentication, integrate it with WaaSuP:
 
 ```php
-use Slim\Factory\AppFactory;
-use Seolinkmap\Waasup\Integration\Slim\SlimMCPProvider;
-use Seolinkmap\Waasup\Storage\MemoryStorage;
-
-$app = AppFactory::create();
-
-// Use memory storage with pre-configured public context
-$storage = new MemoryStorage();
-$storage->addContext('public', 'agency', [
-    'id' => 1,
-    'name' => 'Public MCP Server',
-    'active' => true
-]);
-
-// Create MCP provider without auth requirements
-$mcpProvider = new SlimMCPProvider(
-    $storage,
-    $toolRegistry,
-    $promptRegistry,
-    $resourceRegistry,
-    $responseFactory,
-    $streamFactory,
-    [
-        'server_info' => [
-            'name' => 'Public Repository Explorer',
-            'version' => '1.0.0'
+// Check if user is already logged in
+$config = [
+    'session_user_id' => 'user_id',  // Your session key for logged-in users
+    'database' => [
+        'table_mapping' => [
+            'users' => 'your_users_table',
+            'agencies' => 'your_organizations_table'
         ]
     ]
-);
+];
 
-// Public MCP endpoint - NO auth middleware
-$app->map(['GET', 'POST'], '/mcp/public[/{sessID}]',
-    [$mcpProvider, 'handleMCP']);
+// WaaSuP will automatically use existing login sessions
+// and map to your existing user/organization data
 ```
 
-#### Option 2: Permissive Storage Implementation
+## Security Best Practices
 
+### Production Security Checklist
+
+- ✅ Use HTTPS for all OAuth endpoints
+- ✅ Set secure OAuth client credentials
+- ✅ Configure proper CORS headers
+- ✅ Validate agency/user context in all tools
+- ✅ Use database transactions for multi-table operations
+- ✅ Implement proper session timeout handling
+- ✅ Monitor OAuth token usage and revocation
+
+### Development vs Production
+
+**Development:**
 ```php
-class PublicStorage implements StorageInterface
-{
-    // Always allow access - no real authentication
-    public function validateToken(string $accessToken, array $context = []): ?array
-    {
-        return [
-            'user_id' => 1,
-            'agency_id' => 1,
-            'scope' => 'mcp:read',
-            'expires_at' => time() + 3600,
-            'revoked' => false
-        ];
-    }
-
-    public function getContextData(string $identifier, string $type = 'agency'): ?array
-    {
-        // Accept any identifier as valid public context
-        return [
-            'id' => 1,
-            'name' => 'Public Server',
-            'active' => true,
-            'context_type' => $type
-        ];
-    }
-
-    // Implement other required methods as no-ops or defaults
-    // ...
-}
+$config = [
+    'test_mode' => true,                    // Faster responses
+    'session_lifetime' => 86400,           // 24-hour sessions
+    'auth' => ['authless' => true]          // Public access for testing
+];
 ```
 
-## Security Considerations
-
-When implementing authentication:
-
-### 1. Token Security
-- **Use HTTPS only** for all OAuth endpoints
-- **Implement token rotation** with refresh tokens
-- **Set appropriate token expiration** (1 hour for access tokens)
-- **Store tokens securely** with encryption at rest
-
-### 2. PKCE Requirements
-- **Always require PKCE** for OAuth 2.1 compliance
-- **Use S256 code challenge method** only
-- **Validate code verifier** on token exchange
-
-### 3. Resource Binding (2025-06-18)
-- **Validate resource parameter** in authorization requests
-- **Bind tokens to specific resources** using RFC 8707
-- **Validate audience claims** on token usage
-- **Prevent token misuse** across different resources
-
-### 4. Rate Limiting
+**Production:**
 ```php
-// Implement rate limiting for auth endpoints
-class RateLimiter {
-    public static function checkAuthLimit($ip, $endpoint): bool {
-        $key = "auth_limit:{$endpoint}:{$ip}";
-        $attempts = cache_get($key) ?? 0;
-
-        if ($attempts >= 5) {
-            return false; // Rate limited
-        }
-
-        cache_set($key, $attempts + 1, 3600); // 1 hour window
-        return true;
-    }
-}
-
-// Use in OAuth endpoints
-if (!RateLimiter::checkAuthLimit($ip, 'token')) {
-    return $this->errorResponse('rate_limited', 'Too many token requests');
-}
+$config = [
+    'test_mode' => false,                   // Full security
+    'session_lifetime' => 3600,            // 1-hour sessions
+    'auth' => ['authless' => false],        // Require OAuth
+    'oauth' => [
+        'auth_server' => [
+            'providers' => [/* social auth */]
+        ]
+    ]
+];
 ```
 
-### 5. Session Security
-- **Use cryptographically secure session IDs**
-- **Implement session timeout**
-- **Clear sensitive session data** after OAuth flow
-- **Prevent session fixation** attacks
+## Troubleshooting Authentication
 
-### 6. Input Validation
-- **Validate all OAuth parameters** against specs
-- **Sanitize redirect URIs** to prevent open redirects
-- **Validate state parameters** to prevent CSRF
-- **Check client credentials** securely
+### Common Issues
 
-This authentication system provides enterprise-grade security with OAuth 2.1 compliance, RFC 8707 Resource Indicators support, multi-tenant isolation, social provider integration, and flexible deployment options for both authenticated and public MCP servers.
+**"Authentication required" errors:**
+- Verify OAuth endpoints are properly configured
+- Check that authentication middleware is added to routes
+- Ensure database tables have required fields
+
+**Token validation failures:**
+- Verify agency/user UUIDs match between URL and database
+- Check token expiration and revocation status
+- Validate OAuth client configuration
+
+**Multi-tenant data leaks:**
+- Always check `$context['context_data']['id']` in tools
+- Verify database queries filter by agency/user context
+- Test with multiple agencies to ensure isolation
+
+### Getting Help
+
+Connect your AI assistant to `https://seolinkmap.com/mcp-repo` for live troubleshooting assistance with authentication setup, OAuth configuration, and multi-tenant security implementation.
+
+---
+
+Next: Learn about [Building Tools](tools.md) →
