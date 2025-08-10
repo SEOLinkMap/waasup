@@ -38,20 +38,29 @@ class ToolRegistry
         throw new MCPException("Tool not found: {$toolName}", -32601);
     }
 
-    // Tool annotations only supported in 2025-03-26+
     public function getToolsList(string $protocolVersion = '2025-06-18'): array
     {
         $tools = [];
+        $supportsAnnotations = $this->supportsToolAnnotations($protocolVersion);
+        $supportsOutputSchema = ($protocolVersion === '2025-06-18');
 
         foreach ($this->tools as $tool) {
             $toolData = [
-            'name' => $tool->getName(),
-            'description' => $tool->getDescription(),
-            'inputSchema' => $tool->getInputSchema()
+                'name' => $tool->getName(),
+                'description' => $tool->getDescription(),
+                'inputSchema' => $tool->getInputSchema()
             ];
 
+            // Add outputSchema for 2025-06-18
+            if ($supportsOutputSchema && method_exists($tool, 'getOutputSchema')) {
+                $outputSchema = $tool->getOutputSchema();
+                if (!empty($outputSchema)) {
+                    $toolData['outputSchema'] = $outputSchema;
+                }
+            }
+
             // Tool annotations only in 2025-03-26+
-            if ($this->supportsToolAnnotations($protocolVersion)) {
+            if ($supportsAnnotations) {
                 $toolData['annotations'] = $tool->getAnnotations();
             }
 
@@ -60,17 +69,22 @@ class ToolRegistry
 
         foreach ($this->callables as $name => $callable) {
             $toolData = [
-            'name' => $name,
-            'description' => $callable['schema']['description'] ?? "Tool: {$name}",
-            'inputSchema' => $callable['schema']['inputSchema'] ?? ['type' => 'object']
+                'name' => $name,
+                'description' => $callable['schema']['description'],
+                'inputSchema' => $callable['schema']['inputSchema']
             ];
 
-            if ($this->supportsToolAnnotations($protocolVersion)) {
+            // Add outputSchema for 2025-06-18
+            if ($supportsOutputSchema && isset($callable['schema']['outputSchema'])) {
+                $toolData['outputSchema'] = $callable['schema']['outputSchema'];
+            }
+
+            if ($supportsAnnotations) {
                 $toolData['annotations'] = $callable['schema']['annotations'] ?? [
-                'readOnlyHint' => true,
-                'destructiveHint' => false,
-                'idempotentHint' => true,
-                'openWorldHint' => false
+                    'readOnlyHint' => true,
+                    'destructiveHint' => false,
+                    'idempotentHint' => true,
+                    'openWorldHint' => false
                 ];
             }
 
@@ -103,6 +117,7 @@ class ToolRegistry
         return [
             'description' => $schema['description'] ?? '',
             'inputSchema' => $schema['inputSchema'] ?? ['type' => 'object'],
+            'outputSchema' => $schema['outputSchema'] ?? null,
             'annotations' => $schema['annotations'] ?? [
                 'readOnlyHint' => true,
                 'destructiveHint' => false,

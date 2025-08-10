@@ -394,6 +394,17 @@ class ProtocolFeaturesTest extends TestCase
     {
         $sessionId = $this->generateMcpSessionId('2025-06-18');
 
+        $this->storage->storeSession(
+            $sessionId,
+            [
+                'protocol_version' => '2025-06-18',
+                'agency_id' => 1,
+                'user_id' => 1,
+                'created_at' => time()
+            ],
+            3600
+        );
+
         $initMessage = [
             'jsonrpc' => '2.0',
             'method' => 'initialize',
@@ -1164,6 +1175,17 @@ class ProtocolFeaturesTest extends TestCase
     {
         foreach (['2025-06-18', '2025-03-26'] as $version) {
             $sessionId = $this->generateMcpSessionId($version);
+
+            $this->storage->storeSession(
+                $sessionId,
+                [
+                    'protocol_version' => $version,
+                    'agency_id' => 1,
+                    'user_id' => 1,
+                    'created_at' => time()
+                ],
+                3600
+            );
 
             $initMessage = [
                 'jsonrpc' => '2.0',
