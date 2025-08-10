@@ -9,11 +9,22 @@ class WellKnownProvider
 {
     private array $config;
 
+    /**
+     * @param array $config config array (master in MCPSaaSServer::getDefaultConfig())
+     */
     public function __construct(array $config = [])
     {
         $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
     }
 
+    /**
+     * RFC 8414 OAuth Authorization Server Metadata endpoint
+     * Route: /.well-known/oauth-authorization-server
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response JSON metadata with authorization/token/registration endpoints
+     */
     public function authorizationServer(Request $request, Response $response): Response
     {
         $oauthBaseUrl = $this->getOAuthBaseUrl($request);
@@ -51,6 +62,14 @@ class WellKnownProvider
         return $response->withHeader('Content-Type', 'application/json');
     }
 
+    /**
+     * RFC 9728 OAuth Protected Resource Metadata endpoint
+     * Route: /.well-known/oauth-protected-resource
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response JSON metadata with resource server capabilities
+     */
     public function protectedResource(Request $request, Response $response): Response
     {
         $resourceUrl = $this->extractResourceIdentifier($request);
@@ -138,7 +157,7 @@ class WellKnownProvider
     }
 
     /**
-     * Get OAuth base URL for auth operations (shared infrastructure)
+     * Get OAuth base URL for auth operations
      */
     private function getOAuthBaseUrl(Request $request): string
     {
@@ -164,13 +183,21 @@ class WellKnownProvider
         return '2024-11-05';
     }
 
+    /**
+     * The oauth typically has any "path" in the baseURL and the endpoints are typically /authorize.
+     * The "weird" config below works when baseURL is empty and the system sniffs the domain root.
+     *
+     * You are best off not touching this, or including your oauth "path" in the baseURL before defining each endpoint.
+     *
+     * @return array{base_url: null, oauth: array, scopes_supported: string[]}
+     */
     private function getDefaultConfig(): array
     {
         return [
-            'base_url' => null,
+            'base_url' => null, // MCP baseURL
             'scopes_supported' => ['mcp:read', 'mcp:write'],
             'oauth' => [
-                'base_url' => '',
+                'base_url' => '', // OAuth baseURL
                 'auth_server' => [
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',

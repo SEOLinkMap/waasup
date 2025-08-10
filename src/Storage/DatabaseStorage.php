@@ -54,11 +54,7 @@ class DatabaseStorage implements StorageInterface
      * Initialize database storage
      *
      * @param \PDO $pdo Database connection
-     * @param array $config Configuration array with optional nested structure:
-     *                     - 'database': Database-specific configuration
-     *                       - 'table_prefix': Prefix for default table names (default: 'mcp_')
-     *                       - 'table_mapping': Map logical names to existing table names (use sparingly)
-     *                       - 'cleanup_interval': Cleanup frequency in seconds (default: 3600)
+     * @param array $config config array (master in MCPSaaSServer::getDefaultConfig())
      * @param LoggerInterface|null $logger Optional logger instance
      */
     public function __construct(\PDO $pdo, array $config = [], ?LoggerInterface $logger = null)

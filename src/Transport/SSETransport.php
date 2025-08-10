@@ -14,7 +14,7 @@ use Slim\Psr7\NonBufferedBody;
 class SSETransport implements TransportInterface
 {
     private StorageInterface $storage;
-    private array $config;
+    private array $config; // config array (master in MCPSaaSServer::getDefaultConfig())
 
     public function __construct(StorageInterface $storage, array $config = [])
     {

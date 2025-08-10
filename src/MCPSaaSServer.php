@@ -32,6 +32,16 @@ class MCPSaaSServer
     private ?array $contextData = null;
     private ?string $sessionId = null;
 
+    /**
+     * Initialize the MCP SaaS Server
+     *
+     * @param StorageInterface $storage Database or memory storage implementation
+     * @param ToolRegistry $toolRegistry Registry for managing MCP tools
+     * @param PromptRegistry $promptRegistry Registry for managing MCP prompts
+     * @param ResourceRegistry $resourceRegistry Registry for managing MCP resources
+     * @param array $config Server configuration array
+     * @param LoggerInterface|null $logger Optional logger instance
+     */
     public function __construct(
         StorageInterface $storage,
         ToolRegistry $toolRegistry,
@@ -54,7 +64,16 @@ class MCPSaaSServer
     }
 
     /**
-     * Main MCP endpoint handler
+     * Main MCP endpoint handler for processing HTTP requests
+     *
+     * Handles both POST (JSON-RPC) and GET (streaming) requests according to MCP protocol.
+     * Manages session negotiation, authentication, and protocol version compatibility.
+     *
+     * @param Request $request PSR-7 HTTP request
+     * @param Response $response PSR-7 HTTP response
+     * @return Response Modified PSR-7 response with MCP data or stream
+     * @throws AuthenticationException When authentication is required but missing/invalid
+     * @throws ProtocolException When protocol violations occur
      */
     public function handle(Request $request, Response $response): Response
     {
@@ -252,9 +271,6 @@ class MCPSaaSServer
     /**
      * Extract session ID from request headers or route parameters
      */
-    /**
- * Extract session ID from request headers or route parameters
- */
     private function extractSessionIdFromRequest(Request $request): ?string
     {
         $sessID = $request->getHeaderLine('mcp-session-id');
@@ -493,26 +509,68 @@ class MCPSaaSServer
             ->withStatus($httpStatus);
     }
 
+    /**
+     * Register a tool with the MCP server
+     *
+     * @param string $name Unique tool name identifier
+     * @param callable $handler Function that executes the tool logic
+     * @param array $schema JSON schema defining tool parameters and metadata
+     * @return void
+     */
     public function addTool(string $name, callable $handler, array $schema = []): void
     {
         $this->toolRegistry->register($name, $handler, $schema);
     }
 
+    /**
+     * Register a prompt with the MCP server
+     *
+     * @param string $name Unique prompt name identifier
+     * @param callable $handler Function that generates the prompt content
+     * @param array $schema JSON schema defining prompt arguments and metadata
+     * @return void
+     */
     public function addPrompt(string $name, callable $handler, array $schema = []): void
     {
         $this->promptRegistry->register($name, $handler, $schema);
     }
 
+    /**
+     * Register a resource with the MCP server
+     *
+     * @param string $uri Unique resource URI identifier
+     * @param callable $handler Function that provides the resource content
+     * @param array $schema JSON schema defining resource metadata
+     * @return void
+     */
     public function addResource(string $uri, callable $handler, array $schema = []): void
     {
         $this->resourceRegistry->register($uri, $handler, $schema);
     }
 
+    /**
+     * Register a resource template with the MCP server
+     *
+     * Resource templates allow pattern-based URI matching (e.g., "/files/{filename}").
+     *
+     * @param string $uriTemplate URI pattern with variables in {curly} braces
+     * @param callable $handler Function that provides the resource content
+     * @param array $schema JSON schema defining resource template metadata
+     * @return void
+     */
     public function addResourceTemplate(string $uriTemplate, callable $handler, array $schema = []): void
     {
         $this->resourceRegistry->registerTemplate($uriTemplate, $handler, $schema);
     }
 
+    /**
+     * Set the current authentication and context data
+     *
+     * Used primarily for testing or when bypassing normal authentication flow.
+     *
+     * @param array $contextData Context information including user, agency, and token data
+     * @return void
+     */
     public function setContext(array $contextData): void
     {
         $this->contextData = $contextData;

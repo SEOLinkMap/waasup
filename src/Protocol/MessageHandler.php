@@ -46,7 +46,7 @@ class MessageHandler
         $this->promptRegistry = $promptRegistry;
         $this->resourceRegistry = $resourceRegistry;
         $this->storage = $storage;
-        $this->config = $config;
+        $this->config = $config; // config array (master in MCPSaaSServer::getDefaultConfig())
 
         // Initialize delegated handlers
         $this->protocolManager = new ProtocolManager($storage, $config);

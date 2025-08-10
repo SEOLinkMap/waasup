@@ -32,7 +32,7 @@ class SlimMCPProvider
         ResourceRegistry $resourceRegistry,
         ResponseFactoryInterface $responseFactory,
         StreamFactoryInterface $streamFactory,
-        array $config = [],
+        array $config = [], // config array (master in MCPSaaSServer::getDefaultConfig())
         ?LoggerInterface $logger = null
     ) {
         $logger = $logger ?? new NullLogger();

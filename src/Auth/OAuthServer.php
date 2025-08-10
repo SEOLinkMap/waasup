@@ -19,6 +19,12 @@ class OAuthServer
     private ?LinkedinProvider $linkedinProvider = null;
     private ?GithubProvider $githubProvider = null;
 
+    /**
+     * @param StorageInterface $storage
+     * @param ResponseFactoryInterface $responseFactory
+     * @param StreamFactoryInterface $streamFactory
+     * @param array $config config array (master in MCPSaaSServer::getDefaultConfig())
+     */
     public function __construct(
         StorageInterface $storage,
         ResponseFactoryInterface $responseFactory,
@@ -34,7 +40,11 @@ class OAuthServer
     }
 
     /**
-     * OAuth 2.1 Authorization Endpoint with RFC 8707 Resource Indicators
+     * OAuth 2.1 authorization endpoint with PKCE and resource indicators
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response Auth form or error response
      */
     public function authorize(Request $request, Response $response): Response
     {
@@ -133,7 +143,11 @@ class OAuthServer
     }
 
     /**
-     * Handle OAuth verification form submission
+     * Handle OAuth verification form submission (email/password or social auth)
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response Consent screen, auth form with error, or social redirect
      */
     public function verify(Request $request, Response $response): Response
     {
@@ -183,7 +197,11 @@ class OAuthServer
     }
 
     /**
-     * Handle Google OAuth verify callback
+     * Handle Google OAuth callback for verification
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response Consent screen or auth form with error
      */
     public function handleGoogleVerifyCallback(Request $request, Response $response): Response
     {
@@ -214,7 +232,11 @@ class OAuthServer
     }
 
     /**
-     * Handle LinkedIn OAuth verify callback
+     * Handle LinkedIn OAuth callback for verification
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response Consent screen or auth form with error
      */
     public function handleLinkedinVerifyCallback(Request $request, Response $response): Response
     {
@@ -246,7 +268,11 @@ class OAuthServer
     }
 
     /**
-     * Handle GitHub OAuth verify callback
+     * Handle GitHub OAuth callback for verification
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response Consent screen or auth form with error
      */
     public function handleGithubVerifyCallback(Request $request, Response $response): Response
     {
@@ -278,7 +304,11 @@ class OAuthServer
     }
 
     /**
-     * Handle consent screen submission
+     * Handle consent screen submission (allow/deny)
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response Redirect with auth code or error
      */
     public function consent(Request $request, Response $response): Response
     {
@@ -365,7 +395,11 @@ class OAuthServer
     }
 
     /**
-     * Token endpoint with RFC 8707 Resource Indicators support
+     * OAuth 2.1 token endpoint for authorization_code and refresh_token grants
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response JSON with access_token or error
      */
     public function token(Request $request, Response $response): Response
     {
@@ -393,7 +427,11 @@ class OAuthServer
     }
 
     /**
-     * Revoke token endpoint
+     * Token revocation endpoint
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response Empty 200 response
      */
     public function revoke(Request $request, Response $response): Response
     {
@@ -424,7 +462,11 @@ class OAuthServer
     }
 
     /**
-     * Client registration endpoint
+     * Dynamic client registration endpoint
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response JSON with client_id or error
      */
     public function register(Request $request, Response $response): Response
     {

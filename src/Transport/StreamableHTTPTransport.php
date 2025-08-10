@@ -18,7 +18,7 @@ class StreamableHTTPTransport implements TransportInterface
 {
     private LoggerInterface $logger;
     private StorageInterface $storage;
-    private array $config;
+    private array $config; // config array (master in MCPSaaSServer::getDefaultConfig())
 
 
     public function __construct(

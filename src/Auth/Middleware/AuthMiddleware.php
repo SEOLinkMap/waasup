@@ -10,6 +10,15 @@ use Psr\Http\Server\RequestHandlerInterface as RequestHandler;
 use Seolinkmap\Waasup\Exception\AuthenticationException;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 
+/**
+ * PSR-15 Authentication Middleware for MCP Server
+ *
+ * Handles OAuth 2.1 authentication with RFC 8707 Resource Indicators support.
+ * Validates bearer tokens, manages context-based authorization, and provides
+ * OAuth discovery responses for MCP protocol versions 2024-11-05 through 2025-06-18.
+ *
+ * @package Seolinkmap\Waasup\Auth\Middleware
+ */
 class AuthMiddleware
 {
     private StorageInterface $storage;
@@ -17,6 +26,14 @@ class AuthMiddleware
     private StreamFactoryInterface $streamFactory;
     private array $config;
 
+    /**
+     * Initialize authentication middleware
+     *
+     * @param StorageInterface $storage Storage implementation for token/context validation
+     * @param ResponseFactoryInterface $responseFactory PSR-17 response factory for creating HTTP responses
+     * @param StreamFactoryInterface $streamFactory PSR-17 stream factory for response bodies
+     * @param array $config config array (master in MCPSaaSServer::getDefaultConfig())
+     */
     public function __construct(
         StorageInterface $storage,
         ResponseFactoryInterface $responseFactory,
@@ -29,6 +46,13 @@ class AuthMiddleware
         $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
     }
 
+    /**
+     * PSR-15 middleware that validates OAuth tokens and sets mcp_context attribute
+     *
+     * @param Request $request
+     * @param RequestHandler $handler
+     * @return Response OAuth discovery response on auth failure, or handler response
+     */
     public function __invoke(Request $request, RequestHandler $handler): Response
     {
         try {
