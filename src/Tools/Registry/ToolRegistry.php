@@ -52,7 +52,7 @@ class ToolRegistry
             ];
 
             // Add outputSchema for 2025-06-18
-            if ($supportsOutputSchema && method_exists($tool, 'getOutputSchema')) {
+            if ($supportsOutputSchema) {
                 $outputSchema = $tool->getOutputSchema();
                 if (!empty($outputSchema)) {
                     $toolData['outputSchema'] = $outputSchema;
@@ -75,7 +75,7 @@ class ToolRegistry
             ];
 
             // Add outputSchema for 2025-06-18
-            if ($supportsOutputSchema && isset($callable['schema']['outputSchema'])) {
+            if ($supportsOutputSchema && !empty($callable['schema']['outputSchema'])) {
                 $toolData['outputSchema'] = $callable['schema']['outputSchema'];
             }
 
@@ -117,7 +117,7 @@ class ToolRegistry
         return [
             'description' => $schema['description'] ?? '',
             'inputSchema' => $schema['inputSchema'] ?? ['type' => 'object'],
-            'outputSchema' => $schema['outputSchema'] ?? null,
+            'outputSchema' => $schema['outputSchema'] ?? [],
             'annotations' => $schema['annotations'] ?? [
                 'readOnlyHint' => true,
                 'destructiveHint' => false,

@@ -25,7 +25,6 @@ class MessageHandler
     private StorageInterface $storage;
     private array $config;
     private array $sessionVersionCache = [];
-    private VersionNegotiator $versionNegotiator;
     private array $sessionRequestIds = [];
     private ProtocolManager $protocolManager;
     private ToolsHandler $toolsHandler;
@@ -41,41 +40,39 @@ class MessageHandler
         PromptRegistry $promptRegistry,
         ResourceRegistry $resourceRegistry,
         StorageInterface $storage,
-        array $config = [],
-        ?VersionNegotiator $versionNegotiator = null
+        array $config = []
     ) {
         $this->toolRegistry = $toolRegistry;
         $this->promptRegistry = $promptRegistry;
         $this->resourceRegistry = $resourceRegistry;
         $this->storage = $storage;
         $this->config = $config;
-        $this->versionNegotiator = $versionNegotiator ?? new VersionNegotiator($config);
 
         // Initialize delegated handlers
-        $this->protocolManager = new ProtocolManager($this->versionNegotiator, $storage, $config);
+        $this->protocolManager = new ProtocolManager($storage, $config);
         $this->contentProcessor = new ContentProcessor($this->protocolManager);
         $this->responseManager = new ResponseManager($storage);
 
         $this->toolsHandler = new ToolsHandler(
-            $toolRegistry,
-            $promptRegistry,
+            $this->toolRegistry,
+            $this->promptRegistry,
             $this->protocolManager,
             $this->contentProcessor,
             $this->responseManager
         );
 
         $this->promptsHandler = new PromptsHandler(
-            $promptRegistry,
+            $this->promptRegistry,
             $this->responseManager
         );
 
         $this->resourcesHandler = new ResourcesHandler(
-            $resourceRegistry,
+            $this->resourceRegistry,
             $this->responseManager
         );
 
         $this->samplingHandler = new SamplingHandler(
-            $storage,
+            $this->storage,
             $this->responseManager,
             $this->protocolManager
         );
@@ -83,7 +80,7 @@ class MessageHandler
         $this->systemHandler = new SystemHandler(
             $this->protocolManager,
             $this->responseManager,
-            $config
+            $this->config
         );
     }
 
@@ -116,7 +113,7 @@ class MessageHandler
         return $this->processSingleMessage($data, $sessionId, $context, $response, $protocolVersion);
     }
 
-    public function handleInitialize(array $params, mixed $id, ?string $sessionId, $selectedVersion, Response $response): Response
+    public function handleInitialize(array $params, mixed $id, ?string $sessionId, string $selectedVersion, Response $response): Response
     {
         return $this->systemHandler->handleInitialize($params, $id, $sessionId, $selectedVersion, $response);
     }

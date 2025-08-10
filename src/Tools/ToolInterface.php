@@ -23,6 +23,11 @@ interface ToolInterface
     public function getInputSchema(): array;
 
     /**
+     * Get the tool's output schema (for MCP 2025-06-18+)
+     */
+    public function getOutputSchema(): array;
+
+    /**
      * Execute the tool with given parameters and context
      */
     public function execute(array $parameters, array $context = []): array;

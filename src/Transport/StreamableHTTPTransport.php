@@ -58,7 +58,6 @@ class StreamableHTTPTransport implements TransportInterface
             ->withHeader('Cache-Control', 'no-cache')
             ->withHeader('Connection', 'keep-alive')
             ->withHeader('X-Accel-Buffering', 'no')
-            //->withHeader('MCP-Protocol-Version', $protocolVersion)
             ->withHeader('Access-Control-Allow-Origin', '*')
             ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version')
             ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -116,6 +115,7 @@ class StreamableHTTPTransport implements TransportInterface
 
             sleep($pollInterval);
         }
+        $this->logger->debug('connection ended, but they always do');
     }
 
     private function sendKeepalive(StreamInterface $body): void

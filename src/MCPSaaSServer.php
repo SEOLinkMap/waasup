@@ -48,7 +48,7 @@ class MCPSaaSServer
         $this->logger = $logger ?? new NullLogger();
 
         $this->versionNegotiator = new VersionNegotiator($this->config);
-        $this->messageHandler = new MessageHandler($this->toolRegistry, $this->promptRegistry, $this->resourceRegistry, $this->storage, $this->config, $this->versionNegotiator);
+        $this->messageHandler = new MessageHandler($this->toolRegistry, $this->promptRegistry, $this->resourceRegistry, $this->storage, $this->config);
         $this->sseTransport = new SSETransport($this->storage, $this->config);
         $this->streamableTransport = new StreamableHTTPTransport($this->storage, $this->config, $this->logger);
     }
@@ -263,7 +263,6 @@ class MCPSaaSServer
         }
 
         foreach ($request->getHeaders() as $name => $values) {
-
             $lowerName = strtolower($name);
 
             if ($lowerName === 'mcp-session-id') {
@@ -288,7 +287,6 @@ class MCPSaaSServer
         $pathSegments = explode('/', trim($path, '/'));
 
         foreach ($pathSegments as $index => $segment) {
-
             // Look for protocolVersion_sessionId pattern
             if (preg_match('/^[a-zA-Z0-9.-]+_[a-zA-Z0-9]+$/', $segment)) {
                 return $segment;
@@ -314,41 +312,11 @@ class MCPSaaSServer
         $port = $uri->getPort();
 
         $baseUrl = $scheme . '://' . $host;
-        if ($port && (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443))) {
+        if (is_numeric($port) && $scheme === 'https' && $port !== 443) {
             $baseUrl .= ':' . $port;
         }
 
         return $baseUrl;
-    }
-
-    /**
-     * Extract protocol version from initialize message (POST requests only)
-     */
-    private function extractProtocolFromInitialize(Request $request, ?array $parsedData = null): ?string
-    {
-        if ($request->getMethod() !== 'POST') {
-            return null;
-        }
-
-        $data = $parsedData;
-
-        // Only read body if we don't have pre-parsed data
-        if ($data === null) {
-            $body = (string) $request->getBody();
-            if (!empty($body)) {
-                $data = json_decode($body, true);
-                // Rewind the stream for future reads
-                if ($request->getBody()->isSeekable()) {
-                    $request->getBody()->rewind();
-                }
-            }
-        }
-
-        if ($data && isset($data['method']) && $data['method'] === 'initialize' && isset($data['params']['protocolVersion'])) {
-            return $data['params']['protocolVersion'];
-        }
-
-        return null;
     }
 
     /**

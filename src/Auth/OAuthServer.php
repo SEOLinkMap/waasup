@@ -80,7 +80,7 @@ class OAuthServer
 
         // RFC 8707 Resource Indicators validation for MCP 2025-06-18
         // Get the configured base URL (same as what resource server uses)
-        $expectedBaseUrl = $this->config['base_url'];
+        $expectedBaseUrl = $this->getBaseUrl($request);
 
         // Ensure resource URL matches the expected base URL
         if (!empty($resource) && !str_starts_with($resource, $expectedBaseUrl)) {

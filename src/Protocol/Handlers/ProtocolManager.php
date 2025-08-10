@@ -3,12 +3,10 @@
 namespace Seolinkmap\Waasup\Protocol\Handlers;
 
 use Seolinkmap\Waasup\Exception\ProtocolException;
-use Seolinkmap\Waasup\Protocol\VersionNegotiator;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 
 class ProtocolManager
 {
-    private VersionNegotiator $versionNegotiator;
     private StorageInterface $storage;
     private array $config;
 
@@ -74,11 +72,9 @@ class ProtocolManager
     ];
 
     public function __construct(
-        VersionNegotiator $versionNegotiator,
         StorageInterface $storage,
         array $config = []
     ) {
-        $this->versionNegotiator = $versionNegotiator;
         $this->storage = $storage;
         $this->config = $config;
     }

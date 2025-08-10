@@ -103,7 +103,7 @@ class WellKnownProvider
     private function extractResourceIdentifier(Request $request): string
     {
         $uri = $request->getUri();
-        $scheme = $uri->getScheme() ?: 'https';
+        $scheme = 'https';
         $host = $uri->getHost();
         $port = $uri->getPort();
         $path = $uri->getPath();
@@ -111,7 +111,7 @@ class WellKnownProvider
 
         // Build base URL
         $baseUrl = $scheme . '://' . $host;
-        if ($port && (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443))) {
+        if (is_numeric($port) && $scheme === 'https' && $port !== 443) {
             $baseUrl .= ':' . $port;
         }
 
@@ -135,20 +135,6 @@ class WellKnownProvider
         }
 
         return $baseUrl;
-    }
-
-    /**
-     * Get MCP base URL for resource operations (tenant-specific)
-     */
-    private function getMCPBaseUrl(Request $request): string
-    {
-        if (!empty($this->config['base_url'])) {
-            return $this->config['base_url'];
-        }
-
-        $uri = $request->getUri();
-        return 'https://' . $uri->getHost() .
-               ($uri->getPort() ? ':' . $uri->getPort() : '');
     }
 
     /**

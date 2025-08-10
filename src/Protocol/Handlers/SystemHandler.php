@@ -21,7 +21,7 @@ class SystemHandler
         $this->config = $config;
     }
 
-    public function handleInitialize(array $params, mixed $id, ?string $sessionId, $selectedVersion, Response $response): Response
+    public function handleInitialize(array $params, mixed $id, ?string $sessionId, string $selectedVersion, Response $response): Response
     {
         if (!isset($params['protocolVersion']) || empty($params['protocolVersion'])) {
             throw new ProtocolException('Invalid params: protocolVersion required', -32602);

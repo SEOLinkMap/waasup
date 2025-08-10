@@ -238,7 +238,7 @@ class AuthMiddleware
 
         // Build base host URL
         $hostUrl = $scheme . '://' . $host;
-        if ($port && (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443))) {
+        if ($port && $scheme === 'https' && $port !== 443) {
             $hostUrl .= ':' . $port;
         }
 
@@ -270,7 +270,7 @@ class AuthMiddleware
 
         // Build base host URL
         $hostUrl = $scheme . '://' . $host;
-        if ($port && (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443))) {
+        if ($port && $scheme === 'https' && $port !== 443) {
             $hostUrl .= ':' . $port;
         }
 
@@ -289,7 +289,7 @@ class AuthMiddleware
         return $hostUrl . '/.well-known/oauth-authorization-server';
     }
 
-    private function detectProtocolVersion(Request $request): ?string
+    private function detectProtocolVersion(Request $request): string
     {
         // Check MCP-Protocol-Version header first
         $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');

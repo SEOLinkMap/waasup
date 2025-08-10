@@ -12,17 +12,20 @@ abstract class AbstractTool implements ToolInterface
     protected string $name;
     protected string $description;
     protected array $inputSchema;
+    protected array $outputSchema;
     protected array $annotations;
 
     public function __construct(
         string $name,
         string $description,
         array $inputSchema = [],
-        array $annotations = []
+        array $annotations = [],
+        array $outputSchema = []
     ) {
         $this->name = $name;
         $this->description = $description;
         $this->inputSchema = $inputSchema;
+        $this->outputSchema = $outputSchema;
         $this->annotations = array_replace_recursive($this->getDefaultAnnotations(), $annotations);
     }
 
@@ -43,6 +46,11 @@ abstract class AbstractTool implements ToolInterface
             'properties' => $this->inputSchema['properties'] ?? [],
             'required' => $this->inputSchema['required'] ?? []
         ];
+    }
+
+    public function getOutputSchema(): array
+    {
+        return $this->outputSchema;
     }
 
     public function getAnnotations(): array

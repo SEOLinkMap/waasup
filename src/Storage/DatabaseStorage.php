@@ -63,7 +63,7 @@ class DatabaseStorage implements StorageInterface
      */
     public function __construct(\PDO $pdo, array $config = [], ?LoggerInterface $logger = null)
     {
-        $this->logger = $logger ?? $config['logger'] ?? new NullLogger();
+        $this->logger = $logger ?? new NullLogger();
         $this->pdo = $pdo;
         $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
         $this->tablePrefix = $this->config['database']['table_prefix'];
@@ -567,6 +567,10 @@ class DatabaseStorage implements StorageInterface
             $result = $stmt->execute($params);
             return $result;
         } catch (\Exception $e) {
+            $this->logger->error('Failed to store access token', [
+                'client_id' => $tokenData['client_id'],
+                'error' => $e->getMessage()
+            ]);
             return false;
         }
     }

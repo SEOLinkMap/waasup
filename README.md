@@ -99,7 +99,10 @@ composer require slim/slim slim/psr7
 
 1. Import the database schema:
 ```bash
-mysql -u your_user -p your_database < vendor/seolinkmap/waasup/examples/database/database-schema.sql
+1. Open `examples/database/database-schema.sql`
+2. Use either MySQL section OR PostgreSQL section (not both)
+3. Customize table names/prefixes as needed
+4. Create only the tables you need (if using your own table mapping)
 ```
 
 2. Create your first agency:
