@@ -5,15 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-## [1.0.0] - 2025-06-17
+## [2.0.0] - 2025-08-09
 ### Added
-- Initial release
-- OAuth 2.1 authentication
-- Server-Sent Events transport
-- Database and memory storage backends
-- Slim Framework integration
+- **Configuration Restructure**: Breaking changes to configuration structure for improved organization and granular control
+- **Database Schema Extensions**: New tables and fields for enhanced functionality
+- **Custom Mapping Support**: Table and field mapping for seamless integration with existing user/OAuth/SaaS systems
+
+### Changed
+- **Codebase Optimization**: Reduced file sizes and improved structure for MCP compatibility
+- **Enhanced MCP Integration**: Improved code documentation and structure for better LLM context understanding
+
+
 
 ## [1.1.0] - 2025-07-23
 ### Added
@@ -49,3 +51,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Header Validation**: Proper MCP-Protocol-Version header handling for 2025-06-18 compliance
 - **Memory Management**: Improved session cleanup and memory usage in long-running connections
 - **Content Processing**: Enhanced content validation and processing for mixed media types
+
+
+
+## [1.0.0] - 2025-06-17
+### Added
+- Initial release
+- OAuth 2.1 authentication
+- Server-Sent Events transport
+- Database and memory storage backends
+- Slim Framework integration
+
+
+
+## [Unreleased]
