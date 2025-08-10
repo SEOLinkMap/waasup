@@ -531,7 +531,7 @@ class OAuthServerTest extends TestCase
 
         $tokenResponse = $this->oauthServer->token($tokenRequest, $this->createResponse());
 
-        $this->assertEquals(400, $tokenResponse->getStatusCode());
+        $this->assertEquals(401, $tokenResponse->getStatusCode());
         $errorData = json_decode((string) $tokenResponse->getBody(), true);
         $this->assertEquals('invalid_client', $errorData['error']);
 

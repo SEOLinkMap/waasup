@@ -35,9 +35,7 @@ class MCPSaaSServerTest extends TestCase
                     'version' => '1.0.0-test'
                 ],
                 'supported_versions' => ['2025-03-26', '2024-11-05'],
-                'sse' => [
-                    'test_mode' => true
-                ]
+                'test_mode' => true
             ],
             $this->logger
         );
@@ -714,9 +712,7 @@ class MCPSaaSServerTest extends TestCase
             $promptRegistry,
             $resourceRegistry,
             [
-            'sse' => [
-                'test_mode' => true
-            ]
+            'test_mode' => true
             ],
             $this->logger
         );

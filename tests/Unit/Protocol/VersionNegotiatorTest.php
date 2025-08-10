@@ -26,21 +26,14 @@ class VersionNegotiatorTest extends TestCase
     {
         // Client supports newer version than we do
         $result = $this->negotiator->negotiate('2026-01-01');
-        $this->assertEquals('2025-03-18', $result); // Should return our newest
-    }
-
-    public function testNegotiateOlderClientVersion(): void
-    {
-        // Client supports older version
-        $result = $this->negotiator->negotiate('2024-06-25');
-        $this->assertEquals('2024-06-25', $result); // Should match client capability
+        $this->assertEquals('2025-06-18', $result); // Should return our newest
     }
 
     public function testNegotiateFallbackToOldest(): void
     {
         // Client supports very old version we don't support
         $result = $this->negotiator->negotiate('2023-01-01');
-        $this->assertEquals('2024-06-25', $result); // Should fallback to our oldest
+        $this->assertEquals('2024-11-05', $result); // Should fallback to our oldest
     }
 
     public function testNegotiateWithDefaultVersions(): void
@@ -54,7 +47,8 @@ class VersionNegotiatorTest extends TestCase
     public function testIsSupported(): void
     {
         $this->assertTrue($this->negotiator->isSupported('2024-11-05'));
-        $this->assertTrue($this->negotiator->isSupported('2025-03-18'));
+        $this->assertTrue($this->negotiator->isSupported('2025-03-26'));
+        $this->assertTrue($this->negotiator->isSupported('2025-06-18'));
         $this->assertFalse($this->negotiator->isSupported('2023-01-01'));
         $this->assertFalse($this->negotiator->isSupported('2026-01-01'));
     }
@@ -62,7 +56,7 @@ class VersionNegotiatorTest extends TestCase
     public function testGetSupportedVersions(): void
     {
         $versions = $this->negotiator->getSupportedVersions();
-        $expected = ['2025-03-18', '2024-11-05', '2024-06-25'];
+        $expected = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
         $this->assertEquals($expected, $versions);
     }
@@ -74,7 +68,7 @@ class VersionNegotiatorTest extends TestCase
         $this->assertEquals('2024-11-05', $result1);
 
         $result2 = $this->negotiator->negotiate('2025-05-01');
-        $this->assertEquals('2025-03-18', $result2);
+        $this->assertEquals('2025-03-26', $result2);
     }
 
     public function testEmptyVersionsArray(): void

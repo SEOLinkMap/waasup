@@ -664,7 +664,7 @@ class OAuthSecurityTest extends TestCase
 
         $response = $this->oauthServer->authorize($request, $this->createResponse());
 
-        $this->assertEquals(400, $response->getStatusCode());
+        $this->assertEquals(401, $response->getStatusCode());
         $errorData = json_decode((string) $response->getBody(), true);
         $this->assertEquals('unauthorized_client', $errorData['error']);
     }

@@ -23,6 +23,10 @@ class SystemHandler
 
     public function handleInitialize(array $params, mixed $id, ?string $sessionId, $selectedVersion, Response $response): Response
     {
+        if (!isset($params['protocolVersion']) || empty($params['protocolVersion'])) {
+            throw new ProtocolException('Invalid params: protocolVersion required', -32602);
+        }
+
         if ($sessionId) {
             $this->protocolManager->storeSessionVersion($sessionId, $selectedVersion);
         }

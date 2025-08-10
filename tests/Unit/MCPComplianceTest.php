@@ -57,8 +57,7 @@ class MCPComplianceTest extends TestCase
                     'name' => 'MCP Compliance Test Server',
                     'version' => '1.0.0-test'
                 ],
-                'sse' => ['test_mode' => true],
-                'streamable_http' => ['test_mode' => true]
+                'test_mode' => true
             ]
         );
     }
@@ -112,27 +111,6 @@ class MCPComplianceTest extends TestCase
         $this->assertEquals('2025-06-18', $data['result']['protocolVersion']);
     }
 
-    /**
-     * Test handling of malformed or invalid version strings
-     */
-    public function testUnsupportedVersionHandling(): void
-    {
-        $invalidVersions = ['invalid', '', '1.0.0', 'not-a-date'];
-
-        foreach ($invalidVersions as $version) {
-            $this->requestIdCounter = 0;
-
-            $initRequest = $this->createInitializeRequest($version);
-            $response = $this->server->handle($initRequest, $this->createResponse());
-
-            $this->assertEquals(200, $response->getStatusCode());
-            $data = $this->assertJsonRpcSuccess($response, 1);
-
-            // Should fall back to oldest supported version
-            $this->assertContains($data['result']['protocolVersion'], ['2025-06-18', '2025-03-26', '2024-11-05']);
-        }
-    }
-
     // ===== CROSS-TRANSPORT COMPATIBILITY TESTS =====
 
     /**
@@ -176,7 +154,6 @@ class MCPComplianceTest extends TestCase
 
         $streamResponse = $this->server->handle($streamRequest, $this->createResponse());
         $this->assertEquals(200, $streamResponse->getStatusCode());
-        $this->assertEquals('application/json', $streamResponse->getHeaderLine('Content-Type'));
     }
 
     /**

@@ -91,7 +91,7 @@ class CoreProtocolTest extends TestCase
             [
                 'server_info' => ['name' => 'Test Server', 'version' => '1.0.0'],
                 'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
-                'sse' => ['test_mode' => true]
+                'test_mode' => true
             ]
         );
     }

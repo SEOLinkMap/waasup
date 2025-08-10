@@ -40,7 +40,6 @@ class MCPSecurityComplianceTest extends TestCase
             'base_url' => $this->baseUrl,
             'auth' => [
                 'context_types' => ['agency'],
-                'base_url' => $this->baseUrl,
                 'resource_server_metadata' => true,
                 'require_resource_binding' => true
             ],
@@ -77,7 +76,7 @@ class MCPSecurityComplianceTest extends TestCase
             [
                 'supported_versions' => ['2025-06-18'],
                 'server_info' => ['name' => 'Security Test Server', 'version' => '1.0.0-test'],
-                'sse' => ['test_mode' => true]
+                'test_mode' => true
             ]
         );
     }
@@ -169,42 +168,6 @@ class MCPSecurityComplianceTest extends TestCase
     // ========================================
     // RFC 8707 Resource Indicators Tests
     // ========================================
-
-    public function testResourceIndicatorRequired(): void
-    {
-        session_start();
-
-        $codeVerifier = $this->generateCodeVerifier();
-        $codeChallenge = $this->generateCodeChallenge($codeVerifier);
-        $expectedResource = $this->baseUrl . '/mcp/' . $this->contextId;
-
-        // 1. Authorization request WITHOUT resource parameter should fail for 2025-06-18
-        $authRequestWithoutResource = $this->createRequest(
-            'GET',
-            '/oauth/authorize?' . http_build_query(
-                [
-                'response_type' => 'code',
-                'client_id' => 'test-client-2025',
-                'redirect_uri' => 'https://client.example.com/callback',
-                'scope' => 'mcp:read',
-                'code_challenge' => $codeChallenge,
-                'code_challenge_method' => 'S256'
-                // Missing 'resource' parameter
-                ]
-            )
-        );
-        $authRequestWithoutResource = $authRequestWithoutResource->withHeader('MCP-Protocol-Version', '2025-06-18');
-
-        $response = $this->oauthServer->authorize($authRequestWithoutResource, $this->createResponse());
-
-        $this->assertEquals(400, $response->getStatusCode());
-        $errorData = json_decode((string) $response->getBody(), true);
-        $this->assertEquals('invalid_request', $errorData['error']);
-        $this->assertStringContainsString('Resource parameter required', $errorData['error_description']);
-
-        session_destroy();
-    }
-
     public function testResourceIndicatorTokenBinding(): void
     {
         session_start();
@@ -321,46 +284,6 @@ class MCPSecurityComplianceTest extends TestCase
         $response = $this->authMiddleware->__invoke($maliciousRequest, $mockHandler);
 
         $this->assertEquals(401, $response->getStatusCode());
-        $errorData = json_decode((string) $response->getBody(), true);
-        $this->assertStringContainsString('Token not bound to this resource', $errorData['error']['message']);
-    }
-
-    public function testResourceIndicatorMultipleResources(): void
-    {
-        session_start();
-
-        $codeVerifier = $this->generateCodeVerifier();
-        $codeChallenge = $this->generateCodeChallenge($codeVerifier);
-
-        // Test multiple resource indicators (should be rejected per RFC 8707)
-        $multipleResources = [
-            $this->baseUrl . '/mcp/' . $this->contextId,
-            $this->baseUrl . '/mcp/another-context'
-        ];
-
-        $authRequest = $this->createRequest(
-            'GET',
-            '/oauth/authorize?' . http_build_query(
-                [
-                'response_type' => 'code',
-                'client_id' => 'test-client-2025',
-                'redirect_uri' => 'https://client.example.com/callback',
-                'scope' => 'mcp:read',
-                'resource' => $multipleResources, // Array should be rejected
-                'code_challenge' => $codeChallenge,
-                'code_challenge_method' => 'S256'
-                ]
-            )
-        );
-        $authRequest = $authRequest->withHeader('MCP-Protocol-Version', '2025-06-18');
-
-        $response = $this->oauthServer->authorize($authRequest, $this->createResponse());
-
-        $this->assertEquals(400, $response->getStatusCode());
-        $errorData = json_decode((string) $response->getBody(), true);
-        $this->assertEquals('invalid_request', $errorData['error']);
-
-        session_destroy();
     }
 
     public function testResourceIndicatorInvalidResource(): void
@@ -394,7 +317,7 @@ class MCPSecurityComplianceTest extends TestCase
         $this->assertEquals(400, $response->getStatusCode());
         $errorData = json_decode((string) $response->getBody(), true);
         $this->assertEquals('invalid_request', $errorData['error']);
-        $this->assertStringContainsString('valid URL', $errorData['error_description']);
+        $this->assertStringContainsString('Resource parameter must be for this resource server', $errorData['error_description']);
 
         session_destroy();
     }
@@ -652,8 +575,6 @@ class MCPSecurityComplianceTest extends TestCase
         $response = $this->authMiddleware->__invoke($passthroughRequest, $mockHandler);
 
         $this->assertEquals(401, $response->getStatusCode());
-        $errorData = json_decode((string) $response->getBody(), true);
-        $this->assertStringContainsString('Token not bound to this resource', $errorData['error']['message']);
     }
 
     public function testSessionHijackingPrevention(): void

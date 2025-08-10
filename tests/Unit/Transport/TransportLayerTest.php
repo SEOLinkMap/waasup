@@ -46,8 +46,7 @@ class TransportLayerTest extends TestCase
                     'name' => 'Transport Test Server',
                     'version' => '1.0.0-test'
                 ],
-                'sse' => ['test_mode' => true],
-                'streamable_http' => ['test_mode' => true]
+                'test_mode' => true
             ]
         );
     }

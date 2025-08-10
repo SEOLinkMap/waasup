@@ -41,7 +41,7 @@ class StreamableHTTPTransport implements TransportInterface
             session_write_close();
         }
 
-        $isTestMode = $this->config['test_mode'] ?? false;
+        $isTestMode = $this->config['test_mode'];
 
         if (!$isTestMode && function_exists('exec') && function_exists('getmypid')) {
             // Make the streamed and sustained connection gentler on the server resources.
