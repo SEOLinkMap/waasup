@@ -5,7 +5,6 @@
 [![PSR-15](https://img.shields.io/badge/PSR-15-orange.svg)](https://www.php-fig.org/psr/psr-15/)
 [![PSR-7](https://img.shields.io/badge/PSR-7-orange.svg)](https://www.php-fig.org/psr/psr-7/)
 [![Composer](https://img.shields.io/badge/composer-ready-brightgreen.svg)](https://packagist.org)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#)
 
 **WaaSuP** (Website as a Server using PHP) - A production-ready, SaaS-oriented Model Context Protocol (MCP) server implementation for PHP. Built with enterprise-grade features including OAuth 2.1 authentication, real-time Server-Sent Events (SSE), and comprehensive tool management.
 
