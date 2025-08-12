@@ -130,11 +130,11 @@ CREATE TABLE `mcp_roots_responses` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `mcp_elicitation_responses` (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    session_id VARCHAR(255) NOT NULL,
-    request_id VARCHAR(255) NOT NULL,
-    response_data JSON NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `session_id` VARCHAR(255) NOT NULL,
+    `request_id` VARCHAR(255) NOT NULL,
+    `response_data` JSON NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_session_elicitation (session_id, request_id),
     INDEX idx_created_at (created_at)
 );
@@ -211,7 +211,7 @@ CREATE TRIGGER update_agencies_updated_at
 CREATE TABLE mcp_users (
     id SERIAL PRIMARY KEY,
     uuid VARCHAR(36) NOT NULL UNIQUE,
-    agency_id INTEGER NOT NULL REFERENCES mcp_agencies(id) ON DELETE CASCADE,
+    agency_id INTEGER NOT NULL,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL,
     password VARCHAR(255) NOT NULL,
@@ -257,11 +257,13 @@ CREATE TABLE mcp_oauth_tokens (
     scope VARCHAR(500) DEFAULT NULL,
     expires_at TIMESTAMP NOT NULL,
     revoked BOOLEAN NOT NULL DEFAULT FALSE,
-    agency_id INTEGER NOT NULL REFERENCES mcp_agencies(id) ON DELETE CASCADE,
-    user_id INTEGER DEFAULT NULL REFERENCES mcp_users(id) ON DELETE SET NULL,
+    agency_id INTEGER NOT NULL,
+    user_id INTEGER DEFAULT NULL,
+    resource VARCHAR(500) DEFAULT NULL,
+    aud TEXT DEFAULT NULL,
     code_challenge VARCHAR(255) DEFAULT NULL,
     code_challenge_method VARCHAR(10) DEFAULT NULL,
-    client_id VARCHAR(255) DEFAULT NULL REFERENCES mcp_oauth_clients(client_id) ON DELETE SET NULL,
+    client_id VARCHAR(255) DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -269,6 +271,40 @@ CREATE INDEX idx_tokens_expires_revoked ON mcp_oauth_tokens (expires_at, revoked
 CREATE INDEX idx_tokens_agency_id ON mcp_oauth_tokens (agency_id);
 CREATE INDEX idx_tokens_refresh_token ON mcp_oauth_tokens (refresh_token);
 CREATE INDEX idx_tokens_client_id ON mcp_oauth_tokens (client_id);
+
+CREATE TABLE mcp_sampling_responses (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(255) NOT NULL,
+    request_id VARCHAR(255) NOT NULL,
+    response_data TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_sampling_session_request ON mcp_sampling_responses (session_id, request_id);
+CREATE INDEX idx_sampling_created_at ON mcp_sampling_responses (created_at);
+
+CREATE TABLE mcp_roots_responses (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(255) NOT NULL,
+    request_id VARCHAR(255) NOT NULL,
+    response_data TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_roots_session_request ON mcp_roots_responses (session_id, request_id);
+CREATE INDEX idx_roots_created_at ON mcp_roots_responses (created_at);
+
+CREATE TABLE mcp_elicitation_responses (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(255) NOT NULL,
+    request_id VARCHAR(255) NOT NULL,
+    response_data JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_elicitation_session_request ON mcp_elicitation_responses (session_id, request_id);
+CREATE INDEX idx_elicitation_created_at ON mcp_elicitation_responses (created_at);
+
 
 -- Sample data for PostgreSQL
 INSERT INTO mcp_agencies (uuid, name, active) VALUES
@@ -299,15 +335,6 @@ POSTGRESQL SETUP:
 3. Update your .env: DB_CONNECTION=pgsql
 
 The DatabaseStorage class automatically detects the database type and adapts accordingly.
-
-Key improvements in this schema:
-- Added missing indexes for social login IDs (google_id, linkedin_id, github_id)
-- Added proper foreign key constraints for all relationships
-- Fixed PostgreSQL boolean handling (TRUE/FALSE instead of 1/0)
-- Removed backticks from PostgreSQL version
-- Added index on refresh_token for performance
-- Added sample user data for testing
-- Consistent timestamp handling between databases
 
 Test credentials:
 - Token: test-token-12345
