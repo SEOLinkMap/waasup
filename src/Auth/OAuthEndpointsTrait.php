@@ -369,6 +369,7 @@ trait OAuthEndpointsTrait
             'client_id' => $clientId,
             'client_name' => $data['client_name'],
             'grant_types' => $data['grant_types'] ?? ['authorization_code', 'refresh_token'],
+            'token_endpoint_auth_method' => 'none',
             'response_types' => $data['response_types'] ?? ['code']
         ];
 
