@@ -352,7 +352,7 @@ trait OAuthEndpointsTrait
         }
 
         $clientId = bin2hex(random_bytes(16));
-        $clientSecret = null;
+        $clientSecret = bin2hex(random_bytes(32));
 
         $this->storage->storeOAuthClient(
             [
@@ -368,8 +368,9 @@ trait OAuthEndpointsTrait
         $responseData = [
             'client_id' => $clientId,
             'client_name' => $data['client_name'],
+            'client_secret' => $clientSecret,
             'grant_types' => $data['grant_types'] ?? ['authorization_code', 'refresh_token'],
-            'token_endpoint_auth_method' => 'none',
+            'token_endpoint_auth_method' => 'client_secret_post',
             'response_types' => $data['response_types'] ?? ['code']
         ];
 
