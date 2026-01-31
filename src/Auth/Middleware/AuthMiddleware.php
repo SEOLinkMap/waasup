@@ -174,14 +174,16 @@ class AuthMiddleware
             throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
         }
 
-            if (!empty($tokenData['aud'])) {
-        if (!is_array($tokenData['aud'])) {
+                if (!empty($tokenData['aud'])) {
+        $audiences = is_string($tokenData['aud']) ? json_decode($tokenData['aud'], true) : $tokenData['aud'];
+        
+        if (!is_array($audiences)) {
             throw new AuthenticationException('Token audience must be an array');
         }
         
         $validAudience = false;
-        foreach ($tokenData['aud'] as $audience) {
-            if (str_starts_with($expectedResource, $audience)) {
+        foreach ($audiences as $audience) {
+            if (str_starts_with($expectedResource, rtrim($audience, '/'))) {
                 $validAudience = true;
                 break;
             }
