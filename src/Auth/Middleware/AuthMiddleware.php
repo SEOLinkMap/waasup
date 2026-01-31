@@ -183,7 +183,7 @@ class AuthMiddleware
         
         $validAudience = false;
         foreach ($audiences as $audience) {
-            if (str_starts_with($expectedResource, rtrim($audience, '/'))) {
+            if (str_starts_with($expectedResource, $audience)) {
                 $validAudience = true;
                 break;
             }
