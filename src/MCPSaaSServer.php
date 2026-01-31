@@ -599,7 +599,7 @@ class MCPSaaSServer
             'auth' => [
                 'context_types' => ['agency', 'user'],
                 'validate_scope' => true,
-                'required_scopes' => ['mcp:read'],
+                'required_scopes' => ['mcp:read mcp:write'],
                 'authless' => false,
                 'authless_context_id' => 'public',
                 'authless_context_data' => [
@@ -620,6 +620,8 @@ class MCPSaaSServer
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',
                         'token' => '/oauth/token',
+                        'verify' => '/oauth/verify',
+                        'consent' => '/oauth/consent',
                         'register' => '/oauth/register',
                         'revoke' => '/oauth/revoke'
                     ],

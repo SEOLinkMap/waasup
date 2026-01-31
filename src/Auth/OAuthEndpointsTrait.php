@@ -20,7 +20,7 @@ trait OAuthEndpointsTrait
 
         $clientId = $params['client_id'] ?? null;
         $redirectUri = $params['redirect_uri'] ?? null;
-        $scope = $params['scope'] ?? 'mcp:read';
+        $scope = $params['scope'] ?? 'mcp:read mcp:write';
         $state = $params['state'] ?? null;
         $responseType = $params['response_type'] ?? null;
         $codeChallenge = $params['code_challenge'] ?? null;

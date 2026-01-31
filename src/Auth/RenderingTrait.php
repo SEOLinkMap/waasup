@@ -14,9 +14,13 @@ trait RenderingTrait
         $clientName = $_SESSION['oauth_request']['client_name'] ?? 'Unknown Application';
         $error = $data['error'] ?? '';
 
+        $baseUrl = rtrim($this->config['oauth']['base_url'] ?? '', '/');
+        $verifyPath = $this->config['oauth']['auth_server']['endpoints']['verify'];
+        $verifyEndpoint = $baseUrl . $verifyPath;
+
         $socialButtons = '';
         if ($this->googleProvider || $this->linkedinProvider || $this->githubProvider) {
-            $socialButtons = '<form method="POST" action="/oauth/verify">';
+            $socialButtons = '<form method="POST" action="' . $verifyEndpoint . '">';
 
             if ($this->googleProvider) {
                 $socialButtons .= '<button type="submit" name="provider" value="google" class="btn social google">Continue with Google</button>';
@@ -61,7 +65,7 @@ trait RenderingTrait
 
         {$socialButtons}
 
-        <form method='POST' action='/oauth/verify'>
+        <form method='POST' action='{$verifyEndpoint}'>
             <div class='form-group'>
                 <label>Email</label>
                 <input type='email' name='email' required>
@@ -95,6 +99,10 @@ trait RenderingTrait
         $userEmail = $oauthUser['email'];
         $scope = $oauthRequest['scope'];
         $error = $data['error'] ?? '';
+
+        $baseUrl = rtrim($this->config['oauth']['base_url'] ?? '', '/');
+        $consentPath = $this->config['oauth']['auth_server']['endpoints']['consent'];
+        $consentEndpoint = $baseUrl . $consentPath;
 
         // Show resource information for 2025-06-18
         $resourceInfo = '';
@@ -133,7 +141,7 @@ trait RenderingTrait
             </ul>
             {$resourceInfo}
         </div>
-        <form method='POST' action='/oauth/consent'>
+        <form method='POST' action='{$consentEndpoint}'>
             <button type='submit' name='action' value='allow' class='btn allow'>Allow</button>
             <button type='submit' name='action' value='deny' class='btn deny'>Deny</button>
         </form>

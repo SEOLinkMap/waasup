@@ -174,9 +174,24 @@ class AuthMiddleware
             throw new AuthenticationException('Token not bound to this resource (RFC 8707 violation)');
         }
 
-        if (!empty($tokenData['aud']) && (!is_array($tokenData['aud']) || !in_array($expectedResource, $tokenData['aud']))) {
+            if (!empty($tokenData['aud'])) {
+        if (!is_array($tokenData['aud'])) {
+            throw new AuthenticationException('Token audience must be an array');
+        }
+        
+        $validAudience = false;
+        foreach ($tokenData['aud'] as $audience) {
+            if (str_starts_with($expectedResource, $audience)) {
+                $validAudience = true;
+                break;
+            }
+        }
+        
+        if (!$validAudience) {
             throw new AuthenticationException('Token audience validation failed');
         }
+    }
+
 
         if (isset($tokenData['scope']) && !$this->validateTokenScope($tokenData['scope'])) {
             throw new AuthenticationException('Token scope invalid for this resource server');
