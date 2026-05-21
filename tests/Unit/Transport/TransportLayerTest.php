@@ -237,7 +237,7 @@ class TransportLayerTest extends TestCase
         );
 
         $postResponse = $this->server->handle($postRequest, $this->createResponse());
-        $this->assertEquals(202, $postResponse->getStatusCode());
+        $this->assertEquals(200, $postResponse->getStatusCode());
 
         // Test GET to same endpoint for streaming
         $getRequest = $this->createRequest(
@@ -363,7 +363,7 @@ class TransportLayerTest extends TestCase
         $followupRequest = $followupRequest->withAttribute('mcp_context', $this->createTestContext());
 
         $followupResponse = $this->server->handle($followupRequest, $this->createResponse());
-        $this->assertEquals(202, $followupResponse->getStatusCode());
+        $this->assertEquals(200, $followupResponse->getStatusCode());
     }
 
     /**
@@ -436,7 +436,7 @@ class TransportLayerTest extends TestCase
         $requestWithHeader = $requestWithHeader->withAttribute('mcp_context', $context);
 
         $response = $this->server->handle($requestWithHeader, $this->createResponse());
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     /**

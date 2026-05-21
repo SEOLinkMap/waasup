@@ -51,7 +51,7 @@ class MessageHandler
         // Initialize delegated handlers
         $this->protocolManager = new ProtocolManager($storage, $config);
         $this->contentProcessor = new ContentProcessor($this->protocolManager);
-        $this->responseManager = new ResponseManager($storage);
+        $this->responseManager = new ResponseManager($storage, $this->protocolManager);
 
         $this->toolsHandler = new ToolsHandler(
             $this->toolRegistry,
@@ -206,41 +206,47 @@ class MessageHandler
 
         $batchResponses = [];
         $hasNotifications = false;
+        $body = $response->getBody();
+        $consumed = 0;
 
-        foreach ($batchData as $index => $requestData) {
+        foreach ($batchData as $requestData) {
             if (!is_array($requestData)) {
                 throw new ProtocolException('Invalid Request: batch item must be object', -32600);
             }
 
+            $hasId = array_key_exists('id', $requestData);
+            $isNotification = !$hasId || $requestData['id'] === null;
+
             try {
-                $singleResponse = $this->processSingleMessage($requestData, $sessionId, $context, $response, $protocolVersion);
+                $this->processSingleMessage($requestData, $sessionId, $context, $response, $protocolVersion);
 
-                $hasId = array_key_exists('id', $requestData);
-                $isNotification = !$hasId || $requestData['id'] === null;
-
-                if (!$isNotification) {
-                    $responseBody = $singleResponse->getBody()->getContents();
-                    $responseData = json_decode($responseBody, true);
-
-                    if ($responseData && (isset($responseData['result']) || isset($responseData['error']))) {
-                        $batchResponses[] = $responseData;
-                    }
-                } else {
+                if ($isNotification) {
                     $hasNotifications = true;
+                    continue;
+                }
+
+                // Batching is only negotiated for Streamable HTTP versions, where each
+                // request response is written inline. Read just the slice this item added.
+                $written = (string) $body;
+                $responseData = json_decode(substr($written, $consumed), true);
+                $consumed = strlen($written);
+
+                if (is_array($responseData) && (isset($responseData['result']) || isset($responseData['error']))) {
+                    $batchResponses[] = $responseData;
                 }
             } catch (ProtocolException $e) {
                 $batchResponses[] = [
                     'jsonrpc' => '2.0',
                     'error' => [
-                        'code' => '',
-                        'message' => ''
+                        'code' => $e->getCode(),
+                        'message' => $e->getMessage()
                     ],
                     'id' => $requestData['id'] ?? null
                 ];
             }
         }
 
-        // All notifications = 202 with no body
+        // A batch consisting solely of notifications is acknowledged with 202 and no body.
         if (empty($batchResponses) && $hasNotifications) {
             return $response
                 ->withHeader('Content-Type', 'application/json')
@@ -248,7 +254,18 @@ class MessageHandler
                 ->withStatus(202);
         }
 
-        $response->getBody()->write(json_encode($batchResponses));
+        // Replace the inline per-item output with the aggregated array. PSR-7 streams
+        // expose no truncate, so a shorter payload is padded with trailing whitespace,
+        // which is insignificant following a JSON value.
+        $encoded = json_encode($batchResponses);
+        $payload = $encoded === false ? '[]' : $encoded;
+        $written = strlen((string) $body);
+        if (strlen($payload) < $written) {
+            $payload .= str_repeat(' ', $written - strlen($payload));
+        }
+        $body->rewind();
+        $body->write($payload);
+
         return $response
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Access-Control-Allow-Origin', '*')

@@ -116,6 +116,20 @@ class ProtocolManager
     }
 
     /**
+     * Determine whether a JSON-RPC request response is returned directly on the
+     * originating POST.
+     *
+     * The Streamable HTTP transport (introduced in 2025-03-26) requires the
+     * response to a request to be delivered inline on the POST. The earlier
+     * HTTP+SSE transport (2024-11-05) acknowledges the POST and delivers the
+     * response over the separately established GET stream.
+     */
+    public function usesDirectResponse(string $protocolVersion): bool
+    {
+        return strcmp($protocolVersion, '2025-03-26') >= 0;
+    }
+
+    /**
      * Get protocol version from session data (authoritative source)
      */
     public function getSessionVersion(?string $sessionId): string

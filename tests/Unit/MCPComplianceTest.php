@@ -299,7 +299,7 @@ class MCPComplianceTest extends TestCase
             ->withAttribute('mcp_context', $this->createTestContext(['protocol_version' => '2025-06-18']));
 
         $responseWithHeader = $this->server->handle($requestWithHeader, $this->createResponse());
-        $this->assertEquals(202, $responseWithHeader->getStatusCode());
+        $this->assertEquals(200, $responseWithHeader->getStatusCode());
     }
 
     // ===== HELPER METHODS =====

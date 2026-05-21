@@ -8,10 +8,12 @@ use Seolinkmap\Waasup\Storage\StorageInterface;
 class ResponseManager
 {
     private StorageInterface $storage;
+    private ProtocolManager $protocolManager;
 
-    public function __construct(StorageInterface $storage)
+    public function __construct(StorageInterface $storage, ProtocolManager $protocolManager)
     {
         $this->storage = $storage;
+        $this->protocolManager = $protocolManager;
     }
 
 
@@ -23,13 +25,7 @@ class ResponseManager
             'id' => $id
         ];
 
-        $storeResult = $this->storage->storeMessage($sessionId, $responseData);
-
-        $response->getBody()->write('{"status": "queued"}');
-        return $response
-            ->withHeader('Content-Type', 'application/json')
-            ->withHeader('Access-Control-Allow-Origin', '*')
-            ->withStatus(202);
+        return $this->emit($sessionId, $responseData, $response);
     }
 
     public function storeErrorResponse(
@@ -48,9 +44,32 @@ class ResponseManager
             'id' => $id
         ];
 
+        return $this->emit($sessionId, $responseData, $response);
+    }
+
+    /**
+     * Deliver a JSON-RPC response using the transport for the session's protocol version.
+     *
+     * Streamable HTTP (2025-03-26+) returns the response inline on the POST with a
+     * 200 status. HTTP+SSE (2024-11-05) queues the response for the GET stream and
+     * acknowledges the POST with a 202.
+     */
+    private function emit(string $sessionId, array $responseData, Response $response): Response
+    {
+        if ($this->protocolManager->usesDirectResponse($this->protocolManager->getSessionVersion($sessionId))) {
+            $encoded = json_encode($responseData);
+            $response->getBody()->write($encoded === false ? '{}' : $encoded);
+
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withHeader('Access-Control-Allow-Origin', '*')
+                ->withStatus(200);
+        }
+
         $this->storage->storeMessage($sessionId, $responseData);
 
         $response->getBody()->write('{"status": "queued"}');
+
         return $response
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Access-Control-Allow-Origin', '*')

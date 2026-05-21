@@ -263,7 +263,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testElicitationNotSupportedInOlderVersions(): void
@@ -290,7 +290,7 @@ class ProtocolFeaturesTest extends TestCase
         );
 
         // Should return 202 but with error queued
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testElicitationUserResponse(): void
@@ -319,7 +319,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testElicitationUserCancel(): void
@@ -345,7 +345,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testElicitationJsonSchemaValidation(): void
@@ -386,7 +386,7 @@ class ProtocolFeaturesTest extends TestCase
                 $this->createResponse()
             );
 
-            $this->assertEquals(202, $response->getStatusCode());
+            $this->assertEquals(200, $response->getStatusCode());
         }
     }
 
@@ -466,7 +466,7 @@ class ProtocolFeaturesTest extends TestCase
         );
 
         // Protocol allows this but clients should implement their own validation
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testElicitationMultiTurnInteraction(): void
@@ -498,7 +498,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response1->getStatusCode());
+        $this->assertEquals(200, $response1->getStatusCode());
 
         // Second elicitation request (multi-turn)
         $secondElicitation = [
@@ -523,7 +523,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response2->getStatusCode());
+        $this->assertEquals(200, $response2->getStatusCode());
     }
 
     // ===================
@@ -549,21 +549,17 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
 
         // Check that tools with output schemas are properly listed
-        $messages = $this->storage->getMessages($sessionId);
+        $responseData = json_decode((string) $response->getBody(), true);
+        $result = $responseData['result'] ?? [];
 
-        if (!empty($messages)) {
-            $lastMessage = end($messages);
-            $result = $lastMessage['data']['result'] ?? [];
-
-            if (isset($result['tools'])) {
-                foreach ($result['tools'] as $tool) {
-                    if ($tool['name'] === 'structured_output_tool') {
-                        $this->assertArrayHasKey('outputSchema', $tool);
-                        $this->assertArrayHasKey('properties', $tool['outputSchema']);
-                    }
+        if (isset($result['tools'])) {
+            foreach ($result['tools'] as $tool) {
+                if ($tool['name'] === 'structured_output_tool') {
+                    $this->assertArrayHasKey('outputSchema', $tool);
+                    $this->assertArrayHasKey('properties', $tool['outputSchema']);
                 }
             }
         }
@@ -595,7 +591,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testToolOutputStructuredContent(): void
@@ -624,14 +620,13 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
 
-        // Verify structured content is present in the queued message
-        $messages = $this->storage->getMessages($sessionId);
+        // Verify structured content is present in the inline response
+        $responseData = json_decode((string) $response->getBody(), true);
+        $result = $responseData['result'] ?? [];
 
-        if (!empty($messages)) {
-            $lastMessage = end($messages);
-            $result = $lastMessage['data']['result'] ?? [];
+        if (!empty($result)) {
             $this->assertArrayHasKey('structuredContent', $result);
         }
     }
@@ -662,7 +657,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testToolOutputSchemaMimeTypeClarity(): void
@@ -692,7 +687,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     // ===================
@@ -725,14 +720,13 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
 
         // Verify resource links are present
-        $messages = $this->storage->getMessages($sessionId);
+        $responseData = json_decode((string) $response->getBody(), true);
+        $result = $responseData['result'] ?? [];
 
-        if (!empty($messages)) {
-            $lastMessage = end($messages);
-            $result = $lastMessage['data']['result'] ?? [];
+        if (!empty($result)) {
             $this->assertArrayHasKey('resourceLinks', $result);
             $this->assertIsArray($result['resourceLinks']);
         }
@@ -764,7 +758,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testResourceLinkVsInlineContent(): void
@@ -794,7 +788,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     // ===================
@@ -821,7 +815,7 @@ class ProtocolFeaturesTest extends TestCase
                 $this->createResponse()
             );
 
-            $this->assertEquals(202, $response->getStatusCode());
+            $this->assertEquals(200, $response->getStatusCode());
         }
     }
 
@@ -845,7 +839,7 @@ class ProtocolFeaturesTest extends TestCase
                 $this->createResponse()
             );
 
-            $this->assertEquals(202, $response->getStatusCode());
+            $this->assertEquals(200, $response->getStatusCode());
         }
     }
 
@@ -869,7 +863,7 @@ class ProtocolFeaturesTest extends TestCase
                 $this->createResponse()
             );
 
-            $this->assertEquals(202, $response->getStatusCode());
+            $this->assertEquals(200, $response->getStatusCode());
         }
     }
 
@@ -899,7 +893,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testToolAnnotationFrontendAdaptation(): void
@@ -922,7 +916,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testToolAnnotationsNotAvailableInOldVersions(): void
@@ -995,7 +989,7 @@ class ProtocolFeaturesTest extends TestCase
                 $this->createResponse()
             );
 
-            $this->assertEquals(202, $response->getStatusCode());
+            $this->assertEquals(200, $response->getStatusCode());
         }
     }
 
@@ -1022,7 +1016,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testMultimodalContentIntegration(): void
@@ -1051,7 +1045,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testContentTypeValidation(): void
@@ -1083,7 +1077,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testAudioNotSupportedInOldVersions(): void
@@ -1245,7 +1239,7 @@ class ProtocolFeaturesTest extends TestCase
                 $this->createResponse()
             );
 
-            $this->assertEquals(202, $response->getStatusCode());
+            $this->assertEquals(200, $response->getStatusCode());
         }
     }
 
@@ -1309,7 +1303,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testMetaFieldUsageSpecification(): void
@@ -1342,7 +1336,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     public function testMetaFieldProperUsage(): void
@@ -1375,7 +1369,7 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        $this->assertEquals(202, $response->getStatusCode());
+        $this->assertEquals(200, $response->getStatusCode());
     }
 
     // ===================
@@ -1403,6 +1397,9 @@ class ProtocolFeaturesTest extends TestCase
             $sessionId = $this->initializeSession($version);
             $context = $this->createTestContext(['protocol_version' => $version]);
 
+            // Streamable HTTP (2025-03-26+) answers inline with 200; HTTP+SSE queues with 202.
+            $expectedStatus = strcmp($version, '2025-03-26') >= 0 ? 200 : 202;
+
             // Test supported features
             foreach ($tests['supported'] as $method) {
                 $message = [
@@ -1420,7 +1417,7 @@ class ProtocolFeaturesTest extends TestCase
                 );
 
                 $this->assertEquals(
-                    202,
+                    $expectedStatus,
                     $response->getStatusCode(),
                     "Method {$method} should be supported in version {$version}"
                 );
@@ -1442,11 +1439,11 @@ class ProtocolFeaturesTest extends TestCase
                     $this->createResponse()
                 );
 
-                // Unsupported methods should still return 202 but with error queued
+                // Unsupported methods return an error using the version's transport.
                 $this->assertEquals(
-                    202,
+                    $expectedStatus,
                     $response->getStatusCode(),
-                    "Method {$method} should return 202 (queued error) in version {$version}"
+                    "Method {$method} should return a {$expectedStatus} error in version {$version}"
                 );
             }
         }
