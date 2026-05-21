@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-05-20
+### Fixed
+- **Streamable HTTP response compliance**: Responses to JSON-RPC requests are now returned inline on the originating POST with HTTP 200 for protocol versions 2025-03-26 and 2025-06-18, as required by the Streamable HTTP transport. Previously every request response was acknowledged with HTTP 202 and delivered over the GET stream, which is only correct for the HTTP+SSE transport (2024-11-05). The 2024-11-05 behavior is unchanged.
+- **Batch request aggregation**: Batched requests (2025-03-26) now return the array of JSON-RPC responses inline. The previous implementation read each item's output after the stream pointer and returned an empty array. Errors raised while processing a batch item now carry the originating JSON-RPC error code and message instead of empty values.
+
+### Changed
+- **Internal**: `Protocol\Handlers\ResponseManager::__construct()` now requires a `Protocol\Handlers\ProtocolManager` argument so responses are emitted according to the negotiated protocol version's transport.
+
 ## [2.0.0] - 2025-08-09
 ### Added
 - **Configuration Restructure**: Breaking changes to configuration structure for improved organization and granular control

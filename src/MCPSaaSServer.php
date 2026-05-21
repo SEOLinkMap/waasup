@@ -594,7 +594,7 @@ class MCPSaaSServer
             'test_mode' => false,           // set to true in tests
             'server_info' => [
                 'name' => 'WaaSuP MCP SaaS Server',
-                'version' => '2.0.0'
+                'version' => '2.0.1'
             ],
             'auth' => [
                 'context_types' => ['agency', 'user'],
