@@ -210,6 +210,53 @@ CREATE TABLE `mcp_elicitation_responses` (
 );
 ```
 
+## Field Semantics
+
+Behaviours the library depends on that the column definitions do not convey.
+
+### `oauth_tokens` holds two kinds of row
+
+The table stores both access tokens and authorization codes, told apart by `token_type`:
+
+| `token_type` | Row represents | Notes |
+|---|---|---|
+| `Bearer` | An access token | Only rows with this value validate as bearer tokens |
+| `authorization_code` | An authorization code mid-flow | `access_token` holds the code; `code_challenge` and `code_challenge_method` hold its PKCE binding |
+
+An authorization code is single use. Redeeming one sets `revoked = 1`; the update tests
+`revoked = 0` in its `WHERE` clause and a second redemption is refused.
+
+### Agency scoping is a security boundary
+
+`validateToken()` matches `agency_id` (or `user_id`, depending on the context type)
+against the context in the request URL. `agency_id` must be populated on every token row
+and must reference the agency whose `uuid` appears in the MCP endpoint path.
+
+### JSON-encoded columns
+
+These columns hold JSON documents written and read by the library. Use a `JSON` column
+where your database supports one, otherwise `TEXT`:
+
+- `sessions.session_data` — negotiated protocol version, client capabilities, resource
+  subscriptions, log level, pending server-to-client requests, recently seen request ids
+  and the last SSE event id delivered to the session
+- `messages.message_data` — one queued JSON-RPC message
+- `messages.context_data` — the context the message was created under
+- `oauth_tokens.aud` — the audience array for RFC 8707 resource binding
+- `sampling_responses.response_data`, `roots_responses.response_data`,
+  `elicitation_responses.response_data` — a client's answer to a server request
+
+### Expiry and cleanup
+
+Messages are **not** deleted on delivery. They are retained for replay to a client
+reconnecting with `Last-Event-ID`. `cleanup()` removes messages older than
+`database.message_lifetime` (3600 seconds by default) and sessions past `expires_at`. It
+runs on roughly one percent of session writes; index `sessions.expires_at` and
+`messages.created_at`.
+
+The `messages.id` column is the SSE event id and must be monotonically increasing. The
+provided schema uses an auto-increment primary key.
+
 ## Summary
 
 - **Default approach**: Use `table_prefix` with standard table names (recommended)

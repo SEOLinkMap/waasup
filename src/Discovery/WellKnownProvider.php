@@ -27,6 +27,37 @@ class WellKnownProvider
      */
     public function authorizationServer(Request $request, Response $response): Response
     {
+        $response->getBody()->write(json_encode($this->buildAuthServerMetadata($request)));
+        return $response->withHeader('Content-Type', 'application/json');
+    }
+
+    /**
+     * OpenID Connect Discovery 1.0 endpoint
+     * Route: /.well-known/openid-configuration
+     *
+     * Serves the same OAuth 2.1 authorization server metadata, for clients that probe
+     * this location. This server issues no ID tokens and is not an OpenID Provider.
+     *
+     * @param Request $request
+     * @param Response $response
+     * @return Response JSON metadata with authorization/token/registration endpoints
+     */
+    public function openidConfiguration(Request $request, Response $response): Response
+    {
+        $discovery = $this->buildAuthServerMetadata($request);
+        $discovery['subject_types_supported'] = ['public'];
+
+        $response->getBody()->write(json_encode($discovery));
+        return $response->withHeader('Content-Type', 'application/json');
+    }
+
+    /**
+     * Build the authorization server metadata document
+     *
+     * @return array metadata keyed as RFC 8414 defines
+     */
+    private function buildAuthServerMetadata(Request $request): array
+    {
         $oauthBaseUrl = $this->getOAuthBaseUrl($request);
         $protocolVersion = $request->getHeaderLine('MCP-Protocol-Version') ?: $this->detectProtocolFromPath($request);
 
@@ -45,21 +76,17 @@ class WellKnownProvider
 
         $discovery['revocation_endpoint'] = $oauthBaseUrl . $this->config['oauth']['auth_server']['endpoints']['revoke'];
 
-        if ($protocolVersion === '2025-06-18') {
+        if (strcmp($protocolVersion, '2025-06-18') >= 0) {
             $discovery['resource_indicators_supported'] = true;
             $discovery['token_binding_methods_supported'] = ['resource_indicator'];
             $discovery['require_resource_parameter'] = true;
             $discovery['pkce_methods_supported'] = ['S256'];
-            $discovery['token_endpoint_auth_methods_supported'] = ['client_secret_post', 'private_key_jwt', 'none'];
         }
 
-        if (in_array($protocolVersion, ['2024-11-05', '2025-03-26', '2025-06-18'])) {
-            $discovery['pkce_required'] = true;
-            $discovery['authorization_response_iss_parameter_supported'] = true;
-        }
+        $discovery['pkce_required'] = true;
+        $discovery['authorization_response_iss_parameter_supported'] = true;
 
-        $response->getBody()->write(json_encode($discovery));
-        return $response->withHeader('Content-Type', 'application/json');
+        return $discovery;
     }
 
     /**
@@ -82,13 +109,13 @@ class WellKnownProvider
             'scopes_supported' => $this->config['scopes_supported']
         ];
 
-        if ($protocolVersion === '2025-06-18') {
+        if (strcmp($protocolVersion, '2025-06-18') >= 0) {
             $discovery['resource_server'] = true;
             $discovery['resource_indicators_supported'] = true;
             $discovery['token_binding_supported'] = true;
             $discovery['audience_validation_required'] = true;
             $discovery['resource_indicator_endpoint'] = $this->getOAuthBaseUrl($request) . $this->config['oauth']['resource_server']['endpoints']['resource'];
-            $discovery['token_endpoint_auth_methods_supported'] = ['client_secret_post', 'private_key_jwt'];
+            $discovery['token_endpoint_auth_methods_supported'] = ['client_secret_post', 'none'];
             $discovery['token_binding_methods_supported'] = ['resource_indicator'];
             $discovery['content_types_supported'] = ['application/json', 'text/event-stream'];
             $discovery['streamable_http_supported'] = true;
@@ -97,6 +124,12 @@ class WellKnownProvider
                 'progress_notifications', 'tool_annotations', 'audio_content',
                 'completions', 'elicitation', 'structured_outputs', 'resource_links'
             ];
+
+            if (strcmp($protocolVersion, '2025-11-25') >= 0) {
+                $discovery['mcp_features_supported'][] = 'icons';
+                $discovery['mcp_features_supported'][] = 'elicitation_url';
+                $discovery['mcp_features_supported'][] = 'sampling_tools';
+            }
         } elseif ($protocolVersion === '2025-03-26') {
             $discovery['streamable_http_supported'] = true;
             $discovery['json_rpc_batching_supported'] = true;
@@ -128,27 +161,23 @@ class WellKnownProvider
         $path = $uri->getPath();
         $query = $uri->getQuery();
 
-        // Build base URL
         $baseUrl = $scheme . '://' . $host;
         if (is_numeric($port) && $scheme === 'https' && $port !== 443) {
             $baseUrl .= ':' . $port;
         }
 
-        // Remove the well-known path component to get the original resource identifier
-        // Example: /.well-known/oauth-protected-resource/some/path -> /some/path
         $wellKnownPattern = '/^\/\.well-known\/oauth-protected-resource(\/.*)?$/';
         if (preg_match($wellKnownPattern, $path, $matches)) {
             $resourcePath = $matches[1] ?? '';
-            // If there's a path after the well-known part, that's the resource path
+
             if (!empty($resourcePath)) {
                 $baseUrl .= $resourcePath;
             }
         } else {
-            // If the pattern doesn't match, include the full path (fallback)
+
             $baseUrl .= $path;
         }
 
-        // Add query string if present
         if (!empty($query)) {
             $baseUrl .= '?' . $query;
         }
@@ -174,7 +203,9 @@ class WellKnownProvider
     {
         $path = $request->getUri()->getPath();
 
-        if (strpos($path, '2025-06-18') !== false) {
+        if (strpos($path, '2025-11-25') !== false) {
+            return '2025-11-25';
+        } elseif (strpos($path, '2025-06-18') !== false) {
             return '2025-06-18';
         } elseif (strpos($path, '2025-03-26') !== false) {
             return '2025-03-26';
@@ -187,17 +218,15 @@ class WellKnownProvider
      * The oauth typically has any "path" in the baseURL and the endpoints are typically /authorize.
      * The "weird" config below works when baseURL is empty and the system sniffs the domain root.
      *
-     * You are best off not touching this, or including your oauth "path" in the baseURL before defining each endpoint.
-     *
      * @return array{base_url: null, oauth: array, scopes_supported: string[]}
      */
     private function getDefaultConfig(): array
     {
         return [
-            'base_url' => null, // MCP baseURL
+            'base_url' => null,
             'scopes_supported' => ['mcp:read', 'mcp:write'],
             'oauth' => [
-                'base_url' => '', // OAuth baseURL
+                'base_url' => '',
                 'auth_server' => [
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',

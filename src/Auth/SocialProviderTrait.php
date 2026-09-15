@@ -29,8 +29,9 @@ trait SocialProviderTrait
 
         $params = $request->getQueryParams();
         $code = $params['code'] ?? null;
+        $state = $params['state'] ?? null;
 
-        if (!$code) {
+        if (!$code || !$this->validateState($state)) {
             return $this->renderOAuthVerification(['error' => 'Google authentication failed']);
         }
 
@@ -166,7 +167,10 @@ trait SocialProviderTrait
             return $this->renderOAuthVerification(['error' => 'Google authentication not configured']);
         }
 
-        $authUrl = $this->googleProvider->getAuthUrl();
+        $state = bin2hex(random_bytes(16));
+        $_SESSION['oauth_state'] = $state;
+
+        $authUrl = $this->googleProvider->getAuthUrl($state);
         return $this->responseFactory->createResponse(302)
             ->withHeader('Location', $authUrl);
     }

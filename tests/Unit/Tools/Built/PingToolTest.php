@@ -72,7 +72,6 @@ class PingToolTest extends TestCase
     {
         $result = $this->tool->execute([]);
 
-        // Verify timestamp is in ISO 8601 format
         $timestamp = $result['timestamp'];
         $parsed = \DateTime::createFromFormat(\DateTime::ISO8601, $timestamp);
         $this->assertInstanceOf(\DateTime::class, $parsed);

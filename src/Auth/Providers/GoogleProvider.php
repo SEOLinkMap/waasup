@@ -17,7 +17,7 @@ class GoogleProvider
         $this->redirectUri = $redirectUri;
     }
 
-    public function getAuthUrl(string $state = null): string
+    public function getAuthUrl(?string $state = null): string
     {
         $params = [
             'client_id' => $this->clientId,
@@ -55,7 +55,7 @@ class GoogleProvider
         ];
     }
 
-    public function redirectResponse(Response $response, string $state = null): Response
+    public function redirectResponse(Response $response, ?string $state = null): Response
     {
         return $response->withHeader('Location', $this->getAuthUrl($state))->withStatus(302);
     }

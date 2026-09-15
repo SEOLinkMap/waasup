@@ -8,12 +8,6 @@ use Seolinkmap\Waasup\Tests\TestCase;
 
 /**
  * OAuth 2.1 Security Compliance Tests
- *
- * These tests focus on security requirements mandated by OAuth 2.1:
- * - State parameter validation (CSRF protection)
- * - Redirect URI strict matching
- * - Authorization code replay prevention
- * - Token security measures
  */
 class OAuthSecurityTest extends TestCase
 {
@@ -42,7 +36,7 @@ class OAuthSecurityTest extends TestCase
 
     private function setupTestData(): void
     {
-        // Add test client with strict redirect URIs
+
         $this->storage->addOAuthClient(
             'test-client-id',
             [
@@ -59,7 +53,6 @@ class OAuthSecurityTest extends TestCase
             ]
         );
 
-        // Add test user and agency
         $this->storage->addUser(
             1,
             [
@@ -94,7 +87,6 @@ class OAuthSecurityTest extends TestCase
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
-        // 1. Start authorization with state parameter
         $authRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -113,7 +105,6 @@ class OAuthSecurityTest extends TestCase
         $authResponse = $this->oauthServer->authorize($authRequest, $this->createResponse());
         $this->assertEquals(200, $authResponse->getStatusCode());
 
-        // 2. Complete authorization
         $_SESSION['oauth_user'] = [
             'user_id' => 1,
             'agency_id' => 1,
@@ -122,11 +113,10 @@ class OAuthSecurityTest extends TestCase
         ];
 
         $consentRequest = $this->createRequest('POST', '/oauth/consent')
-            ->withParsedBody(['action' => 'allow']);
+            ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']);
 
         $consentResponse = $this->oauthServer->consent($consentRequest, $this->createResponse());
 
-        // 3. Verify state parameter is returned in callback
         $this->assertEquals(302, $consentResponse->getStatusCode());
         $location = $consentResponse->getHeaderLine('Location');
 
@@ -147,7 +137,6 @@ class OAuthSecurityTest extends TestCase
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
-        // 1. Authorization request with custom state
         $authRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -165,7 +154,6 @@ class OAuthSecurityTest extends TestCase
 
         $this->oauthServer->authorize($authRequest, $this->createResponse());
 
-        // 2. Simulate different session/browser attack by modifying session
         $_SESSION['oauth_user'] = [
             'user_id' => 1,
             'agency_id' => 1,
@@ -173,12 +161,11 @@ class OAuthSecurityTest extends TestCase
             'email' => 'test@example.com'
         ];
 
-        // Verify state is preserved in OAuth request session
         $this->assertEquals($originalState, $_SESSION['oauth_request']['state']);
 
         $consentResponse = $this->oauthServer->consent(
             $this->createRequest('POST', '/oauth/consent')
-                ->withParsedBody(['action' => 'allow']),
+                ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']),
             $this->createResponse()
         );
 
@@ -201,14 +188,13 @@ class OAuthSecurityTest extends TestCase
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
-        // 1. Test with exact registered URI - should succeed
         $validAuthRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
                 [
                 'response_type' => 'code',
                 'client_id' => 'test-client-id',
-                'redirect_uri' => 'https://client.example.com/callback', // Exact match
+                'redirect_uri' => 'https://client.example.com/callback',
                 'scope' => 'mcp:read',
                 'state' => $state,
                 'code_challenge' => $codeChallenge,
@@ -223,14 +209,13 @@ class OAuthSecurityTest extends TestCase
         session_destroy();
         session_start();
 
-        // 2. Test with similar but different URI - should fail
         $invalidAuthRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
                 [
                 'response_type' => 'code',
                 'client_id' => 'test-client-id',
-                'redirect_uri' => 'https://client.example.com/callback/evil', // Different path
+                'redirect_uri' => 'https://client.example.com/callback/evil',
                 'scope' => 'mcp:read',
                 'state' => $state,
                 'code_challenge' => $codeChallenge,
@@ -255,14 +240,13 @@ class OAuthSecurityTest extends TestCase
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
-        // Attempt subdomain attack
         $maliciousRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
                 [
                 'response_type' => 'code',
                 'client_id' => 'test-client-id',
-                'redirect_uri' => 'https://evil.client.example.com/callback', // Subdomain attack
+                'redirect_uri' => 'https://evil.client.example.com/callback',
                 'scope' => 'mcp:read',
                 'state' => $state,
                 'code_challenge' => $codeChallenge,
@@ -284,14 +268,13 @@ class OAuthSecurityTest extends TestCase
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
-        // Attempt parameter injection attack
         $maliciousRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
                 [
                 'response_type' => 'code',
                 'client_id' => 'test-client-id',
-                'redirect_uri' => 'https://client.example.com/callback?evil=param', // Parameter injection
+                'redirect_uri' => 'https://client.example.com/callback?evil=param',
                 'scope' => 'mcp:read',
                 'state' => $state,
                 'code_challenge' => $codeChallenge,
@@ -313,14 +296,13 @@ class OAuthSecurityTest extends TestCase
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
-        // Attempt fragment injection attack
         $maliciousRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
                 [
                 'response_type' => 'code',
                 'client_id' => 'test-client-id',
-                'redirect_uri' => 'https://client.example.com/callback#evil', // Fragment injection
+                'redirect_uri' => 'https://client.example.com/callback#evil',
                 'scope' => 'mcp:read',
                 'state' => $state,
                 'code_challenge' => $codeChallenge,
@@ -347,7 +329,6 @@ class OAuthSecurityTest extends TestCase
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
         $state = bin2hex(random_bytes(16));
 
-        // 1. Complete authorization flow to get auth code
         $authRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -374,7 +355,7 @@ class OAuthSecurityTest extends TestCase
 
         $consentResponse = $this->oauthServer->consent(
             $this->createRequest('POST', '/oauth/consent')
-                ->withParsedBody(['action' => 'allow']),
+                ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']),
             $this->createResponse()
         );
 
@@ -382,7 +363,6 @@ class OAuthSecurityTest extends TestCase
         parse_str(parse_url($location, PHP_URL_QUERY), $params);
         $authCode = $params['code'];
 
-        // 2. First token exchange - should succeed
         $firstTokenRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
@@ -400,12 +380,11 @@ class OAuthSecurityTest extends TestCase
         $firstTokenData = json_decode((string) $firstTokenResponse->getBody(), true);
         $this->assertArrayHasKey('access_token', $firstTokenData);
 
-        // 3. Replay same authorization code - should fail
         $replayTokenRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
                 'grant_type' => 'authorization_code',
-                'code' => $authCode, // Same code
+                'code' => $authCode,
                 'client_id' => 'test-client-id',
                 'redirect_uri' => 'https://client.example.com/callback',
                 'code_verifier' => $codeVerifier
@@ -423,14 +402,14 @@ class OAuthSecurityTest extends TestCase
 
     public function testAuthorizationCodeExpiration(): void
     {
-        // Create expired authorization code directly in storage
+
         $expiredCode = 'expired-auth-code-123';
         $this->storage->storeAuthorizationCode(
             $expiredCode,
             [
             'client_id' => 'test-client-id',
             'scope' => 'mcp:read',
-            'expires_at' => time() - 300, // Expired 5 minutes ago
+            'expires_at' => time() - 300,
             'code_challenge' => null,
             'code_challenge_method' => null,
             'agency_id' => 1,
@@ -462,7 +441,6 @@ class OAuthSecurityTest extends TestCase
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
-        // 1. Get authorization code for one client
         $authRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -488,7 +466,7 @@ class OAuthSecurityTest extends TestCase
 
         $consentResponse = $this->oauthServer->consent(
             $this->createRequest('POST', '/oauth/consent')
-                ->withParsedBody(['action' => 'allow']),
+                ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']),
             $this->createResponse()
         );
 
@@ -496,13 +474,12 @@ class OAuthSecurityTest extends TestCase
         parse_str(parse_url($location, PHP_URL_QUERY), $params);
         $authCode = $params['code'];
 
-        // 2. Try to use code with different client
         $tokenRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
                 'grant_type' => 'authorization_code',
                 'code' => $authCode,
-                'client_id' => 'different-client-id', // Wrong client
+                'client_id' => 'different-client-id',
                 'redirect_uri' => 'https://client.example.com/callback',
                 'code_verifier' => $codeVerifier
                 ]
@@ -524,7 +501,6 @@ class OAuthSecurityTest extends TestCase
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
-        // 1. Get authorization code with one redirect URI
         $authRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -550,7 +526,7 @@ class OAuthSecurityTest extends TestCase
 
         $consentResponse = $this->oauthServer->consent(
             $this->createRequest('POST', '/oauth/consent')
-                ->withParsedBody(['action' => 'allow']),
+                ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']),
             $this->createResponse()
         );
 
@@ -558,14 +534,13 @@ class OAuthSecurityTest extends TestCase
         parse_str(parse_url($location, PHP_URL_QUERY), $params);
         $authCode = $params['code'];
 
-        // 2. Try to exchange with different redirect URI
         $tokenRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
                 'grant_type' => 'authorization_code',
                 'code' => $authCode,
                 'client_id' => 'test-client-id',
-                'redirect_uri' => 'https://app.client.com/oauth/callback', // Different URI
+                'redirect_uri' => 'https://app.client.com/oauth/callback',
                 'code_verifier' => $codeVerifier
                 ]
             );
@@ -581,7 +556,7 @@ class OAuthSecurityTest extends TestCase
 
     public function testMissingRequiredParameters(): void
     {
-        // Test missing response_type
+
         $missingResponseType = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -596,7 +571,6 @@ class OAuthSecurityTest extends TestCase
         $response1 = $this->oauthServer->authorize($missingResponseType, $this->createResponse());
         $this->assertEquals(400, $response1->getStatusCode());
 
-        // Test missing client_id
         $missingClientId = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -611,7 +585,6 @@ class OAuthSecurityTest extends TestCase
         $response2 = $this->oauthServer->authorize($missingClientId, $this->createResponse());
         $this->assertEquals(400, $response2->getStatusCode());
 
-        // Test missing redirect_uri
         $missingRedirectUri = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -633,7 +606,7 @@ class OAuthSecurityTest extends TestCase
             'GET',
             '/oauth/authorize?' . http_build_query(
                 [
-                'response_type' => 'token', // Implicit flow not supported
+                'response_type' => 'token',
                 'client_id' => 'test-client-id',
                 'redirect_uri' => 'https://client.example.com/callback',
                 'scope' => 'mcp:read'
@@ -674,7 +647,7 @@ class OAuthSecurityTest extends TestCase
      */
     public function testBearerTokenNotInQueryString(): void
     {
-        // Create a valid token first
+
         $this->storage->storeAccessToken(
             [
             'access_token' => 'test-bearer-token',
@@ -687,13 +660,11 @@ class OAuthSecurityTest extends TestCase
             ]
         );
 
-        // Attempt to use token in query string (should be rejected)
         $requestWithTokenInQuery = $this->createRequest(
             'GET',
             '/mcp/550e8400-e29b-41d4-a716-446655440000?access_token=test-bearer-token'
         );
 
-        // Test the auth middleware
         $authMiddleware = new \Seolinkmap\Waasup\Auth\Middleware\AuthMiddleware(
             $this->storage,
             $this->responseFactory,
@@ -708,7 +679,6 @@ class OAuthSecurityTest extends TestCase
             }
         };
 
-        // Use __invoke method
         $response = $authMiddleware($requestWithTokenInQuery, $mockHandler);
 
         $this->assertEquals(401, $response->getStatusCode());
@@ -724,12 +694,11 @@ class OAuthSecurityTest extends TestCase
     {
         $state = bin2hex(random_bytes(16));
 
-        // Attempt to use implicit grant flow (should be rejected)
         $implicitRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
                 [
-                'response_type' => 'token', // Implicit grant - forbidden in OAuth 2.1
+                'response_type' => 'token',
                 'client_id' => 'test-client-id',
                 'redirect_uri' => 'https://client.example.com/callback',
                 'scope' => 'mcp:read',

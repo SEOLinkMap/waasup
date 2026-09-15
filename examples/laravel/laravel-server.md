@@ -36,6 +36,7 @@ use Seolinkmap\Waasup\Content\AudioContentHandler;
  *
  * Routes (routes/web.php):
  * Route::get('/.well-known/oauth-authorization-server', [MCPController::class, 'authDiscovery']);
+ * Route::get('/.well-known/openid-configuration', [MCPController::class, 'openidDiscovery']);
  * Route::get('/.well-known/oauth-protected-resource', [MCPController::class, 'resourceDiscovery']);
  * Route::get('/oauth/authorize', [MCPController::class, 'oauthAuthorize']);
  * Route::post('/oauth/verify', [MCPController::class, 'oauthVerify']);
@@ -82,6 +83,14 @@ class MCPController extends Controller
     public function authDiscovery(Request $request): Response
     {
         return $this->mcpProvider->handleAuthDiscovery($request);
+    }
+
+    /**
+     * OpenID Connect Discovery 1.0
+     */
+    public function openidDiscovery(Request $request): Response
+    {
+        return $this->mcpProvider->handleOpenIdDiscovery($request);
     }
 
     /**
@@ -240,7 +249,7 @@ class MCPController extends Controller
                 'audio_content' => true,
                 'structured_outputs' => true
             ],
-            'supported_protocols' => ['2025-06-18', '2025-03-26', '2024-11-05']
+            'supported_protocols' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']
         ];
 
         return response()->json($health, $dbStatus === 'connected' ? 200 : 503);
@@ -278,7 +287,7 @@ class MCPController extends Controller
             ],
             'mcp' => [
                 'active_sessions' => $this->getActiveSessionCount(),
-                'protocol_versions' => ['2025-06-18', '2025-03-26', '2024-11-05']
+                'protocol_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']
             ],
             'timestamp' => now()->toISOString()
         ];
@@ -442,12 +451,18 @@ class MCPController extends Controller
             $readOnly = $params['read_only'] ?? true;
 
             if (empty($query)) {
-                return ['error' => 'Query parameter is required'];
+                return [
+                    'content' => [['type' => 'text', 'text' => 'Query parameter is required.']],
+                    'isError' => true
+                ];
             }
 
             // Security: Only allow SELECT queries if read_only is true
             if ($readOnly && !preg_match('/^\s*SELECT\s/i', trim($query))) {
-                return ['error' => 'Only SELECT queries allowed in read-only mode'];
+                return [
+                    'content' => [['type' => 'text', 'text' => 'Only SELECT queries are allowed in read-only mode.']],
+                    'isError' => true
+                ];
             }
 
             try {
@@ -461,8 +476,8 @@ class MCPController extends Controller
             } catch (\Exception $e) {
                 Log::error('Database query failed: ' . $e->getMessage());
                 return [
-                    'error' => 'Query execution failed',
-                    'message' => $e->getMessage()
+                    'content' => [['type' => 'text', 'text' => 'Query execution failed: ' . $e->getMessage()]],
+                    'isError' => true
                 ];
             }
         }, [
@@ -846,6 +861,7 @@ class MCPController extends Controller
  *
  * // OAuth discovery endpoints
  * Route::get('/.well-known/oauth-authorization-server', [MCPController::class, 'authDiscovery']);
+ * Route::get('/.well-known/openid-configuration', [MCPController::class, 'openidDiscovery']);
  * Route::get('/.well-known/oauth-protected-resource', [MCPController::class, 'resourceDiscovery']);
  *
  * // OAuth flow endpoints

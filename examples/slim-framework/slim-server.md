@@ -348,6 +348,11 @@ $app->get('/.well-known/oauth-authorization-server[/{path:.*}]', function (Reque
     return $discoveryProvider->authorizationServer($request, $response);
 });
 
+$app->get('/.well-known/openid-configuration[/{path:.*}]', function (Request $request, Response $response) {
+    $wellKnownProvider = new \Seolinkmap\Waasup\Discovery\WellKnownProvider();
+    return $wellKnownProvider->openidConfiguration($request, $response);
+});
+
 $app->get('/.well-known/oauth-protected-resource[/{path:.*}]', function (Request $request, Response $response) {
     $discoveryProvider = new \Seolinkmap\Waasup\Discovery\WellKnownProvider([
         'base_url' => 'https://yourdomain.com'

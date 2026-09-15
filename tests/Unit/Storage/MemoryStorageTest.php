@@ -39,16 +39,14 @@ class MemoryStorageTest extends TestCase
 
     public function testDeleteMessage(): void
     {
-        // Store a message
+
         $this->storage->storeMessage('session123', ['test' => 'data']);
         $messages = $this->storage->getMessages('session123');
         $messageId = $messages[0]['id'];
 
-        // Delete it
         $result = $this->storage->deleteMessage($messageId);
         $this->assertTrue($result);
 
-        // Verify it's gone
         $messagesAfter = $this->storage->getMessages('session123');
         $this->assertEmpty($messagesAfter);
     }
@@ -61,7 +59,7 @@ class MemoryStorageTest extends TestCase
 
     public function testValidateToken(): void
     {
-        // Add a valid token
+
         $tokenData = [
             'access_token' => 'valid-token',
             'scope' => 'mcp:read mcp:write',
@@ -77,7 +75,7 @@ class MemoryStorageTest extends TestCase
 
     public function testValidateExpiredToken(): void
     {
-        // Add an expired token
+
         $tokenData = [
             'access_token' => 'expired-token',
             'scope' => 'mcp:read',
@@ -93,7 +91,7 @@ class MemoryStorageTest extends TestCase
 
     public function testValidateRevokedToken(): void
     {
-        // Add a revoked token
+
         $tokenData = [
             'access_token' => 'revoked-token',
             'scope' => 'mcp:read',
@@ -164,7 +162,6 @@ class MemoryStorageTest extends TestCase
     {
         $sessionData = ['user_id' => 123];
 
-        // Store with very short TTL
         $this->storage->storeSession('session123', $sessionData, -1);
 
         $retrieved = $this->storage->getSession('session123');
@@ -181,27 +178,21 @@ class MemoryStorageTest extends TestCase
     {
         $now = time();
 
-        // Add some expired data
         $this->storage->storeMessage('session1', ['old' => 'message']);
         $this->storage->storeSession('session2', ['old' => 'session'], -1);
 
-        // Add some current data
         $this->storage->storeMessage('session3', ['new' => 'message']);
         $this->storage->storeSession('session4', ['new' => 'session'], 3600);
 
-        // Wait a moment to ensure timestamps differ
         sleep(1);
 
         $cleaned = $this->storage->cleanup();
 
-        // Should have cleaned at least the expired session
         $this->assertGreaterThan(0, $cleaned);
 
-        // Current data should still exist
         $this->assertNotEmpty($this->storage->getMessages('session3'));
         $this->assertNotNull($this->storage->getSession('session4'));
 
-        // Expired session should be gone
         $this->assertNull($this->storage->getSession('session2'));
     }
 
@@ -214,7 +205,6 @@ class MemoryStorageTest extends TestCase
         $messages = $this->storage->getMessages('session123');
         $this->assertCount(3, $messages);
 
-        // Messages should be in order
         $this->assertEquals(1, $messages[0]['data']['message']);
         $this->assertEquals(2, $messages[1]['data']['message']);
         $this->assertEquals(3, $messages[2]['data']['message']);
@@ -222,7 +212,7 @@ class MemoryStorageTest extends TestCase
 
     public function testHelperMethods(): void
     {
-        // Test the helper methods exist and work
+
         $tokenData = ['test' => 'token', 'expires_at' => time() + 3600, 'revoked' => false];
         $contextData = ['test' => 'context'];
 
@@ -238,12 +228,10 @@ class MemoryStorageTest extends TestCase
         $sessionData1 = ['user_id' => 123];
         $sessionData2 = ['user_id' => 456, 'updated' => true];
 
-        // Store initial session
         $this->storage->storeSession('session123', $sessionData1, 3600);
         $retrieved1 = $this->storage->getSession('session123');
         $this->assertEquals($sessionData1, $retrieved1);
 
-        // Update session
         $this->storage->storeSession('session123', $sessionData2, 3600);
         $retrieved2 = $this->storage->getSession('session123');
         $this->assertEquals($sessionData2, $retrieved2);
@@ -279,7 +267,7 @@ class MemoryStorageTest extends TestCase
 
     public function testDeleteMessageFromMultipleMessages(): void
     {
-        // Store multiple messages
+
         $this->storage->storeMessage('session123', ['message' => 1]);
         $this->storage->storeMessage('session123', ['message' => 2]);
         $this->storage->storeMessage('session123', ['message' => 3]);
@@ -287,15 +275,80 @@ class MemoryStorageTest extends TestCase
         $messages = $this->storage->getMessages('session123');
         $this->assertCount(3, $messages);
 
-        // Delete middle message
         $middleMessageId = $messages[1]['id'];
         $result = $this->storage->deleteMessage($middleMessageId);
         $this->assertTrue($result);
 
-        // Verify only 2 messages remain and array is re-indexed
         $remainingMessages = $this->storage->getMessages('session123');
         $this->assertCount(2, $remainingMessages);
         $this->assertEquals(1, $remainingMessages[0]['data']['message']);
         $this->assertEquals(3, $remainingMessages[1]['data']['message']);
+    }
+
+    public function testTouchAccessTokenExtendsExpiry(): void
+    {
+        $expiresAt = time() + 60;
+        $this->storage->addToken(
+            'sliding-token',
+            [
+                'access_token' => 'sliding-token',
+                'scope' => 'mcp:read',
+                'expires_at' => $expiresAt,
+                'revoked' => false,
+                'agency_id' => 1
+            ]
+        );
+
+        $newExpiry = $expiresAt + 3600;
+
+        $this->assertTrue($this->storage->touchAccessToken('sliding-token', $newExpiry));
+
+        $stored = $this->storage->validateToken('sliding-token');
+        $this->assertEquals($newExpiry, $stored['expires_at']);
+        $this->assertEquals('mcp:read', $stored['scope']);
+        $this->assertEquals(1, $stored['agency_id']);
+    }
+
+    public function testTouchAccessTokenRejectsUnknownToken(): void
+    {
+        $this->assertFalse($this->storage->touchAccessToken('no-such-token', time() + 3600));
+        $this->assertNull($this->storage->validateToken('no-such-token'));
+    }
+
+    public function testTouchAccessTokenRejectsRevokedToken(): void
+    {
+        $expiresAt = time() + 60;
+        $this->storage->addToken(
+            'revoked-token',
+            [
+                'access_token' => 'revoked-token',
+                'scope' => 'mcp:read',
+                'expires_at' => $expiresAt,
+                'revoked' => true,
+                'agency_id' => 1
+            ]
+        );
+
+        $this->assertFalse($this->storage->touchAccessToken('revoked-token', $expiresAt + 3600));
+    }
+
+    public function testStoreAccessTokenRecordsIssueTime(): void
+    {
+        $this->storage->storeAccessToken(
+            [
+                'access_token' => 'issued-token',
+                'refresh_token' => 'issued-refresh',
+                'client_id' => 'client',
+                'scope' => 'mcp:read',
+                'expires_at' => time() + 3600,
+                'agency_id' => 1,
+                'user_id' => 1
+            ]
+        );
+
+        $stored = $this->storage->validateToken('issued-token');
+
+        $this->assertEqualsWithDelta(time(), $stored['created_at'], 5);
+        $this->assertFalse($stored['revoked']);
     }
 }

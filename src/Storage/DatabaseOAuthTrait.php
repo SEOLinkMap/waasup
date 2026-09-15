@@ -6,13 +6,6 @@ trait DatabaseOAuthTrait
 {
     /**
  * Validate OAuth bearer token with agency-level security
- *
- * Required fields in oauth_tokens table:
- * - access_token (varchar): The token to validate
- * - expires_at (datetime): Token expiration time
- * - revoked (tinyint/boolean): Whether token is revoked
- * - token_type (varchar): Must be 'Bearer' for validation
- * - agency_id (int): Must match the context agency for security
  */
     public function validateToken(string $accessToken, array $context = []): ?array
     {
@@ -55,7 +48,6 @@ AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
             }
         }
 
-        // Convert aud field from JSON string back to array
         if (isset($normalizedResult['aud']) && $normalizedResult['aud'] !== null) {
             $decodedAud = json_decode($normalizedResult['aud'], true);
             if ($decodedAud !== null) {
@@ -68,9 +60,6 @@ AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
 
     /**
      * Get OAuth client by client ID
-     *
-     * Required fields in oauth_clients table:
-     * - client_id, client_secret, client_name, redirect_uris, grant_types, response_types, created_at
      */
     public function getOAuthClient(string $clientId): ?array
     {
@@ -125,7 +114,7 @@ AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
             ':code_challenge_method' => $data['code_challenge_method'],
             ':agency_id' => $data['agency_id'],
             ':user_id' => $data['user_id'],
-            ':resource' => $this->config['base_url'],
+            ':resource' => $data['resource'] ?? $this->config['base_url'],
             ':created_at' => $this->getCurrentTimestamp()
         ]);
     }
@@ -156,7 +145,6 @@ AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
             return null;
         }
 
-        // Map database field names back to logical field names
         $normalizedResult = [];
         foreach ($this->config['database']['field_mapping']['oauth_tokens'] as $logicalField => $dbField) {
             if (isset($result[$dbField])) {
@@ -169,12 +157,20 @@ AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
 
     /**
      * Revoke authorization code after use (one-time use)
+     *
+     * @return bool false when the code had already been revoked
      */
     public function revokeAuthorizationCode(string $code): bool
     {
-        $sql = "UPDATE `{$this->getTableName('oauth_tokens')}` SET `{$this->getField('oauth_tokens', 'revoked')}` = 1 WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :code";
+        $sql = "UPDATE `{$this->getTableName('oauth_tokens')}`
+                SET `{$this->getField('oauth_tokens', 'revoked')}` = 1
+                WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :code
+                AND `{$this->getField('oauth_tokens', 'token_type')}` = 'authorization_code'
+                AND `{$this->getField('oauth_tokens', 'revoked')}` = 0";
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([':code' => $code]);
+        $stmt->execute([':code' => $code]);
+
+        return $stmt->rowCount() > 0;
     }
 
     /**
@@ -188,7 +184,7 @@ AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
         VALUES (:client_id, :access_token, :refresh_token, 'Bearer', :scope,
                 :expires_at, :agency_id, :user_id, 0, :resource, :aud, :created_at)";
 
-        $baseUrl = $this->config['base_url'];
+        $baseUrl = $tokenData['resource'] ?? $this->config['base_url'];
         if ($baseUrl === null || $baseUrl === '') {
             $resourceValue = null;
             $audValue = null;
@@ -233,6 +229,33 @@ AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
     }
 
     /**
+     * Extend the expiry of a stored access token (sliding expiration)
+     */
+    public function touchAccessToken(string $accessToken, int $expiresAt): bool
+    {
+        $sql = "UPDATE `{$this->getTableName('oauth_tokens')}`
+                SET `{$this->getField('oauth_tokens', 'expires_at')}` = :expires_at
+                WHERE `{$this->getField('oauth_tokens', 'access_token')}` = :token
+                AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'
+                AND `{$this->getField('oauth_tokens', 'revoked')}` = 0";
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute(
+                [
+                    ':expires_at' => date('Y-m-d H:i:s', $expiresAt),
+                    ':token' => $accessToken
+                ]
+            );
+
+            return $stmt->rowCount() > 0;
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to extend access token', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    /**
      * Get token data by refresh token (for refresh flow)
      */
     public function getTokenByRefreshToken(string $refreshToken, string $clientId): ?array
@@ -251,6 +274,48 @@ AND `{$this->getField('oauth_tokens', 'token_type')}` = 'Bearer'";
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $result ?: null;
+    }
+
+    /**
+     * Revoke every live token issued to the same client and user as a refresh token
+     *
+     * @return bool true when the token was found and its family revoked
+     */
+    public function revokeTokenFamily(string $refreshToken): bool
+    {
+        $sql = "SELECT `{$this->getField('oauth_tokens', 'client_id')}` AS fam_client, `{$this->getField('oauth_tokens', 'user_id')}` AS fam_user
+                FROM `{$this->getTableName('oauth_tokens')}`
+                WHERE `{$this->getField('oauth_tokens', 'refresh_token')}` = :refresh_token
+                LIMIT 1";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':refresh_token' => $refreshToken]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$row) {
+            return false;
+        }
+
+        $userCondition = $row['fam_user'] === null
+            ? "`{$this->getField('oauth_tokens', 'user_id')}` IS NULL"
+            : "`{$this->getField('oauth_tokens', 'user_id')}` = :user_id";
+
+        $sql = "UPDATE `{$this->getTableName('oauth_tokens')}`
+                SET `{$this->getField('oauth_tokens', 'revoked')}` = 1
+                WHERE `{$this->getField('oauth_tokens', 'client_id')}` = :client_id
+                AND {$userCondition}
+                AND `{$this->getField('oauth_tokens', 'revoked')}` = 0";
+
+        $params = [':client_id' => $row['fam_client']];
+
+        if ($row['fam_user'] !== null) {
+            $params[':user_id'] = $row['fam_user'];
+        }
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return true;
     }
 
     /**

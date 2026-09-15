@@ -22,7 +22,6 @@ class MessageHandlerTest extends TestCase
         $resourceRegistry = $this->createTestResourceRegistry();
         $this->storage = $this->createTestStorage();
 
-        // Create a specific test session with proper MCP format
         $this->testSessionId = $this->generateMcpSessionId('2024-11-05');
         $this->storage->storeSession(
             $this->testSessionId,
@@ -88,7 +87,7 @@ class MessageHandlerTest extends TestCase
             'jsonrpc' => '2.0',
             'method' => 'initialize',
             'params' => [
-                'protocolVersion' => '2023-01-01', // Older version
+                'protocolVersion' => '2023-01-01',
                 'capabilities' => []
             ],
             'id' => 1
@@ -102,7 +101,7 @@ class MessageHandlerTest extends TestCase
         );
 
         $data = $this->assertJsonRpcSuccess($response, 1);
-        // Should fall back to newest supported version
+
         $this->assertEquals('2024-11-05', $data['result']['protocolVersion']);
     }
 
@@ -136,7 +135,7 @@ class MessageHandlerTest extends TestCase
 
         $this->messageHandler->processMessage(
             $message,
-            null, // No session
+            null,
             $this->createTestContext(),
             $this->createResponse()
         );
@@ -214,7 +213,6 @@ class MessageHandlerTest extends TestCase
             'id' => 1
         ];
 
-        // MCP spec: parameter errors should be queued, not thrown
         $response = $this->messageHandler->processMessage(
             $message,
             $this->testSessionId,
@@ -272,7 +270,6 @@ class MessageHandlerTest extends TestCase
             'id' => 1
         ];
 
-        // MCP spec: method not found errors should be queued, not thrown
         $response = $this->messageHandler->processMessage(
             $message,
             $this->testSessionId,
@@ -282,7 +279,6 @@ class MessageHandlerTest extends TestCase
 
         $this->assertEquals(202, $response->getStatusCode());
 
-        // Verify error was queued
         $messages = $this->storage->getMessages($this->testSessionId);
         $this->assertCount(1, $messages);
         $errorMessage = $messages[0]['data'];

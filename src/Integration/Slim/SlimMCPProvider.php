@@ -32,7 +32,7 @@ class SlimMCPProvider
         ResourceRegistry $resourceRegistry,
         ResponseFactoryInterface $responseFactory,
         StreamFactoryInterface $streamFactory,
-        array $config = [], // config array (master in MCPSaaSServer::getDefaultConfig())
+        array $config = [],
         ?LoggerInterface $logger = null
     ) {
         $logger = $logger ?? new NullLogger();
@@ -79,6 +79,14 @@ class SlimMCPProvider
     public function handleAuthDiscovery(Request $request, Response $response): Response
     {
         return $this->discoveryProvider->authorizationServer($request, $response);
+    }
+
+    /**
+     * OpenID Connect Discovery 1.0 endpoint
+     */
+    public function handleOpenIdDiscovery(Request $request, Response $response): Response
+    {
+        return $this->discoveryProvider->openidConfiguration($request, $response);
     }
 
     /**

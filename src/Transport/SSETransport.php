@@ -14,7 +14,7 @@ use Slim\Psr7\NonBufferedBody;
 class SSETransport implements TransportInterface
 {
     private StorageInterface $storage;
-    private array $config; // config array (master in MCPSaaSServer::getDefaultConfig())
+    private array $config;
 
     public function __construct(StorageInterface $storage, array $config = [])
     {
@@ -31,16 +31,14 @@ class SSETransport implements TransportInterface
         string $sessionId,
         array $context
     ): Response {
-        // CRITICAL: Close session to prevent blocking - PHP sessions are file-locked
+
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_write_close();
         }
 
-        // Check if we're in a test environment for shortened behavior
         $isTestMode = $this->config['test_mode'];
 
-        // Set low process priority (only in non-test environments)
-        if (!$isTestMode && function_exists('exec')) {
+        if (!$isTestMode && function_exists('exec') && function_exists('getmypid')) {
             exec('renice 10 ' . getmypid());
         }
 
@@ -54,18 +52,17 @@ class SSETransport implements TransportInterface
             ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version')
             ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 
+        $this->resolveResumePoint($request, $sessionId);
+
         $body = $response->getBody();
 
-        // Send endpoint event immediately (MCP spec requirement)
         $this->sendEndpointEvent($body, $sessionId, $context);
 
-        // In test mode, send any pending messages and return immediately
         if ($isTestMode) {
             $this->checkAndSendMessages($body, $sessionId);
             return $response;
         }
 
-        // Start message polling loop (production mode only)
         $this->pollForMessages($body, $sessionId, $context);
 
         return $response;
@@ -73,7 +70,7 @@ class SSETransport implements TransportInterface
 
     private function sendEndpointEvent(StreamInterface $body, string $sessionId, array $context): void
     {
-        // Build endpoint URL from context
+
         $baseUrl = $context['base_url'] ?? 'https://localhost';
         $contextId = $context['context_id'] ?? 'unknown';
         $endpointUrl = "{$baseUrl}/{$contextId}";
@@ -99,22 +96,20 @@ class SSETransport implements TransportInterface
         $endTime = $startTime + $maxTime;
 
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
-            // Send keepalive
+
             $this->sendKeepalive($body);
 
             if (connection_aborted()) {
                 break;
             }
 
-            // Check for messages and send them
             if ($this->checkAndSendMessages($body, $sessionId)) {
-                $startTime = time(); // Reset timer on activity
+                $startTime = time();
             }
 
-            // Adjust polling interval after initial period
             $currentTime = time();
             if ($currentTime - $startTime > $switchTime) {
-                $pollInterval = max($pollInterval * 2, 5); // Increase interval, max 5 seconds
+                $pollInterval = max($pollInterval * 2, 5);
             }
 
             sleep($pollInterval);
@@ -129,7 +124,7 @@ class SSETransport implements TransportInterface
 
     private function checkAndSendMessages(StreamInterface $body, string $sessionId): bool
     {
-        $messages = $this->storage->getMessages($sessionId);
+        $messages = $this->storage->getMessages($sessionId, [], $this->lastEventId);
 
         if (empty($messages)) {
             return false;
@@ -137,28 +132,67 @@ class SSETransport implements TransportInterface
 
         foreach ($messages as $message) {
             $messageData = sprintf(
-                "event: message\ndata: %s\n\n",
+                "id: %s\nevent: message\ndata: %s\n\n",
+                $message['id'],
                 json_encode($message['data'])
             );
 
             $body->write($messageData);
 
-            // Delete message after sending
-            $this->storage->deleteMessage($message['id']);
+            $this->lastEventId = (string)$message['id'];
         }
 
-        // We know messages were sent since $messages wasn't empty
+        $this->rememberResumePoint($sessionId);
+
         return true;
     }
+    /**
+     * Position in the message stream this connection has reached
+     */
+    private ?string $lastEventId = null;
+
+    /**
+     * Resume from the id the client reconnected with, or from where the session left off
+     */
+    private function resolveResumePoint(Request $request, string $sessionId): void
+    {
+        $header = $request->getHeaderLine('Last-Event-ID');
+
+        if ($header !== '') {
+            $this->lastEventId = $header;
+            return;
+        }
+
+        $sessionData = $this->storage->getSession($sessionId) ?? [];
+        $this->lastEventId = $sessionData['last_event_id'] ?? null;
+    }
+
+    /**
+     * Record how far this session has been delivered
+     */
+    private function rememberResumePoint(string $sessionId): void
+    {
+        $sessionData = $this->storage->getSession($sessionId);
+
+        if ($sessionData === null) {
+            return;
+        }
+
+        $sessionData['last_event_id'] = $this->lastEventId;
+
+        $this->storage->storeSession($sessionId, $sessionData, $this->config['session_lifetime']);
+    }
+
 
     private function getDefaultConfig(): array
     {
         return [
-            'test_mode' => false,              // set to true in tests for instant responses
+            'test_mode' => false,
+            'session_lifetime' => 3600,
             'sse' => [
-                'keepalive_interval' => 1,     // seconds
-                'max_connection_time' => 1800, // 30 minutes
-                'switch_interval_after' => 60  // switch to longer intervals after 1 minute
+                'keepalive_interval' => 1,
+                'max_connection_time' => 1800,
+                'switch_interval_after' => 60
             ]
         ];
     }

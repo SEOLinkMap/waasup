@@ -8,39 +8,8 @@ use Psr\Log\NullLogger;
 /**
  * Database storage implementation for MCP server data persistence
  *
- * DEFAULT USAGE: Use default table names with optional prefix
- * ================================================================
- * The simplest and recommended approach is to let this class create the default
- * table names, optionally with a prefix:
- *
- * Example (recommended):
- * ```php
- * $config = ['database' => ['table_prefix' => 'mcp_']];
- * $storage = new DatabaseStorage($pdo, $config);
- * // Results in tables: mcp_agencies, mcp_users, mcp_oauth_clients, etc.
- * ```
- *
- * ADVANCED USAGE: Map to existing tables (only when you have existing data)
- * =========================================================================
- * Only use table_mapping when you have existing tables with data that you want
- * to integrate with. You'll need to ensure your existing tables have the required
- * fields (see field requirements below).
- *
- * Example (advanced - only for existing tables with data):
- * ```php
- * $config = [
- *     'database' => [
- *         'table_prefix' => '',  // Empty since using custom mappings
- *         'table_mapping' => [
- *             'agencies' => 'client_agency',    // Your existing agency table
- *             'users' => 'app_users',           // Your existing user table
- *             // Don't map oauth_clients - let it use default since you have no data
- *             // Don't map sessions - let it use default (these are always new)
- *         ]
- *     ]
- * ];
- * $storage = new DatabaseStorage($pdo, $config);
- * ```
+ * @see examples/database/custom-table-configurations.md for table names, field
+ *      mapping and the schema this implementation expects
  */
 class DatabaseStorage implements StorageInterface
 {
@@ -76,52 +45,38 @@ class DatabaseStorage implements StorageInterface
     /**
      * Resolve logical table name to actual database table name
      *
-     * Resolution order:
-     * 1. Check table_mapping config for custom override (use only for existing tables with data)
-     * 2. Fall back to table_prefix + logical name (preferred approach)
-     *
      * @param string $logicalTableName One of the valid logical table names
      * @return string The actual database table name to use
      * @throws \InvalidArgumentException If logical table name is not recognized
      */
     private function getTableName(string $logicalTableName): string
     {
-        // Valid logical table names that can be mapped/overridden
-        // Only add entries to table_mapping for tables where you have existing data
+
         $validTableNames = [
-            'agencies',              // Main agency/organization table (commonly has existing data)
-            'users',                 // User accounts table (commonly has existing data)
-            'oauth_clients',         // OAuth client registrations (may have existing data)
-            'oauth_tokens',          // OAuth access/refresh tokens and auth codes (may have existing data)
-            'sessions',              // MCP session data (usually new - rarely needs mapping)
-            'messages',              // MCP message queue (always new - rarely needs mapping)
-            'sampling_responses',    // MCP sampling responses (always new - no mapping needed)
-            'roots_responses',       // MCP roots responses (always new - no mapping needed)
-            'elicitation_responses'  // MCP elicitation responses (always new - no mapping needed)
+            'agencies',
+            'users',
+            'oauth_clients',
+            'oauth_tokens',
+            'sessions',
+            'messages',
+            'sampling_responses',
+            'roots_responses',
+            'elicitation_responses'
         ];
 
-        // Validate the logical table name
         if (!in_array($logicalTableName, $validTableNames)) {
             throw new \InvalidArgumentException("Invalid logical table name: {$logicalTableName}. Valid names are: " . implode(', ', $validTableNames));
         }
 
-        // Check if there's a custom table mapping for this logical table
-        // Only use this if you have existing tables with data to preserve
         if (isset($this->config['database']['table_mapping'][$logicalTableName])) {
             return $this->config['database']['table_mapping'][$logicalTableName];
         }
 
-        // Fall back to prefixed default table name
-        // This is the preferred path for most use cases
         return $this->tablePrefix . $logicalTableName;
     }
 
     /**
      * Resolve logical field name to actual database field name
-     *
-     * Resolution order:
-     * 1. Check field_mapping config for custom override (use only for existing tables with different field names)
-     * 2. Fall back to original field name (preferred approach)
      *
      * @param string $logicalTableName One of the valid logical table names
      * @param string $logicalFieldName One of the valid logical field names for the table
@@ -130,18 +85,16 @@ class DatabaseStorage implements StorageInterface
      */
     private function getField(string $logicalTableName, string $logicalFieldName): string
     {
-        // Valid logical table names that can have field mappings
+
         $validTableNames = [
             'agencies', 'users', 'oauth_clients', 'oauth_tokens', 'sessions',
             'messages', 'sampling_responses', 'roots_responses', 'elicitation_responses'
         ];
 
-        // Validate the logical table name
         if (!in_array($logicalTableName, $validTableNames)) {
             throw new \InvalidArgumentException("Invalid logical table name: {$logicalTableName}. Valid names are: " . implode(', ', $validTableNames));
         }
 
-        // Get valid fields for this table from config
         if (!isset($this->config['database']['field_mapping'][$logicalTableName])) {
             throw new \InvalidArgumentException("No field definitions found for table: {$logicalTableName}");
         }
@@ -151,14 +104,13 @@ class DatabaseStorage implements StorageInterface
             throw new \InvalidArgumentException("Invalid logical field name '{$logicalFieldName}' for table '{$logicalTableName}'. Valid fields are: " . implode(', ', $validFields));
         }
 
-        // Return the field mapping (either default or user override)
         $field = $this->config['database']['field_mapping'][$logicalTableName][$logicalFieldName];
         return $this->validateFieldName($field);
     }
 
     private function validateFieldName(string $fieldName): string
     {
-        // Only allow alphanumeric, underscores, and common database chars
+
         if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $fieldName)) {
             throw new \InvalidArgumentException("Invalid field name: {$fieldName}");
         }
@@ -207,9 +159,11 @@ class DatabaseStorage implements StorageInterface
     private function getDefaultConfig(): array
     {
         return [
+            'base_url' => null,
             'database' => [
                 'table_prefix' => 'mcp_',
                 'cleanup_interval' => 3600,
+                'message_lifetime' => 3600,
                 'table_mapping' => [],
                 'field_mapping' => [
                     'agencies' => [

@@ -20,7 +20,10 @@ class DatabaseIntegrationTest extends TestCase
     {
         parent::setUp();
 
-        // Create test database
+        if (!in_array('sqlite', \PDO::getAvailableDrivers(), true)) {
+            $this->markTestSkipped('The pdo_sqlite driver is not available');
+        }
+
         $this->pdo = new \PDO('sqlite::memory:');
         $this->pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 
@@ -60,7 +63,7 @@ class DatabaseIntegrationTest extends TestCase
                     'version' => '1.0.0-test'
                 ],
                 'sse' => [
-                    'test_mode' => true  // Important: Enable test mode for SSE
+                    'test_mode' => true
                 ]
             ]
         );
@@ -68,7 +71,7 @@ class DatabaseIntegrationTest extends TestCase
 
     private function createDatabaseSchema(): void
     {
-        // Create the main tables needed for testing
+
         $this->pdo->exec(
             "
             CREATE TABLE mcp_messages (
@@ -104,6 +107,8 @@ class DatabaseIntegrationTest extends TestCase
                 revoked INTEGER NOT NULL DEFAULT 0,
                 agency_id INTEGER NOT NULL,
                 user_id INTEGER DEFAULT NULL,
+                resource VARCHAR(255) DEFAULT NULL,
+                aud TEXT DEFAULT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         "
@@ -140,7 +145,7 @@ class DatabaseIntegrationTest extends TestCase
 
     private function seedTestData(): void
     {
-        // Insert test agency
+
         $this->pdo->exec(
             "
             INSERT INTO mcp_agencies (id, uuid, name, active)
@@ -148,7 +153,6 @@ class DatabaseIntegrationTest extends TestCase
         "
         );
 
-        // Insert test user
         $this->pdo->exec(
             "
             INSERT INTO mcp_users (id, uuid, agency_id, name, email, active)
@@ -156,7 +160,6 @@ class DatabaseIntegrationTest extends TestCase
         "
         );
 
-        // Insert test token with proper datetime format for SQLite
         $this->pdo->exec(
             "
             INSERT INTO mcp_oauth_tokens (access_token, scope, expires_at, agency_id, user_id)
@@ -184,7 +187,6 @@ class DatabaseIntegrationTest extends TestCase
             'base_url' => 'https://localhost:8080'
         ];
 
-        // 1. Initialize request
         $initRequest = $this->createRequest(
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
@@ -235,7 +237,6 @@ class DatabaseIntegrationTest extends TestCase
             'base_url' => 'https://localhost:8080'
         ];
 
-        // 1. Initialize first to establish session
         $initRequest = $this->createRequest(
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
@@ -261,11 +262,9 @@ class DatabaseIntegrationTest extends TestCase
         $initResponse = $this->server->handle($initRequest, $this->createResponse());
         $this->assertEquals(200, $initResponse->getStatusCode());
 
-        // Extract session ID from response header
         $sessionId = $initResponse->getHeaderLine('Mcp-Session-Id');
         $this->assertNotEmpty($sessionId);
 
-        // 2. Tools list request with established session
         $toolsRequest = $this->createRequest(
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
@@ -285,7 +284,6 @@ class DatabaseIntegrationTest extends TestCase
 
         $response = $this->server->handle($toolsRequest, $this->createResponse());
 
-        // Debug the response if it's not what we expect
         if ($response->getStatusCode() !== 202) {
             $body = (string) $response->getBody();
             echo "Unexpected response: " . $response->getStatusCode() . "\n";
@@ -294,13 +292,11 @@ class DatabaseIntegrationTest extends TestCase
 
         $this->assertEquals(202, $response->getStatusCode(), 'Tools list request should return 202 Accepted');
 
-        // 3. Verify message was stored
         $messages = $this->storage->getMessages($sessionId);
         $this->assertNotEmpty($messages);
         $this->assertEquals('2.0', $messages[0]['data']['jsonrpc']);
         $this->assertArrayHasKey('tools', $messages[0]['data']['result']);
 
-        // 4. Tool call request with same session
         $toolCallRequest = $this->createRequest(
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
@@ -325,9 +321,8 @@ class DatabaseIntegrationTest extends TestCase
         $response = $this->server->handle($toolCallRequest, $this->createResponse());
         $this->assertEquals(202, $response->getStatusCode());
 
-        // 5. Verify tool call result was stored
         $messages = $this->storage->getMessages($sessionId);
-        $this->assertCount(2, $messages); // tools/list + tools/call
+        $this->assertCount(2, $messages);
 
         $toolCallMessage = $messages[1];
         $this->assertEquals(3, $toolCallMessage['data']['id']);
@@ -336,11 +331,10 @@ class DatabaseIntegrationTest extends TestCase
 
     public function testStoragePersistenceAcrossRequests(): void
     {
-        // Store session data
+
         $sessionData = ['user_id' => 1, 'agency_id' => 1, 'timestamp' => time()];
         $this->storage->storeSession('persistent-session', $sessionData);
 
-        // Store messages
         $this->storage->storeMessage(
             'persistent-session',
             [
@@ -359,7 +353,6 @@ class DatabaseIntegrationTest extends TestCase
             ]
         );
 
-        // Retrieve and verify persistence
         $retrievedSession = $this->storage->getSession('persistent-session');
         $this->assertEquals($sessionData, $retrievedSession);
 
@@ -403,7 +396,6 @@ class DatabaseIntegrationTest extends TestCase
             $config
         );
 
-        // Test auth discovery
         $authRequest = $this->createRequest('GET', '/.well-known/oauth-authorization-server');
         $authResponse = $provider->handleAuthDiscovery($authRequest, $this->createResponse());
 
@@ -417,11 +409,10 @@ class DatabaseIntegrationTest extends TestCase
 
     public function testDatabaseCleanupIntegration(): void
     {
-        // Add current data
+
         $this->storage->storeMessage('current-session', ['current' => 'message']);
         $this->storage->storeSession('current-session', ['current' => 'session'], 3600);
 
-        // Add expired data directly to database (SQLite syntax)
         $this->pdo->exec(
             "
             INSERT INTO mcp_messages (session_id, message_data, created_at)
@@ -436,18 +427,15 @@ class DatabaseIntegrationTest extends TestCase
         "
         );
 
-        // Run cleanup
         $cleaned = $this->storage->cleanup();
         $this->assertGreaterThanOrEqual(0, $cleaned);
 
-        // Verify current data still exists
         $currentMessages = $this->storage->getMessages('current-session');
         $this->assertNotEmpty($currentMessages);
 
         $currentSession = $this->storage->getSession('current-session');
         $this->assertNotNull($currentSession);
 
-        // Verify expired session was cleaned
         $expiredSession = $this->storage->getSession('expired-session');
         $this->assertNull($expiredSession);
     }

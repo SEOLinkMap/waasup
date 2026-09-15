@@ -14,7 +14,6 @@ class ContentProcessor
         $this->protocolManager = $protocolManager;
     }
 
-    // Audio content processing only for 2025-03-26+
     public function processContentWithAudio(array $content, string $protocolVersion): array
     {
         $processedContent = [];
@@ -26,18 +25,50 @@ class ContentProcessor
 
             switch ($item['type']) {
                 case 'text':
-                    $processedContent[] = [
+                    $processedContent[] = $this->withAnnotations(
+                        [
                         'type' => 'text',
                         'text' => $item['text'] ?? ''
-                    ];
+                        ],
+                        $item
+                    );
                     break;
 
                 case 'image':
-                    $processedContent[] = [
+                    $processedContent[] = $this->withAnnotations(
+                        [
                         'type' => 'image',
                         'data' => $item['data'] ?? '',
                         'mimeType' => $item['mimeType'] ?? 'image/jpeg'
-                    ];
+                        ],
+                        $item
+                    );
+                    break;
+
+                case 'resource':
+                    if (!isset($item['resource']['uri'])) {
+                        throw new ProtocolException("Embedded resource content requires a 'resource' object carrying a 'uri'.", -32602);
+                    }
+
+                    $processedContent[] = $this->withAnnotations(
+                        [
+                        'type' => 'resource',
+                        'resource' => $item['resource']
+                        ],
+                        $item
+                    );
+                    break;
+
+                case 'resource_link':
+                    if (!$this->protocolManager->isFeatureSupported('resource_links', $protocolVersion)) {
+                        throw new ProtocolException("Resource link content is not supported in version {$protocolVersion}. Return an embedded 'resource' or 'text' block instead.", -32602);
+                    }
+
+                    if (!isset($item['uri'])) {
+                        throw new ProtocolException("Resource link content requires a 'uri'.", -32602);
+                    }
+
+                    $processedContent[] = $item;
                     break;
 
                 case 'audio':
@@ -53,10 +84,26 @@ class ContentProcessor
                     break;
 
                 default:
-                    throw new ProtocolException("Unsupported content type: {$item['type']}", -32602);
+                    throw new ProtocolException("Unsupported content type: {$item['type']}. Use text, image, audio, resource or resource_link.", -32602);
             }
         }
 
         return $processedContent;
+    }
+
+    /**
+     * Copy the optional annotations and _meta of a content block
+     */
+    private function withAnnotations(array $processed, array $item): array
+    {
+        if (isset($item['annotations'])) {
+            $processed['annotations'] = $item['annotations'];
+        }
+
+        if (isset($item['_meta'])) {
+            $processed['_meta'] = $item['_meta'];
+        }
+
+        return $processed;
     }
 }

@@ -11,12 +11,6 @@ use Seolinkmap\Waasup\Tests\TestCase;
 
 /**
  * MCP 2025-06-18 Security & Authorization Compliance Tests
- *
- * This test class validates compliance with MCP 2025-06-18 specification
- * security requirements including:
- * - RFC 8707 Resource Indicators
- * - OAuth 2.0 Resource Server classification
- * - Enhanced security features and best practices
  */
 class MCPSecurityComplianceTest extends TestCase
 {
@@ -59,7 +53,7 @@ class MCPSecurityComplianceTest extends TestCase
             $this->storage,
             $this->responseFactory,
             $this->streamFactory,
-            $config['auth']
+            $config
         );
 
         $this->discoveryProvider = new WellKnownProvider($config['discovery']);
@@ -83,7 +77,7 @@ class MCPSecurityComplianceTest extends TestCase
 
     private function setupTestData(): void
     {
-        // Add test client supporting 2025-06-18
+
         $this->storage->addOAuthClient(
             'test-client-2025',
             [
@@ -96,7 +90,6 @@ class MCPSecurityComplianceTest extends TestCase
             ]
         );
 
-        // Add test agency and user
         $this->storage->addContext(
             $this->contextId,
             'agency',
@@ -108,7 +101,6 @@ class MCPSecurityComplianceTest extends TestCase
             ]
         );
 
-        // Add malicious context for token passthrough tests
         $this->storage->addContext(
             $this->maliciousContextId,
             'agency',
@@ -132,17 +124,15 @@ class MCPSecurityComplianceTest extends TestCase
         );
     }
 
-    // Override createRequest to include proper URI with scheme and host
     protected function createRequest(
         string $method = 'GET',
         string $uri = '/',
         array $headers = [],
         ?string $body = null
     ) {
-        // Parse the URI and ensure it has proper scheme/host
+
         $parsedUri = parse_url($uri);
 
-        // If URI doesn't have scheme/host, add them
         if (!isset($parsedUri['scheme']) || !isset($parsedUri['host'])) {
             $baseUri = parse_url($this->baseUrl);
             $fullUri = $baseUri['scheme'] . '://' . $baseUri['host'] .
@@ -165,9 +155,6 @@ class MCPSecurityComplianceTest extends TestCase
         return $request;
     }
 
-    // ========================================
-    // RFC 8707 Resource Indicators Tests
-    // ========================================
     public function testResourceIndicatorTokenBinding(): void
     {
         session_start();
@@ -176,14 +163,12 @@ class MCPSecurityComplianceTest extends TestCase
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
         $expectedResource = $this->baseUrl . '/mcp/' . $this->contextId;
 
-        // Complete authorization flow with resource indicator
         $authCode = $this->completeAuthorizationFlow($codeVerifier, $codeChallenge, $expectedResource);
 
         if ($authCode === null) {
             $this->fail('Authorization flow did not complete successfully');
         }
 
-        // Token exchange WITH resource parameter
         $tokenRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
@@ -208,7 +193,7 @@ class MCPSecurityComplianceTest extends TestCase
 
     public function testResourceIndicatorAudienceRestriction(): void
     {
-        // Create token bound to specific resource
+
         $boundResource = $this->baseUrl . '/mcp/' . $this->contextId;
         $this->storage->storeAccessToken(
             [
@@ -223,7 +208,6 @@ class MCPSecurityComplianceTest extends TestCase
             ]
         );
 
-        // Test access to correct resource (should succeed)
         $validRequest = $this->createRequest(
             'POST',
             '/mcp/' . $this->contextId,
@@ -237,7 +221,6 @@ class MCPSecurityComplianceTest extends TestCase
         $response = $this->authMiddleware->__invoke($validRequest, $mockHandler);
         $this->assertEquals(200, $response->getStatusCode());
 
-        // Test access to different resource (should fail)
         $invalidRequest = $this->createRequest(
             'POST',
             '/mcp/' . $this->maliciousContextId,
@@ -253,10 +236,9 @@ class MCPSecurityComplianceTest extends TestCase
 
     public function testResourceIndicatorMaliciousServerPrevention(): void
     {
-        // Simulate malicious server trying to use token intended for different resource
+
         $legitimateResource = $this->baseUrl . '/mcp/' . $this->contextId;
 
-        // Create token bound to legitimate resource
         $this->storage->storeAccessToken(
             [
             'client_id' => 'test-client-2025',
@@ -270,7 +252,6 @@ class MCPSecurityComplianceTest extends TestCase
             ]
         );
 
-        // Malicious server tries to use token (should fail audience validation)
         $maliciousRequest = $this->createRequest(
             'POST',
             '/mcp/' . $this->maliciousContextId,
@@ -293,7 +274,6 @@ class MCPSecurityComplianceTest extends TestCase
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
-        // Test invalid resource URL
         $invalidResource = 'not-a-valid-url';
 
         $authRequest = $this->createRequest(
@@ -322,13 +302,9 @@ class MCPSecurityComplianceTest extends TestCase
         session_destroy();
     }
 
-    // ========================================
-    // OAuth Resource Server Tests
-    // ========================================
-
     public function testOAuthResourceServerClassification(): void
     {
-        // Test that MCP server properly identifies as OAuth Resource Server
+
         $request = $this->createRequest('GET', '/.well-known/oauth-protected-resource')
             ->withHeader('MCP-Protocol-Version', '2025-06-18');
 
@@ -337,7 +313,6 @@ class MCPSecurityComplianceTest extends TestCase
         $this->assertEquals(200, $response->getStatusCode());
         $metadata = json_decode((string) $response->getBody(), true);
 
-        // Verify OAuth Resource Server classification
         $this->assertTrue($metadata['resource_server']);
         $this->assertTrue($metadata['resource_indicators_supported']);
         $this->assertTrue($metadata['token_binding_supported']);
@@ -358,13 +333,11 @@ class MCPSecurityComplianceTest extends TestCase
 
         $metadata = json_decode((string) $response->getBody(), true);
 
-        // Required RFC 9728 fields
         $this->assertArrayHasKey('resource', $metadata);
         $this->assertArrayHasKey('authorization_servers', $metadata);
         $this->assertArrayHasKey('scopes_supported', $metadata);
         $this->assertArrayHasKey('bearer_methods_supported', $metadata);
 
-        // MCP 2025-06-18 specific fields
         $this->assertArrayHasKey('mcp_features_supported', $metadata);
         $this->assertContains('elicitation', $metadata['mcp_features_supported']);
         $this->assertContains('structured_outputs', $metadata['mcp_features_supported']);
@@ -379,7 +352,6 @@ class MCPSecurityComplianceTest extends TestCase
         $response = $this->discoveryProvider->protectedResource($request, $this->createResponse());
         $metadata = json_decode((string) $response->getBody(), true);
 
-        // Validate metadata structure according to RFC 9728
         $this->assertEquals($this->baseUrl, $metadata['resource']);
         $this->assertIsArray($metadata['authorization_servers']);
         $this->assertIsArray($metadata['scopes_supported']);
@@ -387,7 +359,6 @@ class MCPSecurityComplianceTest extends TestCase
         $this->assertContains('mcp:write', $metadata['scopes_supported']);
         $this->assertContains('header', $metadata['bearer_methods_supported']);
 
-        // Validate MCP-specific extensions
         $this->assertTrue($metadata['resource_indicators_supported']);
         $this->assertIsArray($metadata['mcp_features_supported']);
     }
@@ -402,14 +373,12 @@ class MCPSecurityComplianceTest extends TestCase
         $this->assertEquals(200, $response->getStatusCode());
         $metadata = json_decode((string) $response->getBody(), true);
 
-        // Required OAuth 2.1 Authorization Server metadata
         $this->assertEquals($this->baseUrl, $metadata['issuer']);
         $this->assertEquals($this->baseUrl . '/oauth/authorize', $metadata['authorization_endpoint']);
         $this->assertEquals($this->baseUrl . '/oauth/token', $metadata['token_endpoint']);
         $this->assertContains('authorization_code', $metadata['grant_types_supported']);
         $this->assertContains('code', $metadata['response_types_supported']);
 
-        // MCP 2025-06-18 specific requirements
         $this->assertTrue($metadata['resource_indicators_supported']);
         $this->assertTrue($metadata['require_resource_parameter']);
         $this->assertContains('S256', $metadata['pkce_methods_supported']);
@@ -418,7 +387,7 @@ class MCPSecurityComplianceTest extends TestCase
 
     public function testAuthorizationServerMetadataIntegration(): void
     {
-        // Test that protected resource metadata properly references auth server
+
         $protectedResourceRequest = $this->createRequest('GET', '/.well-known/oauth-protected-resource');
         $protectedResourceResponse = $this->discoveryProvider->protectedResource($protectedResourceRequest, $this->createResponse());
         $protectedResourceData = json_decode((string) $protectedResourceResponse->getBody(), true);
@@ -427,13 +396,8 @@ class MCPSecurityComplianceTest extends TestCase
         $authServerResponse = $this->discoveryProvider->authorizationServer($authServerRequest, $this->createResponse());
         $authServerData = json_decode((string) $authServerResponse->getBody(), true);
 
-        // Verify integration between resource and auth server metadata
         $this->assertContains($authServerData['issuer'], $protectedResourceData['authorization_servers']);
     }
-
-    // ========================================
-    // Enhanced Security Features Tests
-    // ========================================
 
     public function testDynamicClientRegistration(): void
     {
@@ -452,7 +416,7 @@ class MCPSecurityComplianceTest extends TestCase
 
         $response = $this->oauthServer->register($request, $this->createResponse());
 
-        $this->assertEquals(200, $response->getStatusCode());
+        $this->assertEquals(201, $response->getStatusCode());
         $clientData = json_decode((string) $response->getBody(), true);
 
         $this->assertArrayHasKey('client_id', $clientData);
@@ -464,7 +428,6 @@ class MCPSecurityComplianceTest extends TestCase
     {
         $resource1 = $this->baseUrl . '/mcp/' . $this->contextId;
 
-        // Create token bound to resource1
         $this->storage->storeAccessToken(
             [
             'client_id' => 'test-client-2025',
@@ -478,7 +441,6 @@ class MCPSecurityComplianceTest extends TestCase
             ]
         );
 
-        // Test access to bound resource (should succeed)
         $validRequest = $this->createRequest(
             'POST',
             '/mcp/' . $this->contextId,
@@ -492,9 +454,8 @@ class MCPSecurityComplianceTest extends TestCase
 
         $mockHandler = $this->createMockRequestHandler(200);
         $response = $this->authMiddleware->__invoke($validRequest, $mockHandler);
-        $this->assertEquals(200, $response->getStatusCode()); // Should pass auth middleware
+        $this->assertEquals(200, $response->getStatusCode());
 
-        // Test access to different resource (should fail)
         $invalidRequest = $this->createRequest(
             'POST',
             '/mcp/' . $this->maliciousContextId,
@@ -510,10 +471,9 @@ class MCPSecurityComplianceTest extends TestCase
 
     public function testConfusedDeputyPrevention(): void
     {
-        // Test that tokens cannot be used by unintended parties
+
         $legitimateResource = $this->baseUrl . '/mcp/' . $this->contextId;
 
-        // Create token with specific resource binding
         $this->storage->storeAccessToken(
             [
             'client_id' => 'legitimate-client',
@@ -527,7 +487,6 @@ class MCPSecurityComplianceTest extends TestCase
             ]
         );
 
-        // Test with valid resource binding
         $validRequest = $this->createRequest(
             'POST',
             '/mcp/' . $this->contextId,
@@ -545,7 +504,7 @@ class MCPSecurityComplianceTest extends TestCase
 
     public function testTokenPassthroughPrevention(): void
     {
-        // Test that tokens cannot be passed through to unintended services
+
         $originalResource = $this->baseUrl . '/mcp/' . $this->contextId;
 
         $this->storage->storeAccessToken(
@@ -561,10 +520,9 @@ class MCPSecurityComplianceTest extends TestCase
             ]
         );
 
-        // Attempt to use token for different resource (passthrough attack)
         $passthroughRequest = $this->createRequest(
             'POST',
-            '/mcp/' . $this->maliciousContextId, // Use valid UUID for malicious context
+            '/mcp/' . $this->maliciousContextId,
             [
                 'Authorization' => 'Bearer passthrough-test-token',
                 'MCP-Protocol-Version' => '2025-06-18'
@@ -579,14 +537,13 @@ class MCPSecurityComplianceTest extends TestCase
 
     public function testSessionHijackingPrevention(): void
     {
-        // This test verifies basic session state handling - actual prevention
-        // is handled by HTTPS, secure cookies, and client-side state validation
-        $this->addToAssertionCount(1); // Mark test as not empty
+
+        $this->addToAssertionCount(1);
     }
 
     public function testProxyMisusePrevention(): void
     {
-        // Test that requests through proxies maintain security properties
+
         $resource = $this->baseUrl . '/mcp/' . $this->contextId;
 
         $this->storage->storeAccessToken(
@@ -602,7 +559,6 @@ class MCPSecurityComplianceTest extends TestCase
             ]
         );
 
-        // Test valid resource access
         $validRequest = $this->createRequest(
             'POST',
             '/mcp/' . $this->contextId,
@@ -620,10 +576,9 @@ class MCPSecurityComplianceTest extends TestCase
 
     public function testSecurityBestPracticesEnforcement(): void
     {
-        // Test that MCP 2025-06-18 features work as expected
+
         $resource = $this->baseUrl . '/mcp/' . $this->contextId;
 
-        // Valid request with all required headers and proper resource binding
         $validRequest = $this->createRequest(
             'GET',
             '/.well-known/oauth-protected-resource',
@@ -637,13 +592,9 @@ class MCPSecurityComplianceTest extends TestCase
         $this->assertTrue($metadata['resource_indicators_supported']);
     }
 
-    // ========================================
-    // Helper Methods
-    // ========================================
-
     private function completeAuthorizationFlow(string $codeVerifier, string $codeChallenge, string $resource): ?string
     {
-        // Authorization request
+
         $authRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -665,7 +616,6 @@ class MCPSecurityComplianceTest extends TestCase
             return null;
         }
 
-        // Complete user consent
         $_SESSION['oauth_user'] = [
             'user_id' => 1,
             'agency_id' => 1,
@@ -674,7 +624,7 @@ class MCPSecurityComplianceTest extends TestCase
         ];
 
         $consentRequest = $this->createRequest('POST', '/oauth/consent')
-            ->withParsedBody(['action' => 'allow']);
+            ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']);
 
         $consentResponse = $this->oauthServer->consent($consentRequest, $this->createResponse());
 
@@ -694,6 +644,62 @@ class MCPSecurityComplianceTest extends TestCase
 
         parse_str($parsedUrl['query'], $params);
         return $params['code'] ?? null;
+    }
+
+    public function testInsufficientScopeIsAStepUpChallenge(): void
+    {
+        $uuid = '550e8400-e29b-41d4-a716-446655440000';
+        $storage = new \Seolinkmap\Waasup\Storage\MemoryStorage();
+        $storage->addContext($uuid, 'agency', ['id' => 1, 'uuid' => $uuid, 'name' => 'A', 'active' => true]);
+        $storage->addToken(
+            'partial-token',
+            [
+                'access_token' => 'partial-token',
+                'scope' => 'mcp:read',
+                'expires_at' => time() + 3600,
+                'agency_id' => 1,
+                'revoked' => false
+            ]
+        );
+
+        $middleware = new AuthMiddleware(
+            $storage,
+            $this->responseFactory,
+            $this->streamFactory,
+            [
+                'base_url' => 'https://mcp.example.com',
+                'auth' => [
+                    'context_types' => ['agency'],
+                    'validate_scope' => true,
+                    'required_scopes' => ['mcp:read', 'mcp:write']
+                ]
+            ]
+        );
+
+        $handler = $this->createMockRequestHandler(200);
+
+        $unauthenticated = $middleware(
+            $this->createRequest('POST', '/mcp/' . $uuid),
+            $handler
+        );
+
+        $this->assertEquals(401, $unauthenticated->getStatusCode());
+        $this->assertStringContainsString('scope="mcp:read mcp:write"', $unauthenticated->getHeaderLine('WWW-Authenticate'));
+
+        $underScoped = $middleware(
+            $this->createRequest('POST', '/mcp/' . $uuid, ['Authorization' => 'Bearer partial-token']),
+            $handler
+        );
+
+        $challenge = $underScoped->getHeaderLine('WWW-Authenticate');
+
+        $this->assertEquals(403, $underScoped->getStatusCode());
+        $this->assertStringContainsString('error="insufficient_scope"', $challenge);
+        $this->assertStringContainsString('scope="mcp:read mcp:write"', $challenge);
+        $this->assertStringContainsString('resource_metadata="', $challenge);
+
+        $body = json_decode((string) $underScoped->getBody(), true);
+        $this->assertEquals('insufficient_scope', $body['error']);
     }
 
     private function createMockRequestHandler(int $statusCode): \Psr\Http\Server\RequestHandlerInterface

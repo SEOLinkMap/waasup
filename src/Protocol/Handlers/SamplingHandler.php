@@ -28,23 +28,39 @@ class SamplingHandler
         array $options = [],
         array $context = []
     ): string {
+        $this->requireClientCapability($sessionId, 'sampling');
+
         $requestId = bin2hex(random_bytes(16));
+
+        $params = [
+            'messages' => $messages,
+            'maxTokens' => $options['maxTokens'] ?? 1000,
+            'includeContext' => $options['includeContext'] ?? 'none'
+        ];
+
+        foreach (['temperature', 'stopSequences', 'metadata', 'systemPrompt', 'modelPreferences'] as $option) {
+            if (isset($options[$option])) {
+                $params[$option] = $options[$option];
+            }
+        }
+
+        if ($this->protocolManager->isFeatureSupported('sampling_tools', $this->protocolManager->getSessionVersion($sessionId))) {
+            foreach (['tools', 'toolChoice'] as $option) {
+                if (isset($options[$option])) {
+                    $params[$option] = $options[$option];
+                }
+            }
+        }
 
         $samplingRequest = [
         'jsonrpc' => '2.0',
         'method' => 'sampling/createMessage',
         'id' => $requestId,
-        'params' => [
-            'messages' => $messages,
-            'includeContext' => $options['includeContext'] ?? 'none',
-            'temperature' => $options['temperature'] ?? null,
-            'maxTokens' => $options['maxTokens'] ?? null,
-            'stopSequences' => $options['stopSequences'] ?? null,
-            'metadata' => $options['metadata'] ?? []
-        ]
+        'params' => $params
         ];
 
         $this->storage->storeMessage($sessionId, $samplingRequest, $context);
+        $this->rememberRequest($sessionId, $requestId, 'sampling/createMessage');
 
         return $requestId;
     }
@@ -52,7 +68,7 @@ class SamplingHandler
     public function handleSamplingResponse(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
     {
         if (!$sessionId) {
-            throw new ProtocolException('Session required', -32001);
+            throw new ProtocolException('Session required. Send an initialize request first and reuse the returned Mcp-Session-Id header.', -32001);
         }
 
         $samplingResult = [
@@ -76,6 +92,8 @@ class SamplingHandler
 
     public function requestRootsList(string $sessionId, array $context = []): string
     {
+        $this->requireClientCapability($sessionId, 'roots');
+
         $requestId = bin2hex(random_bytes(16));
 
         $rootsRequest = [
@@ -86,6 +104,7 @@ class SamplingHandler
         ];
 
         $this->storage->storeMessage($sessionId, $rootsRequest, $context);
+        $this->rememberRequest($sessionId, $requestId, 'roots/list');
 
         return $requestId;
     }
@@ -96,6 +115,8 @@ class SamplingHandler
         array $options = [],
         array $context = []
     ): string {
+        $this->requireClientCapability($sessionId, 'roots');
+
         $requestId = bin2hex(random_bytes(16));
 
         $readRequest = [
@@ -106,6 +127,7 @@ class SamplingHandler
         ];
 
         $this->storage->storeMessage($sessionId, $readRequest, $context);
+        $this->rememberRequest($sessionId, $requestId, 'roots/read');
 
         return $requestId;
     }
@@ -116,6 +138,8 @@ class SamplingHandler
         array $options = [],
         array $context = []
     ): string {
+        $this->requireClientCapability($sessionId, 'roots');
+
         $requestId = bin2hex(random_bytes(16));
 
         $listRequest = [
@@ -126,6 +150,7 @@ class SamplingHandler
         ];
 
         $this->storage->storeMessage($sessionId, $listRequest, $context);
+        $this->rememberRequest($sessionId, $requestId, 'roots/listDirectory');
 
         return $requestId;
     }
@@ -133,7 +158,7 @@ class SamplingHandler
     public function handleRootsListResponse(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
     {
         if (!$sessionId) {
-            throw new ProtocolException('Session required', -32001);
+            throw new ProtocolException('Session required. Send an initialize request first and reuse the returned Mcp-Session-Id header.', -32001);
         }
 
         $rootsResult = [
@@ -155,7 +180,7 @@ class SamplingHandler
     public function handleRootsReadResponse(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
     {
         if (!$sessionId) {
-            throw new ProtocolException('Session required', -32001);
+            throw new ProtocolException('Session required. Send an initialize request first and reuse the returned Mcp-Session-Id header.', -32001);
         }
 
         $readResult = [
@@ -174,11 +199,117 @@ class SamplingHandler
         return $this->responseManager->storeSuccessResponse($sessionId, ['received' => true], $id, $response);
     }
 
-    // Elicitation only supported in 2025-06-18
+    /**
+     * Assert the client declared a capability at initialize
+     *
+     * @throws ProtocolException when the capability was not declared
+     */
+    private function requireClientCapability(string $sessionId, string $capability): void
+    {
+        $capabilities = $this->protocolManager->getSessionValue($sessionId, 'client_capabilities', []);
+
+        if (!isset($capabilities[$capability])) {
+            throw new ProtocolException(
+                "This client did not declare the '{$capability}' capability when it initialized, so the server cannot send it a {$capability} request.",
+                -32601
+            );
+        }
+    }
+
+    /**
+     * Record an outstanding server to client request
+     *
+     * @param string $method the method the client will answer
+     */
+    private function rememberRequest(string $sessionId, string $requestId, string $method): void
+    {
+        $pending = $this->protocolManager->getSessionValue($sessionId, 'pending_requests', []);
+        $pending[$requestId] = $method;
+
+        if (count($pending) > 50) {
+            $pending = array_slice($pending, -50, null, true);
+        }
+
+        $this->protocolManager->storeSessionValue($sessionId, 'pending_requests', $pending);
+    }
+
+    /**
+     * Store a client response to a server initiated request
+     *
+     * @param array $payload the response 'result', or 'error' when the client refused
+     * @return bool true when the id matched an outstanding request
+     */
+    public function storeClientResponse(string $sessionId, mixed $id, array $payload): bool
+    {
+        $pending = $this->protocolManager->getSessionValue($sessionId, 'pending_requests', []);
+        $requestId = (string)$id;
+        $method = $pending[$requestId] ?? null;
+
+        if ($method === null) {
+            return false;
+        }
+
+        unset($pending[$requestId]);
+        $this->protocolManager->storeSessionValue($sessionId, 'pending_requests', $pending);
+
+        switch ($method) {
+            case 'sampling/createMessage':
+                $this->storage->storeSamplingResponse(
+                    $sessionId,
+                    $requestId,
+                    [
+                        'type' => 'sampling_response',
+                        'result' => array_replace_recursive(['requestId' => $id], $payload),
+                        'timestamp' => time()
+                    ]
+                );
+                break;
+
+            case 'roots/list':
+                $this->storage->storeRootsResponse(
+                    $sessionId,
+                    $requestId,
+                    [
+                        'type' => 'roots_list_response',
+                        'result' => array_replace_recursive(['requestId' => $id], $payload),
+                        'timestamp' => time()
+                    ]
+                );
+                break;
+
+            case 'roots/read':
+            case 'roots/listDirectory':
+                $this->storage->storeRootsResponse(
+                    $sessionId,
+                    $requestId,
+                    [
+                        'type' => 'roots_read_response',
+                        'result' => array_replace_recursive(['requestId' => $id], $payload),
+                        'timestamp' => time()
+                    ]
+                );
+                break;
+
+            case 'elicitation/create':
+                $this->storage->storeElicitationResponse(
+                    $sessionId,
+                    $requestId,
+                    [
+                        'type' => 'elicitation_response',
+                        'result' => array_replace_recursive(['requestId' => $id], $payload),
+                        'timestamp' => time()
+                    ]
+                );
+                break;
+        }
+
+        return true;
+    }
+
     public function handleElicitationRequest(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
     {
         if (!$sessionId) {
-            throw new ProtocolException('Session required', -32001);
+            throw new ProtocolException('Session required. Send an initialize request first and reuse the returned Mcp-Session-Id header.', -32001);
         }
 
         $sessionVersion = $this->protocolManager->getSessionVersion($sessionId);
@@ -203,21 +334,32 @@ class SamplingHandler
         string $sessionId,
         string $message,
         ?array $requestedSchema = null,
-        array $context = []
+        array $context = [],
+        array $options = []
     ): string {
+        $this->requireClientCapability($sessionId, 'elicitation');
+
         $requestId = bin2hex(random_bytes(16));
+
+        $params = ['message' => $message];
+
+        if (isset($options['url']) && $this->protocolManager->isFeatureSupported('elicitation_url', $this->protocolManager->getSessionVersion($sessionId))) {
+            $params['mode'] = 'url';
+            $params['url'] = $options['url'];
+        } else {
+            $params['mode'] = 'form';
+            $params['requestedSchema'] = $requestedSchema ?? ['type' => 'object', 'properties' => new \stdClass()];
+        }
 
         $elicitationRequest = [
         'jsonrpc' => '2.0',
         'method' => 'elicitation/create',
         'id' => $requestId,
-        'params' => [
-            'message' => $message,
-            'requestedSchema' => $requestedSchema
-        ]
+        'params' => $params
         ];
 
         $this->storage->storeMessage($sessionId, $elicitationRequest, $context);
+        $this->rememberRequest($sessionId, $requestId, 'elicitation/create');
 
         return $requestId;
     }

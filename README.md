@@ -37,7 +37,7 @@ Once connected, you can explore our entire repository through chat and get real-
 
 ## ✨ Features
 
-- 🔐 **OAuth 2.1 Authentication** - Complete OAuth flow with RFC 8707 Resource Indicators support for MCP 2025-06-18
+- 🔐 **OAuth 2.1 Authentication** - Complete OAuth flow with mandatory S256 PKCE, CSRF-protected consent, refresh token rotation with reuse detection, and RFC 8707 Resource Indicators
 - ⚡ **Multi-Transport Support** - Server-Sent Events (SSE) and Streamable HTTP for real-time message delivery
 - 🛠️ **Flexible Tool System** - Easy tool registration with both class-based and callable approaches
 - 🏢 **Multi-tenant Architecture** - Agency/user context isolation for SaaS applications
@@ -50,6 +50,11 @@ Once connected, you can explore our entire repository through chat and get real-
 - 🔄 **Progress Notifications** - Real-time progress updates with version-aware messaging
 - 🏷️ **Tool Annotations** - Rich tool metadata for better LLM understanding (MCP 2025-03-26+)
 - 📦 **JSON-RPC Batching** - Efficient batch request processing (MCP 2025-03-26)
+- 📄 **Pagination** - Cursor-paged `tools/list`, `prompts/list`, `resources/list` and `resources/templates/list`
+- 🔁 **Stream Resumption** - SSE event ids with `Last-Event-ID` replay after a dropped connection
+- 🔔 **Subscriptions & Logging** - `resources/subscribe` and `logging/setLevel` with server-side delivery gating
+- 🖼️ **Icons & Titles** - Display metadata on tools, prompts, resources and templates (MCP 2025-11-25 / 2025-06-18)
+- ⏳ **Tasks** - Task-augmented tool calls with `tasks/get`, `tasks/result`, `tasks/cancel` and `tasks/list` (MCP 2025-11-25, experimental)
 
 ## Requirements
 
@@ -63,24 +68,34 @@ WaaSuP implements the complete MCP specification across multiple protocol versio
 
 ### **Feature Matrix Summary**
 
-| Feature | 2024-11-05 | 2025-03-26 | 2025-06-18 |
-|---------|------------|------------|------------|
-| Tools | ✅ | ✅ | ✅ |
-| Prompts | ✅ | ✅ | ✅ |
-| Resources | ✅ | ✅ | ✅ |
-| Sampling | ✅ | ✅ | ✅ |
-| Roots | ✅ | ✅ | ✅ |
-| Ping | ✅ | ✅ | ✅ |
-| Progress Notifications | ✅ | ✅ | ✅ |
-| Tool Annotations | ❌ | ✅ | ✅ |
-| Audio Content | ❌ | ✅ | ✅ |
-| Completions | ❌ | ✅ | ✅ |
-| JSON-RPC Batching | ❌ | ✅ | ❌ |
-| OAuth 2.1 | ❌ | ❌ | ✅ |
-| Elicitation | ❌ | ❌ | ✅ |
-| Structured Outputs | ❌ | ❌ | ✅ |
-| Resource Links | ❌ | ❌ | ✅ |
-| Resource Indicators (RFC 8707) | ❌ | ❌ | ✅ (Required) |
+| Feature | 2024-11-05 | 2025-03-26 | 2025-06-18 | 2025-11-25 |
+|---------|------------|------------|------------|------------|
+| Tools | ✅ | ✅ | ✅ | ✅ |
+| Prompts | ✅ | ✅ | ✅ | ✅ |
+| Resources | ✅ | ✅ | ✅ | ✅ |
+| Resource Subscriptions | ✅ | ✅ | ✅ | ✅ |
+| Logging | ✅ | ✅ | ✅ | ✅ |
+| Sampling | ✅ | ✅ | ✅ | ✅ |
+| Roots | ✅ | ✅ | ✅ | ✅ |
+| Ping | ✅ | ✅ | ✅ | ✅ |
+| Progress Notifications | ✅ | ✅ | ✅ | ✅ |
+| Tool Annotations | ❌ | ✅ | ✅ | ✅ |
+| Audio Content | ❌ | ✅ | ✅ | ✅ |
+| Completions | ❌ | ✅ | ✅ | ✅ |
+| JSON-RPC Batching | ❌ | ✅ | ❌ | ❌ |
+| OAuth 2.1 | ❌ | ❌ | ✅ | ✅ |
+| Elicitation | ❌ | ❌ | ✅ | ✅ |
+| Structured Outputs | ❌ | ❌ | ✅ | ✅ |
+| Resource Links | ❌ | ❌ | ✅ | ✅ |
+| Resource Indicators (RFC 8707) | ❌ | ❌ | ✅ | ✅ |
+| Icons | ❌ | ❌ | ❌ | ✅ |
+| URL Mode Elicitation | ❌ | ❌ | ❌ | ✅ |
+| Tool Calling in Sampling | ❌ | ❌ | ❌ | ✅ |
+| Tasks (experimental) | ❌ | ❌ | ❌ | ✅ |
+
+The `2026-07-28` revision is not implemented. It removes the `initialize` handshake
+and protocol sessions in favour of per-request metadata, and a client that speaks it
+is answered with `2025-11-25`, the newest version this server negotiates.
 
 ## Installation
 
@@ -274,7 +289,7 @@ $response = $server->handle($request, $response);
 
 ```php
 $config = [
-    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
+    'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
     'server_info' => [
         'name' => 'Your MCP Server',
         'version' => '0.0.7'

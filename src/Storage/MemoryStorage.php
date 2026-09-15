@@ -4,13 +4,11 @@ namespace Seolinkmap\Waasup\Storage;
 
 /**
  * In-memory storage implementation - ONLY FOR TESTING
- *
- * WARNING: This storage loses ALL data when the process ends.
- * Never use in production - use DatabaseStorage instead.
  */
 class MemoryStorage implements StorageInterface
 {
     private array $messages = [];
+    private int $messageSequence = 0;
     private array $tokens = [];
     private array $contexts = [];
     private array $sessions = [];
@@ -37,7 +35,7 @@ class MemoryStorage implements StorageInterface
         }
 
         $this->messages[$sessionId][] = [
-            'id' => uniqid(),
+            'id' => (string)++$this->messageSequence,
             'data' => $messageData,
             'context' => $context,
             'created_at' => time()
@@ -46,9 +44,20 @@ class MemoryStorage implements StorageInterface
         return true;
     }
 
-    public function getMessages(string $sessionId, array $context = []): array
+    public function getMessages(string $sessionId, array $context = [], ?string $afterId = null): array
     {
-        return $this->messages[$sessionId] ?? [];
+        $messages = $this->messages[$sessionId] ?? [];
+
+        if ($afterId === null || $afterId === '') {
+            return array_values($messages);
+        }
+
+        return array_values(
+            array_filter(
+                $messages,
+                fn ($message) => (int)$message['id'] > (int)$afterId
+            )
+        );
     }
 
     public function storeSamplingResponse(string $sessionId, string $requestId, array $responseData): bool
@@ -245,7 +254,17 @@ class MemoryStorage implements StorageInterface
 
     public function storeAccessToken(array $tokenData): bool
     {
-        $this->tokens[$tokenData['access_token']] = $tokenData;
+        $this->tokens[$tokenData['access_token']] = $tokenData + ['created_at' => time(), 'revoked' => false];
+        return true;
+    }
+
+    public function touchAccessToken(string $accessToken, int $expiresAt): bool
+    {
+        if (!isset($this->tokens[$accessToken]) || !empty($this->tokens[$accessToken]['revoked'])) {
+            return false;
+        }
+
+        $this->tokens[$accessToken]['expires_at'] = $expiresAt;
         return true;
     }
 
@@ -255,11 +274,36 @@ class MemoryStorage implements StorageInterface
             if (isset($token['refresh_token'])
                 && $token['refresh_token'] === $refreshToken
                 && $token['client_id'] === $clientId
+                && empty($token['revoked'])
             ) {
                 return $token;
             }
         }
         return null;
+    }
+
+    public function revokeTokenFamily(string $refreshToken): bool
+    {
+        $family = null;
+
+        foreach ($this->tokens as $tokenData) {
+            if (($tokenData['refresh_token'] ?? null) === $refreshToken) {
+                $family = [$tokenData['client_id'] ?? null, $tokenData['user_id'] ?? null];
+                break;
+            }
+        }
+
+        if ($family === null) {
+            return false;
+        }
+
+        foreach ($this->tokens as $key => $tokenData) {
+            if (($tokenData['client_id'] ?? null) === $family[0] && ($tokenData['user_id'] ?? null) === $family[1]) {
+                $this->tokens[$key]['revoked'] = true;
+            }
+        }
+
+        return true;
     }
 
     public function revokeToken(string $token): bool

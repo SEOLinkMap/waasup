@@ -6,10 +6,6 @@ trait DatabaseContextTrait
 {
     /**
      * Get context data by identifier (agency or user)
-     *
-     * Required fields:
-     * - agencies table: id, uuid, name, active (plus any additional fields you have)
-     * - users table: id, uuid, name, email (plus any additional fields you have)
      */
     public function getContextData(string $identifier, string $type = 'agency'): ?array
     {
@@ -31,7 +27,7 @@ trait DatabaseContextTrait
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($result) {
-            // Map database field names back to logical field names
+
             $normalizedResult = [];
             $tableName = $type === 'agency' ? 'agencies' : 'users';
             foreach ($this->config['database']['field_mapping'][$tableName] as $logicalField => $dbField) {

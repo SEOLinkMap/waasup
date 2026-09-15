@@ -14,19 +14,25 @@ abstract class AbstractTool implements ToolInterface
     protected array $inputSchema;
     protected array $outputSchema;
     protected array $annotations;
+    protected array $icons;
+    protected string $title;
 
     public function __construct(
         string $name,
         string $description,
         array $inputSchema = [],
         array $annotations = [],
-        array $outputSchema = []
+        array $outputSchema = [],
+        array $icons = [],
+        string $title = ''
     ) {
         $this->name = $name;
         $this->description = $description;
         $this->inputSchema = $inputSchema;
         $this->outputSchema = $outputSchema;
         $this->annotations = array_replace_recursive($this->getDefaultAnnotations(), $annotations);
+        $this->icons = $icons;
+        $this->title = $title;
     }
 
     public function getName(): string
@@ -41,11 +47,20 @@ abstract class AbstractTool implements ToolInterface
 
     public function getInputSchema(): array
     {
-        return [
-            'type' => 'object',
-            'properties' => $this->inputSchema['properties'] ?? [],
-            'required' => $this->inputSchema['required'] ?? []
-        ];
+        $properties = $this->inputSchema['properties'] ?? [];
+        $required = $this->inputSchema['required'] ?? [];
+
+        if (empty($properties)) {
+            return ['type' => 'object', 'additionalProperties' => false];
+        }
+
+        $schema = ['type' => 'object', 'properties' => $properties];
+
+        if (!empty($required)) {
+            $schema['required'] = array_values($required);
+        }
+
+        return $schema;
     }
 
     public function getOutputSchema(): array
@@ -58,17 +73,22 @@ abstract class AbstractTool implements ToolInterface
         return $this->annotations;
     }
 
+    public function getIcons(): array
+    {
+        return $this->icons;
+    }
+
+    public function getTitle(): string
+    {
+        return $this->title;
+    }
+
+    /**
+     * Behaviour hints a tool declares about itself
+     */
     protected function getDefaultAnnotations(): array
     {
-        return [
-        'readOnlyHint' => true,
-        'destructiveHint' => false,
-        'idempotentHint' => true,
-        'openWorldHint' => false,
-        'experimental' => false,
-        'requiresUserConfirmation' => false,
-        'sensitive' => false
-        ];
+        return [];
     }
 
     /**

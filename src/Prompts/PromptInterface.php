@@ -26,4 +26,14 @@ interface PromptInterface
      * Execute the prompt with given arguments and context
      */
     public function execute(array $arguments, array $context = []): array;
+
+    /**
+     * Get display icons (for MCP 2025-11-25+)
+     */
+    public function getIcons(): array;
+
+    /**
+     * Get the display title (for MCP 2025-06-18+)
+     */
+    public function getTitle(): string;
 }

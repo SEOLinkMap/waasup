@@ -6,11 +6,6 @@ trait DatabaseMessageTrait
 {
     /**
      * Store a message for SSE/streaming delivery to MCP clients
-     *
-     * Required fields in messages table:
-     * - session_id (varchar): MCP session identifier
-     * - message_data (text): JSON-encoded message data
-     * - context_data (text): JSON-encoded context information
      */
     public function storeMessage(string $sessionId, array $messageData, array $context = []): bool
     {
@@ -34,15 +29,23 @@ trait DatabaseMessageTrait
     /**
      * Retrieve pending messages for a session (ordered by creation time)
      */
-    public function getMessages(string $sessionId, array $context = []): array
+    public function getMessages(string $sessionId, array $context = [], ?string $afterId = null): array
     {
         $sql = "SELECT `{$this->getField('messages', 'id')}`, `{$this->getField('messages', 'message_data')}`, `{$this->getField('messages', 'context_data')}`, `{$this->getField('messages', 'created_at')}`
                 FROM `{$this->getTableName('messages')}`
-                WHERE `{$this->getField('messages', 'session_id')}` = :session_id
-                ORDER BY `{$this->getField('messages', 'created_at')}` ASC";
+                WHERE `{$this->getField('messages', 'session_id')}` = :session_id";
+
+        $params = [':session_id' => $sessionId];
+
+        if ($afterId !== null && $afterId !== '') {
+            $sql .= " AND `{$this->getField('messages', 'id')}` > :after_id";
+            $params[':after_id'] = (int)$afterId;
+        }
+
+        $sql .= " ORDER BY `{$this->getField('messages', 'id')}` ASC";
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([':session_id' => $sessionId]);
+        $stmt->execute($params);
 
         $messages = [];
         while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {

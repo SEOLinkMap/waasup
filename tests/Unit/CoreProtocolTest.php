@@ -8,9 +8,6 @@ use Seolinkmap\Waasup\Tests\TestCase;
 
 /**
  * Unit tests for MCP core protocol features
- *
- * Tests protocol compliance across prompts, resources, cancellation,
- * logging, pagination, sampling, and roots capabilities.
  */
 class CoreProtocolTest extends TestCase
 {
@@ -27,7 +24,6 @@ class CoreProtocolTest extends TestCase
         $promptRegistry = $this->createTestPromptRegistry();
         $resourceRegistry = $this->createTestResourceRegistry();
 
-        // Add test prompts with validation
         $promptRegistry->register(
             'template_prompt',
             function ($arguments, $context) {
@@ -62,11 +58,10 @@ class CoreProtocolTest extends TestCase
             ]
         );
 
-        // Add test resource that can fail
         $resourceRegistry->register(
             'test://protected',
             function ($uri, $context) {
-                // Check for agency_id in the context structure
+
                 $agencyId = $context['agency_id'] ?? $context['token_data']['agency_id'] ?? $context['context_data']['id'] ?? null;
                 if (empty($agencyId)) {
                     throw new \RuntimeException('Access denied - no agency context');
@@ -139,15 +134,12 @@ class CoreProtocolTest extends TestCase
         $response = $this->server->handle($request, $this->createResponse());
         $this->assertEquals(202, $response->getStatusCode());
 
-        // Get the actual stored response
         $messages = $this->storage->getMessages($sessionId);
         $this->assertNotEmpty($messages, 'No response was stored');
 
         $lastMessage = end($messages);
         return $lastMessage['data'];
     }
-
-    // ===== PROMPT TESTS =====
 
     public function testPromptWithArguments(): void
     {
@@ -191,7 +183,6 @@ class CoreProtocolTest extends TestCase
         $this->assertArrayHasKey('prompts', $response['result']);
         $this->assertIsArray($response['result']['prompts']);
 
-        // Verify our test prompts are included
         $promptNames = array_column($response['result']['prompts'], 'name');
         $this->assertContains('test_prompt', $promptNames);
         $this->assertContains('template_prompt', $promptNames);
@@ -224,7 +215,6 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        // Test missing required argument - should fail gracefully
         $response = $this->sendRequestAndGetStoredResponse(
             $sessionId,
             [
@@ -232,16 +222,15 @@ class CoreProtocolTest extends TestCase
             'method' => 'prompts/get',
             'params' => [
                 'name' => 'template_prompt',
-                'arguments' => ['topic' => 'test'] // missing required 'name'
+                'arguments' => ['topic' => 'test']
             ],
             'id' => $this->getNextRequestId()
             ]
         );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
-        // Should return error result in wrapped form, not crash
-        $this->assertArrayHasKey('result', $response);
-        $this->assertArrayHasKey('messages', $response['result']);
+        $this->assertArrayHasKey('error', $response);
+        $this->assertArrayNotHasKey('result', $response);
     }
 
     public function testPromptTemplateProcessing(): void
@@ -267,8 +256,6 @@ class CoreProtocolTest extends TestCase
         $this->assertStringContainsString('Bob', $messageText);
         $this->assertStringContainsString('protocols', $messageText);
     }
-
-    // ===== RESOURCE TESTS =====
 
     public function testResourceSubscription(): void
     {
@@ -350,7 +337,6 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        // Test protected resource with context
         $response = $this->sendRequestAndGetStoredResponse(
             $sessionId,
             [
@@ -365,7 +351,7 @@ class CoreProtocolTest extends TestCase
         $this->assertArrayHasKey('result', $response);
         $content = json_decode($response['result']['contents'][0]['text'], true);
         $this->assertTrue($content['protected']);
-        $this->assertEquals(1, $content['agency']); // From test context
+        $this->assertEquals(1, $content['agency']);
     }
 
     public function testResourceMimeTypeDetection(): void
@@ -402,18 +388,14 @@ class CoreProtocolTest extends TestCase
         );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
-        // Should return wrapped error content, not crash
-        $this->assertArrayHasKey('result', $response);
-        $this->assertArrayHasKey('contents', $response['result']);
+        $this->assertArrayHasKey('error', $response);
+        $this->assertEquals(-32002, $response['error']['code']);
     }
-
-    // ===== CANCELLATION TESTS =====
 
     public function testRequestCancellation(): void
     {
         $sessionId = $this->initializeAndGetSession();
 
-        // Send cancellation notification
         $request = $this->createRequest(
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
@@ -434,7 +416,6 @@ class CoreProtocolTest extends TestCase
         $response = $this->server->handle($request, $this->createResponse());
         $this->assertEquals(202, $response->getStatusCode());
 
-        // Verify messages were cleaned up
         $messages = $this->storage->getMessages($sessionId);
         $this->assertIsArray($messages);
     }
@@ -493,7 +474,6 @@ class CoreProtocolTest extends TestCase
     {
         $sessionId = $this->initializeAndGetSession();
 
-        // Add some messages first
         $this->storage->storeMessage($sessionId, ['test' => 'message1']);
         $this->storage->storeMessage($sessionId, ['test' => 'message2']);
 
@@ -519,17 +499,13 @@ class CoreProtocolTest extends TestCase
         $response = $this->server->handle($request, $this->createResponse());
         $this->assertEquals(202, $response->getStatusCode());
 
-        // Verify cleanup occurred
         $this->assertGreaterThan(0, $initialCount);
     }
-
-    // ===== LOGGING TESTS =====
 
     public function testLoggingCapability(): void
     {
         $sessionId = $this->initializeAndGetSession();
 
-        // Logging methods are not implemented in current server, expect method not found
         $request = $this->createRequest(
             'POST',
             '/mcp/550e8400-e29b-41d4-a716-446655440000',
@@ -636,8 +612,6 @@ class CoreProtocolTest extends TestCase
         $this->assertEquals(202, $response->getStatusCode());
     }
 
-    // ===== PAGINATION TESTS =====
-
     public function testPaginationSupport(): void
     {
         $sessionId = $this->initializeAndGetSession();
@@ -672,7 +646,7 @@ class CoreProtocolTest extends TestCase
         );
 
         $this->assertEquals('2.0', $response['jsonrpc']);
-        $this->assertArrayHasKey('result', $response);
+        $this->assertEquals(-32602, $response['error']['code']);
     }
 
     public function testPaginationLimits(): void
@@ -692,8 +666,6 @@ class CoreProtocolTest extends TestCase
         $this->assertArrayHasKey('result', $response);
         $this->assertArrayHasKey('prompts', $response['result']);
     }
-
-    // ===== SAMPLING TESTS =====
 
     public function testSamplingCoordination(): void
     {
@@ -762,8 +734,6 @@ class CoreProtocolTest extends TestCase
         $this->assertEquals('2.0', $response['jsonrpc']);
         $this->assertArrayHasKey('result', $response);
     }
-
-    // ===== ROOTS TESTS =====
 
     public function testRootsCapability(): void
     {

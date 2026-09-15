@@ -31,6 +31,7 @@ class MCPSaaSServer
     private array $config;
     private ?array $contextData = null;
     private ?string $sessionId = null;
+    private mixed $requestId = null;
 
     /**
      * Initialize the MCP SaaS Server
@@ -66,9 +67,6 @@ class MCPSaaSServer
     /**
      * Main MCP endpoint handler for processing HTTP requests
      *
-     * Handles both POST (JSON-RPC) and GET (streaming) requests according to MCP protocol.
-     * Manages session negotiation, authentication, and protocol version compatibility.
-     *
      * @param Request $request PSR-7 HTTP request
      * @param Response $response PSR-7 HTTP response
      * @return Response Modified PSR-7 response with MCP data or stream
@@ -85,10 +83,30 @@ class MCPSaaSServer
                 return $this->handleCorsPreflightRequest($response);
             }
 
-            $this->validateOriginHeader($request);
+            if (!$this->isOriginAllowed($request)) {
+                return $this->createErrorResponse(
+                    $response,
+                    -32600,
+                    'Origin not allowed. This server refuses cross-origin browser requests to a loopback address.',
+                    null,
+                    403
+                );
+            }
+
+            if (!$this->acceptsContentType($request, $request->getMethod() === 'GET' ? 'text/event-stream' : 'application/json')) {
+                return $this->createErrorResponse(
+                    $response,
+                    -32600,
+                    $request->getMethod() === 'GET'
+                        ? 'This endpoint answers GET with text/event-stream. Send Accept: text/event-stream.'
+                        : 'This endpoint answers POST with application/json. Send Accept: application/json, text/event-stream.',
+                    null,
+                    406
+                );
+            }
 
             if ($request->getMethod() === 'POST') {
-                // Parse JSON FIRST to catch parse errors and avoid multiple body reads
+
                 $body = (string) $request->getBody();
                 $data = null;
 
@@ -104,16 +122,15 @@ class MCPSaaSServer
                         throw new ProtocolException('Parse error', -32700);
                     }
 
-                    // Ensure we have an array
                     if ($data !== null && !is_array($data)) {
                         throw new ProtocolException('Request must be JSON object', -32600);
                     }
                 }
 
-                // Check for initialize method - skip auth if this is initialize
+                $this->requestId = $data['id'] ?? null;
+
                 $isInitialize = ($data['method'] ?? '') === 'initialize';
 
-                // THEN check authentication (skip for authless mode OR initialize)
                 if (!$isInitialize && empty($this->contextData) && !$isAuthless) {
                     throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
                 }
@@ -121,17 +138,23 @@ class MCPSaaSServer
                 $this->sessionId = $this->negotiateSessionId($request, $data);
 
                 if ($isInitialize) {
-                    // negotiate the protocol
+
                     $clientProtocolVersion = $data['params']['protocolVersion'] ?? null;
                     if (!$clientProtocolVersion) {
-                        throw new ProtocolException('Invalid params: protocolVersion required', -32602);
+                        throw new ProtocolException('Invalid params: protocolVersion required. Send the protocol version your client speaks, for example ' . $this->config['supported_versions'][0] . '.', -32602);
                     }
 
-                    // This is where we negotiate the protocol
                     $protocolVersion = $this->versionNegotiator->negotiate($clientProtocolVersion);
 
-                    // Create the combined sessionID with protocol version
-                    $this->sessionId = $protocolVersion . '_' . $this->sessionId;
+                    $openedSessionId = $this->extractSessionIdFromRequest($request);
+
+                    if ($openedSessionId
+                        && str_starts_with($openedSessionId, $protocolVersion . '_')
+                        && $this->storage->getSession($openedSessionId)) {
+                        $this->sessionId = $openedSessionId;
+                    } else {
+                        $this->sessionId = $protocolVersion . '_' . $this->sessionId;
+                    }
 
                     return $this->messageHandler->handleInitialize($data['params'] ?? [], $data['id'] ?? null, $this->sessionId, $protocolVersion, $response);
                 }
@@ -140,7 +163,7 @@ class MCPSaaSServer
             }
 
             if ($request->getMethod() === 'GET') {
-                // For authless mode, ensure we have minimal context
+
                 if ($isAuthless && empty($this->contextData)) {
                     $this->contextData = $this->getDefaultAuthlessContext($request);
                 }
@@ -154,7 +177,25 @@ class MCPSaaSServer
                 return $this->handleStreamConnection($request, $response, $protocolVersion);
             }
 
-            throw new ProtocolException('Method not allowed', -32002);
+            if ($request->getMethod() === 'DELETE') {
+                $sessionId = $this->extractSessionIdFromRequest($request);
+
+                if ($sessionId) {
+                    $this->storage->storeSession($sessionId, [], 0);
+                }
+
+                return $response
+                    ->withHeader('Access-Control-Allow-Origin', '*')
+                    ->withStatus(204);
+            }
+
+            return $this->createErrorResponse(
+                $response,
+                -32600,
+                'Method not allowed. This endpoint accepts POST for requests, GET for the event stream, DELETE to end a session and OPTIONS for preflight.',
+                null,
+                405
+            );
         } catch (AuthenticationException $e) {
             $this->logger->warning(
                 'Authentication failed',
@@ -173,15 +214,18 @@ class MCPSaaSServer
                 'session_id' => $this->sessionId
                 ]
             );
-            return $this->createErrorResponse($response, $e->getCode(), 'Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT.');
-        } catch (\Exception $e) {
+
+            $httpStatus = $e->getCode() === -32001 ? 404 : 400;
+
+            return $this->createErrorResponse($response, $e->getCode(), $e->getMessage(), $this->requestId, $httpStatus);
+        } catch (\Throwable $e) {
             $this->logger->critical(
                 'Unexpected error in MCP handler',
                 [
                 'message' => $e->getMessage()
                 ]
             );
-            return $this->createErrorResponse($response, -32603, 'Internal error');
+            return $this->createErrorResponse($response, -32603, 'Internal error', $this->requestId, 500);
         }
     }
 
@@ -217,49 +261,52 @@ class MCPSaaSServer
     {
         $method = $request->getMethod();
 
-        // Check for existing session ID in header or route
         $existingSessionId = $this->extractSessionIdFromRequest($request);
 
         if ($method === 'GET') {
-            // GET requires existing session ID
             if (!$existingSessionId) {
-                throw new ProtocolException('Session ID required for GET requests', -32001);
+                $newSessionId = '2024-11-05_' . $this->generateSessionId();
+
+                $this->storage->storeSession(
+                    $newSessionId,
+                    ['protocol_version' => '2024-11-05', 'created_at' => time()],
+                    (int)$this->config['session_lifetime']
+                );
+
+                return $newSessionId;
             }
 
-            // Verify session exists in storage (using full protocolVersion_sessionId)
             $sessionData = $this->storage->getSession($existingSessionId);
             if (!$sessionData) {
-                throw new ProtocolException('Invalid or expired session ID', -32001);
+                throw new ProtocolException('Invalid or expired session ID. Send a new initialize request to start a session.', -32001);
             }
 
             return $existingSessionId;
         }
 
         if ($method === 'POST') {
-            // Check if this is an initialize request first
+
             if (($data['method'] ?? '') === 'initialize') {
-                // Generate just the numeric session ID - protocol gets added later in initialize
+
                 $newSessionId = $this->generateSessionId();
                 return $newSessionId;
             }
 
-            // For non-initialize requests, we need a valid existing session
             if (!$existingSessionId) {
                 $this->logger->warning('No session ID found in request', [
                     'method' => $data['method'] ?? 'unknown',
                     'headers' => array_keys($request->getHeaders())
                 ]);
-                throw new ProtocolException('Session ID required for non-initialize requests', -32001);
+                throw new ProtocolException('Session ID required. Send an initialize request first, then repeat its Mcp-Session-Id response header on every later request.', -32001);
             }
 
-            // Verify session exists in storage (using full protocolVersion_sessionId)
             $sessionData = $this->storage->getSession($existingSessionId);
             if (!$sessionData) {
                 $this->logger->warning('Session not found in storage', [
                     'session_id' => $existingSessionId,
                     'method' => $data['method'] ?? 'unknown'
                 ]);
-                throw new ProtocolException('Invalid or expired session ID', -32001);
+                throw new ProtocolException('Invalid or expired session ID. Send a new initialize request to start a session.', -32001);
             }
 
             return $existingSessionId;
@@ -286,7 +333,6 @@ class MCPSaaSServer
             }
         }
 
-        // Check route parameters
         $route = $request->getAttribute('__route__');
 
         if ($route && method_exists($route, 'getArgument')) {
@@ -297,13 +343,12 @@ class MCPSaaSServer
             }
         }
 
-        // Generic URI path extraction - look for protocolVersion_sessionId format
         $path = $request->getUri()->getPath();
 
         $pathSegments = explode('/', trim($path, '/'));
 
         foreach ($pathSegments as $index => $segment) {
-            // Look for protocolVersion_sessionId pattern
+
             if (preg_match('/^[a-zA-Z0-9.-]+_[a-zA-Z0-9]+$/', $segment)) {
                 return $segment;
             }
@@ -316,12 +361,11 @@ class MCPSaaSServer
      */
     private function getBaseUrl(Request $request): string
     {
-        // First try to get from config (for tests and when explicitly set)
+
         if (!empty($this->config['base_url'])) {
             return $this->config['base_url'];
         }
 
-        // Extract from request URI
         $uri = $request->getUri();
         $scheme = 'https';
         $host = $uri->getHost() ?: 'localhost';
@@ -341,15 +385,15 @@ class MCPSaaSServer
      */
     private function getSessionProtocolVersion(Request $request): string
     {
-        // Get the negotiated version from session
+
         $sessionData = $this->storage->getSession($this->sessionId);
         if (!$sessionData || !isset($sessionData['protocol_version'])) {
-            // Try to extract from sessionId if it's in protocolVersion_sessionId format
+
             if ($this->sessionId && strpos($this->sessionId, '_') !== false) {
                 $parts = explode('_', $this->sessionId, 2);
                 if (count($parts) === 2) {
                     $protocolFromSessionId = $parts[0];
-                    // Validate it's a known protocol version
+
                     if (in_array($protocolFromSessionId, $this->config['supported_versions'])) {
                         return $protocolFromSessionId;
                     }
@@ -360,19 +404,14 @@ class MCPSaaSServer
 
         $negotiatedVersion = $sessionData['protocol_version'];
 
-        // Only check MCP-Protocol-Version header for 2025-06-18 (spec requirement)
-        if ($negotiatedVersion === '2025-06-18') {
-            $isAuthless = $this->config['auth']['authless'];
-
+        if (strcmp($negotiatedVersion, '2025-06-18') >= 0) {
             $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
 
-            if (!$headerVersion && !$isAuthless) {
-                // Only require header for OAuth mode (security critical)
-                throw new ProtocolException('MCP-Protocol-Version header required for version 2025-06-18', -32600);
-            }
-
             if ($headerVersion && $headerVersion !== $negotiatedVersion) {
-                throw new ProtocolException('MCP-Protocol-Version header must match negotiated version', -32600);
+                throw new ProtocolException(
+                    "MCP-Protocol-Version header says {$headerVersion} but this session negotiated {$negotiatedVersion}. Send MCP-Protocol-Version: {$negotiatedVersion} or start a new session with initialize.",
+                    -32600
+                );
             }
         }
 
@@ -384,7 +423,7 @@ class MCPSaaSServer
      */
     private function shouldUseStreamableHTTP(string $protocolVersion): bool
     {
-        return in_array($protocolVersion, ['2025-03-26', '2025-06-18']);
+        return strcmp($protocolVersion, '2025-03-26') >= 0;
     }
 
     /**
@@ -425,7 +464,7 @@ class MCPSaaSServer
      */
     private function handleMCPRequest(Request $request, Response $response, ?array $data = null): Response
     {
-        // At this point, $data should always be parsed and valid, but let's be defensive
+
         if ($data === null) {
             throw new ProtocolException('No request data provided', -32600);
         }
@@ -439,27 +478,55 @@ class MCPSaaSServer
     }
 
     /**
-     * Validate Origin header for 2025-03-26+ versions to prevent DNS rebinding attacks
+     * Check whether the client accepts the content type this endpoint will return
+     *
+     * @param string $contentType the type the endpoint produces
+     * @return bool false when the client asked for something else entirely
      */
-    private function validateOriginHeader(Request $request): void
+    private function acceptsContentType(Request $request, string $contentType): bool
     {
-        $origin = $request->getHeaderLine('Origin');
-        $host = $request->getHeaderLine('Host');
+        $accept = $request->getHeaderLine('Accept');
 
-        // Allow requests without Origin header (non-browser clients)
-        if (empty($origin)) {
-            return;
+        if ($accept === '') {
+            return true;
         }
 
-        // DNS rebinding protection: reject external origins trying to access localhost
-        $hostOnly = explode(':', $host)[0]; // Remove port
+        [$group] = explode('/', $contentType);
+
+        foreach ([$contentType, $group . '/*', '*/*'] as $candidate) {
+            if (stripos($accept, $candidate) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check the Origin header
+     *
+     * @return bool false when the request must be refused with 403
+     */
+    private function isOriginAllowed(Request $request): bool
+    {
+        $origin = $request->getHeaderLine('Origin');
+
+        if (empty($origin)) {
+            return true;
+        }
+
+        $allowedOrigins = $this->config['auth']['allowed_origins'];
+
+        if (!empty($allowedOrigins)) {
+            return in_array($origin, $allowedOrigins, true);
+        }
+
+        $hostOnly = explode(':', $request->getHeaderLine('Host'))[0];
         $originHost = parse_url($origin, PHP_URL_HOST) ?? '';
 
         $localhostHosts = ['localhost', '127.0.0.1', '::1'];
 
-        if (in_array($hostOnly, $localhostHosts) && !in_array($originHost, $localhostHosts)) {
-            throw new ProtocolException('DNS rebinding attack detected', -32600);
-        }
+        return !in_array($hostOnly, $localhostHosts) || in_array($originHost, $localhostHosts);
     }
 
     /**
@@ -551,8 +618,6 @@ class MCPSaaSServer
     /**
      * Register a resource template with the MCP server
      *
-     * Resource templates allow pattern-based URI matching (e.g., "/files/{filename}").
-     *
      * @param string $uriTemplate URI pattern with variables in {curly} braces
      * @param callable $handler Function that provides the resource content
      * @param array $schema JSON schema defining resource template metadata
@@ -564,9 +629,100 @@ class MCPSaaSServer
     }
 
     /**
-     * Set the current authentication and context data
+     * Send a progress notification for the request being handled
      *
-     * Used primarily for testing or when bypassing normal authentication flow.
+     * @param string $sessionId Session the request arrived on
+     * @param int|float $progress Work completed so far
+     * @param string $message Human readable step description (2025-03-26+)
+     * @param int|float|null $total Expected total when known
+     * @return void
+     */
+    public function sendProgressNotification(string $sessionId, int|float $progress, string $message = '', int|float|null $total = null): void
+    {
+        $this->messageHandler->sendProgressNotification($sessionId, $progress, $message, $total);
+    }
+
+    /**
+     * Send a list_changed notification
+     *
+     * @param string $sessionId Session to notify
+     * @param string $listType One of tools, prompts or resources
+     * @return void
+     */
+    public function notifyListChanged(string $sessionId, string $listType): void
+    {
+        $this->messageHandler->sendListChangedNotification($sessionId, $listType);
+    }
+
+    /**
+     * Send a resources/updated notification to a subscribed session
+     *
+     * @param string $sessionId Session to notify
+     * @param string $uri Resource URI that changed
+     * @return void
+     */
+    public function notifyResourceUpdated(string $sessionId, string $uri): void
+    {
+        $this->messageHandler->sendResourceUpdatedNotification($sessionId, $uri);
+    }
+
+    /**
+     * Send a notifications/message log record
+     *
+     * @param string $sessionId Session to notify
+     * @param string $level RFC 5424 severity
+     * @param mixed $data Log payload
+     * @param string $logger Optional logger name
+     * @return void
+     */
+    public function sendLogMessage(string $sessionId, string $level, mixed $data, string $logger = ''): void
+    {
+        $this->messageHandler->sendLogMessage($sessionId, $level, $data, $logger);
+    }
+
+    /**
+     * Ask the client's model to generate a completion
+     *
+     * @param string $sessionId Session to send the request on
+     * @param array $messages Conversation to sample from
+     * @param array $options maxTokens, temperature, stopSequences, systemPrompt, modelPreferences, and tools/toolChoice from 2025-11-25
+     * @param array $context Context stored alongside the queued request
+     * @return string Request id the client's response will carry
+     */
+    public function requestSampling(string $sessionId, array $messages, array $options = [], array $context = []): string
+    {
+        return $this->messageHandler->requestSampling($sessionId, $messages, $options, $context);
+    }
+
+    /**
+     * Ask the client's user for structured input
+     *
+     * @param string $sessionId Session to send the request on
+     * @param string $message Prompt shown to the user
+     * @param array|null $requestedSchema Schema describing the fields requested
+     * @param array $context Context stored alongside the queued request
+     * @param array $options Pass a 'url' to use URL mode elicitation (2025-11-25)
+     * @return string Request id the client's response will carry
+     */
+    public function requestElicitation(string $sessionId, string $message, ?array $requestedSchema = null, array $context = [], array $options = []): string
+    {
+        return $this->messageHandler->requestElicitation($sessionId, $message, $requestedSchema, $context, $options);
+    }
+
+    /**
+     * Ask the client which roots it exposes
+     *
+     * @param string $sessionId Session to send the request on
+     * @param array $context Context stored alongside the queued request
+     * @return string Request id the client's response will carry
+     */
+    public function requestRootsList(string $sessionId, array $context = []): string
+    {
+        return $this->messageHandler->requestRootsList($sessionId, $context);
+    }
+
+    /**
+     * Set the current authentication and context data
      *
      * @param array $contextData Context information including user, agency, and token data
      * @return void
@@ -578,29 +734,36 @@ class MCPSaaSServer
 
     /**
      * Get default configuration
-     *
-     * This is the one location where every developer-facing configuration exists.
-     * Override them, if you need to, or let this repository handle things for you.
      */
     private function getDefaultConfig(): array
     {
         return [
-            // Core MCP Protocol Configuration
-            'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
-            'base_url' => null, // MCP base url
-            'session_user_id' => null, // key name for session validation around "is the user logged in?"
+
+            'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
+            'base_url' => null,
+            'session_user_id' => null,
             'scopes_supported' => ['mcp:read', 'mcp:write'],
-            'session_lifetime' => 3600,    // seconds
-            'test_mode' => false,           // set to true in tests
+            'session_lifetime' => 3600,
+            'pagination' => [
+                'page_size' => 50
+            ],
+            'tasks' => [
+                'default_ttl' => 300000,
+                'max_ttl' => 3600000,
+                'poll_interval' => 1000,
+                'max_retained' => 50
+            ],
+            'test_mode' => false,
             'server_info' => [
                 'name' => 'WaaSuP MCP SaaS Server',
-                'version' => '2.0.1'
+                'version' => '3.0.0'
             ],
             'auth' => [
                 'context_types' => ['agency', 'user'],
                 'validate_scope' => true,
-                'required_scopes' => ['mcp:read mcp:write'],
+                'required_scopes' => ['mcp:read'],
                 'authless' => false,
+                'allowed_origins' => [],
                 'authless_context_id' => 'public',
                 'authless_context_data' => [
                     'id' => 1,
@@ -615,7 +778,18 @@ class MCPSaaSServer
                 ]
             ],
             'oauth' => [
-                'base_url' => '', // OAuth base url
+                'base_url' => '',
+                'access_token_lifetime' => 3600,
+                'refresh_token_lifetime' => null,
+                'authorization_code_lifetime' => 300,
+                'sliding_expiration' => false,
+                'sliding_expiration_max_lifetime' => null,
+                'sliding_expiration_interval' => 60,
+                'ui' => [
+                    'background_color' => null,
+                    'text_color' => null,
+                    'accent_color' => null
+                ],
                 'auth_server' => [
                     'endpoints' => [
                         'authorize' => '/oauth/authorize',
@@ -664,6 +838,7 @@ class MCPSaaSServer
             'database' => [
                 'table_prefix' => 'mcp_',
                 'cleanup_interval' => 3600,
+                'message_lifetime' => 3600,
                 'table_mapping' => []
             ]
         ];

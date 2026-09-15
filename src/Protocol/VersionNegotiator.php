@@ -21,16 +21,21 @@ class VersionNegotiator
      */
     public function negotiate(string $clientVersion): string
     {
-        // Convert to comparable format or use semantic version comparison
+        if ($this->isSupported($clientVersion)) {
+            return $clientVersion;
+        }
+
         $clientVersionTime = strtotime($clientVersion);
 
-        foreach ($this->supportedVersions as $version) {
-            $versionTime = strtotime($version);
-            if ($versionTime <= $clientVersionTime) {
-                return $version;
+        if ($clientVersionTime !== false) {
+            foreach ($this->supportedVersions as $version) {
+                if (strtotime($version) <= $clientVersionTime) {
+                    return $version;
+                }
             }
         }
-        return end($this->supportedVersions);
+
+        return reset($this->supportedVersions);
     }
 
     /**
@@ -52,7 +57,7 @@ class VersionNegotiator
     private function getDefaultConfig(): array
     {
         return [
-            'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05']
+            'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']
         ];
     }
 }

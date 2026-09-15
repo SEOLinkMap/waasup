@@ -204,7 +204,7 @@ registerMyResources($resourceRegistry);
 $app->map(['GET', 'POST', 'OPTIONS'], '/mcp[/{sessID}]', function ($request, $response, $args) use ($storage, $toolRegistry, $promptRegistry, $resourceRegistry, $logger) {
 
     $config = [
-        'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
+        'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
         'server_info' => [
             'name' => 'Example MCP Server',
             'version' => '1.0.0'
@@ -245,7 +245,7 @@ $app->map(['GET', 'POST', 'OPTIONS'], '/mcp-private/{agencyUuid}[/{sessID}]', fu
 
     $config = [
         'base_url' => $baseUrl,
-        'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
+        'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
         'server_info' => [
             'name' => 'Example Private MCP Server',
             'version' => '1.0.0'
@@ -368,6 +368,10 @@ $wellKnownProvider = new WellKnownProvider([
 
 $app->get('/.well-known/oauth-authorization-server[/{path:.*}]', function ($request, $response) use ($wellKnownProvider) {
     return $wellKnownProvider->authorizationServer($request, $response);
+});
+
+$app->get('/.well-known/openid-configuration[/{path:.*}]', function ($request, $response) use ($wellKnownProvider) {
+    return $wellKnownProvider->openidConfiguration($request, $response);
 });
 
 $app->get('/.well-known/oauth-protected-resource[/{path:.*}]', function ($request, $response) use ($wellKnownProvider) {
@@ -580,7 +584,7 @@ Just change the config arrays to customize behavior:
 
 ```php
 $config = [
-    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
+    'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
     'server_info' => ['name' => 'My Server', 'version' => '1.0.0'],
     'base_url' => 'https://your-domain.com/mcp',
     'auth' => [

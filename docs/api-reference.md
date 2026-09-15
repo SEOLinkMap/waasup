@@ -33,11 +33,20 @@ $config = [
     // ================================================================
     // CORE MCP PROTOCOL CONFIGURATION
     // ================================================================
-    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
+    'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
     'base_url' => null,                    // Your MCP server URL (auto-detected if null)
     'session_user_id' => null,             // Session key for existing user login integration
     'scopes_supported' => ['mcp:read', 'mcp:write'],
     'session_lifetime' => 3600,            // MCP session lifetime in seconds
+    'pagination' => [
+        'page_size' => 50,                 // Items per list page; 0 returns every item at once
+    ],
+    'tasks' => [
+        'default_ttl' => 300000,           // Task lifetime in ms when the client asks for none
+        'max_ttl' => 3600000,              // Ceiling applied to a requested ttl
+        'poll_interval' => 1000,           // Suggested tasks/get interval in ms
+        'max_retained' => 50,              // Tasks kept per session
+    ],
     'test_mode' => false,                  // Set true for testing (disables some features)
 
     // ================================================================
@@ -56,6 +65,7 @@ $config = [
         'validate_scope' => true,                       // Enforce OAuth scope validation
         'required_scopes' => ['mcp:read'],              // Required OAuth scopes
         'authless' => false,                            // true = public access, false = OAuth required
+        'allowed_origins' => [],                        // Origin allowlist; empty trusts any origin except loopback rebinding
 
         // Public/Authless Mode Settings (only used when authless = true)
         'authless_context_id' => 'public',
@@ -77,6 +87,21 @@ $config = [
     // ================================================================
     'oauth' => [
         'base_url' => '',                               // OAuth server base URL (defaults to same as MCP)
+
+        // Token Lifetimes
+        'access_token_lifetime' => 3600,                // Access token validity in seconds (expires_in)
+        'refresh_token_lifetime' => null,               // Refresh token validity in seconds, null = never expires
+        'authorization_code_lifetime' => 300,           // Authorization code validity in seconds
+        'sliding_expiration' => false,                  // Extend access tokens on each authenticated request
+        'sliding_expiration_max_lifetime' => null,      // Absolute cap from issue time, null = uncapped
+        'sliding_expiration_interval' => 60,            // Minimum seconds between expiry extensions
+
+        // Browser Page Appearance (light/dark follows the operating system)
+        'ui' => [
+            'background_color' => null,                 // Page background, or ['light' => ..., 'dark' => ...]
+            'text_color' => null,                       // Body text color
+            'accent_color' => null                      // Primary button color
+        ],
 
         // Authorization Server Configuration
         'auth_server' => [
@@ -141,6 +166,7 @@ $config = [
     'database' => [
         'table_prefix' => 'mcp_',                      // Prefix for auto-generated table names
         'cleanup_interval' => 3600,                    // Automatic cleanup frequency (seconds)
+        'message_lifetime' => 3600,                    // How long an undelivered message is kept (seconds)
         'table_mapping' => [],                         // Map logical table names to existing tables
         'field_mapping' => []                          // Map logical field names to existing columns
     ]
@@ -151,7 +177,13 @@ $config = [
 
 ### Core Protocol Settings
 
-**`supported_versions`**: Array of MCP protocol versions your server supports. Listed in preference order (newest first). The server automatically negotiates the best compatible version with each client.
+**`supported_versions`**: MCP protocol versions this server supports, newest first. A client requesting an unsupported version is answered with the first entry.
+
+**`pagination.page_size`**: Items returned per page by `tools/list`, `prompts/list`, `resources/list` and `resources/templates/list`. A `nextCursor` is issued while more remain. Set to `0` to return every item in a single response.
+
+**`auth.allowed_origins`**: Origins permitted to reach the MCP endpoint from a browser. Empty accepts any origin except a cross-origin request aimed at a loopback host. A disallowed `Origin` is answered with 403.
+
+**`instructions`**: Optional text returned to the client in the `initialize` result, describing how this server expects to be used.
 
 **`base_url`**: The base URL where your MCP server is accessible. If null, WaaSuP auto-detects from the request. For multi-tenant setups, include the `{agencyUuid}` placeholder.
 
@@ -456,18 +488,77 @@ $config = [
 
 WaaSuP automatically gates features based on the negotiated MCP protocol version:
 
-| Feature | 2024-11-05 | 2025-03-26 | 2025-06-18 |
-|---------|------------|------------|------------|
-| Tools, Prompts, Resources | ✅ | ✅ | ✅ |
-| Progress Notifications | ✅ | ✅ | ✅ |
-| Tool Annotations | ❌ | ✅ | ✅ |
-| Audio Content | ❌ | ✅ | ✅ |
-| JSON-RPC Batching | ❌ | ✅ | ❌ |
-| Completions | ❌ | ✅ | ✅ |
-| Elicitation | ❌ | ❌ | ✅ |
-| Structured Outputs | ❌ | ❌ | ✅ |
-| Resource Links | ❌ | ❌ | ✅ |
-| OAuth Resource Indicators | ❌ | ❌ | ✅ |
+| Feature | 2024-11-05 | 2025-03-26 | 2025-06-18 | 2025-11-25 |
+|---------|------------|------------|------------|------------|
+| Tools, Prompts, Resources | ✅ | ✅ | ✅ | ✅ |
+| Resource Subscriptions, Logging | ✅ | ✅ | ✅ | ✅ |
+| Progress Notifications | ✅ | ✅ | ✅ | ✅ |
+| Tool Annotations | ❌ | ✅ | ✅ | ✅ |
+| Audio Content | ❌ | ✅ | ✅ | ✅ |
+| JSON-RPC Batching | ❌ | ✅ | ❌ | ❌ |
+| Completions | ❌ | ✅ | ✅ | ✅ |
+| Elicitation | ❌ | ❌ | ✅ | ✅ |
+| Structured Outputs | ❌ | ❌ | ✅ | ✅ |
+| Resource Links | ❌ | ❌ | ✅ | ✅ |
+| OAuth Resource Indicators | ❌ | ❌ | ✅ | ✅ |
+| Icons | ❌ | ❌ | ❌ | ✅ |
+| URL Mode Elicitation | ❌ | ❌ | ❌ | ✅ |
+| Tool Calling in Sampling | ❌ | ❌ | ❌ | ✅ |
+| Tasks (experimental) | ❌ | ❌ | ❌ | ✅ |
+
+## Server Notifications
+
+The server object sends the notifications a client subscribed to. Each takes the
+session id the request arrived on.
+
+```php
+// Progress for the request a tool is handling, sent only when the client
+// attached a progressToken to it
+$server->sendProgressNotification($sessionId, 40, 'Fetching rows', 100);
+
+// A list the client may have cached has changed
+$server->notifyListChanged($sessionId, 'tools');
+
+// A resource changed, delivered only if the session subscribed to that URI
+$server->notifyResourceUpdated($sessionId, 'file:///reports/daily.csv');
+
+// A log record, dropped unless the client set a level at or below this one
+$server->sendLogMessage($sessionId, 'warning', 'Rate limit at 80%', 'quota');
+```
+
+Delivery is gated by what the client requested:
+
+- **`resources/subscribe`** and **`resources/unsubscribe`** record which resource URIs a
+  session is watching. `notifyResourceUpdated()` emits nothing for an unsubscribed URI.
+- **`logging/setLevel`** records the minimum severity a session accepts.
+  `sendLogMessage()` emits nothing until a level is set, then drops anything below it.
+  Levels are the RFC 5424 set: `debug`, `info`, `notice`, `warning`, `error`, `critical`,
+  `alert`, `emergency`.
+- **`sendProgressNotification()`** emits only when the request being handled carried a
+  `progressToken`.
+
+## Stream Resumption
+
+Every SSE event carries an `id`. A client reconnecting with the `Last-Event-ID` header is
+replayed only the messages it missed. A reconnect without the header resumes from the
+point the session last reached.
+
+Undelivered messages are pruned once `database.message_lifetime` elapses.
+
+## Server Requests to the Client
+
+Sampling, elicitation and roots are requests the server makes of the client. Each is
+refused unless the client declared that capability during `initialize`:
+
+```php
+$requestId = $server->requestSampling($sessionId, $messages, ['maxTokens' => 500]);
+$requestId = $server->requestElicitation($sessionId, 'Which project should I use?', $schema);
+$requestId = $server->requestRootsList($sessionId);
+```
+
+The client answers with an ordinary JSON-RPC response carrying that request id, which the
+server stores for retrieval through `StorageInterface::getSamplingResponse()`,
+`getRootsResponse()` and `getElicitationResponse()`.
 
 ## Environment-Specific Configuration
 

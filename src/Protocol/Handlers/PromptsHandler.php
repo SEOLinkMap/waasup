@@ -10,62 +10,98 @@ class PromptsHandler
 {
     private PromptRegistry $promptRegistry;
     private ResponseManager $responseManager;
+    private ProtocolManager $protocolManager;
 
     public function __construct(
         PromptRegistry $promptRegistry,
-        ResponseManager $responseManager
+        ResponseManager $responseManager,
+        ProtocolManager $protocolManager
     ) {
         $this->promptRegistry = $promptRegistry;
         $this->responseManager = $responseManager;
+        $this->protocolManager = $protocolManager;
     }
 
-    public function handlePromptsList(mixed $id, ?string $sessionId, array $context, Response $response): Response
+    public function handlePromptsList(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
     {
         if (!$sessionId) {
-            throw new ProtocolException('Session required', -32001);
+            throw new ProtocolException('Session required. Send an initialize request first and reuse the returned Mcp-Session-Id header.', -32001);
         }
 
-        $result = $this->promptRegistry->getPromptsList();
+        $prompts = $this->promptRegistry->getPromptsList($this->protocolManager->getSessionVersion($sessionId))['prompts'];
+
+        $page = $this->responseManager->paginate(
+            $prompts,
+            'name',
+            $params['cursor'] ?? null,
+            $this->protocolManager->getPageSize()
+        );
+
+        if ($page === null) {
+            return $this->responseManager->storeErrorResponse(
+                $sessionId,
+                -32602,
+                'Invalid cursor. Re-request prompts/list without a cursor to start again.',
+                $id,
+                $response
+            );
+        }
+
+        $result = ['prompts' => $page['items']];
+
+        if ($page['nextCursor'] !== null) {
+            $result['nextCursor'] = $page['nextCursor'];
+        }
+
         return $this->responseManager->storeSuccessResponse($sessionId, $result, $id, $response);
     }
 
     public function handlePromptsGet(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
     {
         if (!$sessionId) {
-            throw new ProtocolException('Session required', -32001);
+            throw new ProtocolException('Session required. Send an initialize request first and reuse the returned Mcp-Session-Id header.', -32001);
         }
 
         $promptName = $params['name'] ?? '';
         $arguments = $params['arguments'] ?? [];
 
         if (empty($promptName)) {
-            return $this->responseManager->storeErrorResponse($sessionId, -32602, 'Invalid params: missing prompt name', $id, $response);
+            return $this->responseManager->storeErrorResponse(
+                $sessionId,
+                -32602,
+                "Invalid params: 'name' is required. Call prompts/list to see the available prompts.",
+                $id,
+                $response
+            );
+        }
+
+        if (!$this->promptRegistry->hasPrompt($promptName)) {
+            return $this->responseManager->storeErrorResponse(
+                $sessionId,
+                -32602,
+                "Unknown prompt: {$promptName}. Call prompts/list to see the available prompts.",
+                $id,
+                $response
+            );
         }
 
         try {
             $result = $this->promptRegistry->execute($promptName, $arguments, $context);
-
-            $wrappedResult = [
-                'description' => $result['description'] ?? '',
-                'messages' => $result['messages'] ?? []
-            ];
-
-            return $this->responseManager->storeSuccessResponse($sessionId, $wrappedResult, $id, $response);
-        } catch (\Exception $e) {
-            $errorResult = [
-                'description' => '',
-                'messages' => [
-                    [
-                        'role' => 'assistant',
-                        'content' => [
-                            'type' => 'text',
-                            'text' => 'Prompt execution failed'
-                        ]
-                    ]
-                ]
-            ];
-
-            return $this->responseManager->storeSuccessResponse($sessionId, $errorResult, $id, $response);
+        } catch (\Throwable $e) {
+            return $this->responseManager->storeErrorResponse(
+                $sessionId,
+                -32603,
+                "Prompt '{$promptName}' failed: " . $e->getMessage(),
+                $id,
+                $response
+            );
         }
+
+        $wrappedResult = [
+            'description' => $result['description'] ?? '',
+            'messages' => $result['messages'] ?? []
+        ];
+
+        return $this->responseManager->storeSuccessResponse($sessionId, $wrappedResult, $id, $response);
     }
 }

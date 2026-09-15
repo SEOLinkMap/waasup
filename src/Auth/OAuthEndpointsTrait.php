@@ -25,7 +25,7 @@ trait OAuthEndpointsTrait
         $responseType = $params['response_type'] ?? null;
         $codeChallenge = $params['code_challenge'] ?? null;
         $codeChallengeMethod = $params['code_challenge_method'] ?? null;
-        $resource = $params['resource'] ?? null; // RFC 8707
+        $resource = $params['resource'] ?? null;
 
         if (!$responseType) {
             return $this->errorResponse('invalid_request', 'Missing response_type parameter');
@@ -56,31 +56,43 @@ trait OAuthEndpointsTrait
             return $this->errorResponse('invalid_request', 'Invalid redirect_uri');
         }
 
-        // RFC 8707 Resource Indicators validation for MCP 2025-06-18
-        // Get the configured base URL (same as what resource server uses)
+        if (!$codeChallenge) {
+            return $this->errorResponse('invalid_request', 'Missing code_challenge parameter. This server requires PKCE with code_challenge_method=S256.');
+        }
+
+        if ($codeChallengeMethod !== 'S256') {
+            return $this->errorResponse('invalid_request', 'Unsupported code_challenge_method. This server requires S256.');
+        }
+
+        $supportedScopes = $this->config['scopes_supported'];
+        $unknownScopes = array_diff(explode(' ', trim($scope)), $supportedScopes);
+
+        if (!empty($unknownScopes)) {
+            return $this->errorResponse('invalid_scope', 'Unsupported scope: ' . implode(' ', $unknownScopes) . '. This server issues: ' . implode(' ', $supportedScopes) . '.');
+        }
+
         $expectedBaseUrl = $this->getBaseUrl($request);
 
-        // Ensure resource URL matches the expected base URL
         if (!empty($resource) && !str_starts_with($resource, $expectedBaseUrl)) {
             return $this->errorResponse('invalid_request', 'Resource parameter must be for this resource server');
         }
 
-        // Basic security validation: ensure resource URL doesn't have suspicious patterns
-        $parsedResource = parse_url($resource);
-        if (
-            !$parsedResource ||
-            !empty($parsedResource['fragment']) ||
-            str_contains($resource, '..')
-        ) {
-            return $this->errorResponse('invalid_request', 'Invalid resource URL format');
+        if (!empty($resource)) {
+            $parsedResource = parse_url($resource);
+            if (
+                !$parsedResource ||
+                !empty($parsedResource['fragment']) ||
+                str_contains($resource, '..')
+            ) {
+                return $this->errorResponse('invalid_request', 'Invalid resource URL format');
+            }
         }
 
-
-        // Store OAuth request in session
         if (session_status() !== PHP_SESSION_ACTIVE) {
             session_start();
         }
 
+        $_SESSION['oauth_csrf'] = bin2hex(random_bytes(16));
         $_SESSION['oauth_request'] = [
             'client_id' => $clientId,
             'redirect_uri' => $redirectUri,
@@ -92,7 +104,6 @@ trait OAuthEndpointsTrait
             'resource' => $resource
         ];
 
-        // Check if user already authenticated
         $sessionUserIdKey = $this->config['session_user_id'];
         if ($sessionUserIdKey !== null && isset($_SESSION[$sessionUserIdKey]) && $_SESSION[$sessionUserIdKey]) {
             $userData = $this->storage->getUserData($_SESSION[$sessionUserIdKey]);
@@ -130,6 +141,10 @@ trait OAuthEndpointsTrait
         $data = $request->getParsedBody();
         if (!is_array($data)) {
             return $this->errorResponse('invalid_request', 'Invalid request data');
+        }
+
+        if (!$this->validateCsrfToken($data['csrf_token'] ?? null)) {
+            return $this->errorResponse('invalid_request', 'Form token missing or stale. Reload the authorization link and sign in again.');
         }
 
         $provider = $data['provider'] ?? 'email';
@@ -186,6 +201,10 @@ trait OAuthEndpointsTrait
             return $this->errorResponse('invalid_request', 'Invalid request data');
         }
 
+        if (!$this->validateCsrfToken($data['csrf_token'] ?? null)) {
+            return $this->errorResponse('invalid_request', 'Form token missing or stale. Reload the authorization link and sign in again.');
+        }
+
         $action = $data['action'] ?? '';
         $oauthRequest = $_SESSION['oauth_request'];
         $oauthUser = $_SESSION['oauth_user'];
@@ -208,19 +227,17 @@ trait OAuthEndpointsTrait
         if ($action === 'allow') {
             $authCode = bin2hex(random_bytes(32));
 
-            // Store authorization code with resource binding for 2025-06-18
             $authCodeData = [
                 'client_id' => $oauthRequest['client_id'],
                 'redirect_uri' => $oauthRequest['redirect_uri'],
                 'scope' => $oauthRequest['scope'],
-                'expires_at' => time() + 300,
+                'expires_at' => time() + (int)$this->config['oauth']['authorization_code_lifetime'],
                 'code_challenge' => $oauthRequest['code_challenge'],
                 'code_challenge_method' => $oauthRequest['code_challenge_method'],
                 'agency_id' => $oauthUser['agency_id'],
                 'user_id' => $oauthUser['user_id']
             ];
 
-            // Add resource binding for 2025-06-18
             if (isset($oauthRequest['resource'])) {
                 $authCodeData['resource'] = $oauthRequest['resource'];
             }
@@ -232,19 +249,12 @@ trait OAuthEndpointsTrait
             $responseData = [
                 'code' => $authCode,
                 'state' => $oauthRequest['state'],
-                'scope' => $oauthRequest['scope']
+                'scope' => $oauthRequest['scope'],
+                'iss' => $this->getBaseUrl($request)
             ];
 
             if ($oauthRequest['redirect_uri'] === 'urn:ietf:wg:oauth:2.0:oob') {
-                $html = "<!DOCTYPE html><html><head><title>Authorization Code</title></head>
-                     <body><h1>Authorization Successful</h1>
-                     <p>Copy this authorization code: <strong>{$authCode}</strong></p>
-                     <p>Paste it back into your application to complete the connection.</p></body></html>";
-
-                $stream = $this->streamFactory->createStream($html);
-                return $this->responseFactory->createResponse(200)
-                    ->withBody($stream)
-                    ->withHeader('Content-Type', 'text/html');
+                return $this->renderAuthorizationCode($authCode);
             } else {
                 $query = http_build_query($responseData);
                 return $this->responseFactory->createResponse(302)
@@ -309,9 +319,21 @@ trait OAuthEndpointsTrait
         }
 
         $token = $data['token'] ?? null;
+        $clientId = $data['client_id'] ?? null;
+        $clientSecret = $data['client_secret'] ?? null;
 
         if (!$token) {
             return $this->errorResponse('invalid_request', 'Missing token parameter');
+        }
+
+        if (!$clientId) {
+            return $this->errorResponse('invalid_client', 'Missing client_id parameter');
+        }
+
+        $client = $this->storage->getOAuthClient($clientId);
+
+        if (!$client || !$this->clientSecretMatches($client, $clientSecret)) {
+            return $this->errorResponse('invalid_client', 'Invalid client credentials');
         }
 
         $this->storage->revokeToken($token);
@@ -367,8 +389,11 @@ trait OAuthEndpointsTrait
 
         $responseData = [
             'client_id' => $clientId,
+            'client_id_issued_at' => time(),
             'client_name' => $data['client_name'],
             'client_secret' => $clientSecret,
+            'client_secret_expires_at' => 0,
+            'redirect_uris' => $data['redirect_uris'],
             'grant_types' => $data['grant_types'] ?? ['authorization_code', 'refresh_token'],
             'token_endpoint_auth_method' => 'client_secret_post',
             'response_types' => $data['response_types'] ?? ['code']
@@ -379,7 +404,7 @@ trait OAuthEndpointsTrait
             $jsonContent = '{"error":"JSON encoding failed"}';
         }
         $stream = $this->streamFactory->createStream($jsonContent);
-        return $this->responseFactory->createResponse(200)
+        return $this->responseFactory->createResponse(201)
             ->withBody($stream)
             ->withHeader('Content-Type', 'application/json');
     }

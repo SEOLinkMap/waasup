@@ -33,12 +33,12 @@ class OAuthServerTest extends TestCase
 
     private function setupTestData(): void
     {
-        // Add test client
+
         $this->storage->addOAuthClient(
             'test-client-id',
             [
             'client_id' => 'test-client-id',
-            'client_secret' => null, // Public client
+            'client_secret' => null,
             'client_name' => 'Test MCP Client',
             'redirect_uris' => ['https://client.example.com/callback', 'urn:ietf:wg:oauth:2.0:oob'],
             'grant_types' => ['authorization_code', 'refresh_token'],
@@ -46,7 +46,6 @@ class OAuthServerTest extends TestCase
             ]
         );
 
-        // Add confidential client
         $this->storage->addOAuthClient(
             'confidential-client',
             [
@@ -59,7 +58,6 @@ class OAuthServerTest extends TestCase
             ]
         );
 
-        // Add test user
         $this->storage->addUser(
             1,
             [
@@ -71,7 +69,6 @@ class OAuthServerTest extends TestCase
             ]
         );
 
-        // Add test agency
         $this->storage->addContext(
             'agency-uuid',
             'agency',
@@ -89,10 +86,9 @@ class OAuthServerTest extends TestCase
      */
     public function testAuthorizationCodeFlowWithPKCE(): void
     {
-        // Start session for OAuth flow
+
         session_start();
 
-        // 1. Authorization request with PKCE
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
         $state = bin2hex(random_bytes(16));
@@ -114,11 +110,9 @@ class OAuthServerTest extends TestCase
 
         $authResponse = $this->oauthServer->authorize($authRequest, $this->createResponse());
 
-        // Should redirect to auth form
         $this->assertEquals(200, $authResponse->getStatusCode());
         $this->assertStringContainsString('Test MCP Client', (string) $authResponse->getBody());
 
-        // 2. Simulate user authentication and consent
         $_SESSION['oauth_user'] = [
             'user_id' => 1,
             'agency_id' => 1,
@@ -127,22 +121,19 @@ class OAuthServerTest extends TestCase
         ];
 
         $consentRequest = $this->createRequest('POST', '/oauth/consent')
-            ->withParsedBody(['action' => 'allow']);
+            ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']);
 
         $consentResponse = $this->oauthServer->consent($consentRequest, $this->createResponse());
 
-        // Should redirect with authorization code
         $this->assertEquals(302, $consentResponse->getStatusCode());
         $location = $consentResponse->getHeaderLine('Location');
         $this->assertStringContainsString('https://client.example.com/callback', $location);
 
-        // Extract authorization code from redirect
         parse_str(parse_url($location, PHP_URL_QUERY), $params);
         $authCode = $params['code'];
         $this->assertNotEmpty($authCode);
         $this->assertEquals($state, $params['state']);
 
-        // 3. Token exchange with PKCE
         $tokenRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
@@ -173,11 +164,6 @@ class OAuthServerTest extends TestCase
      */
     public function testAuthorizationCodeFlowFailsWithoutPKCE(): void
     {
-        session_start();
-
-        // 1. Authorization request WITHOUT PKCE
-        $state = bin2hex(random_bytes(16));
-
         $authRequest = $this->createRequest(
             'GET',
             '/oauth/authorize?' . http_build_query(
@@ -185,62 +171,24 @@ class OAuthServerTest extends TestCase
                 'response_type' => 'code',
                 'client_id' => 'test-client-id',
                 'redirect_uri' => 'https://client.example.com/callback',
-                'scope' => 'mcp:read',
-                'state' => $state
-                // Note: No code_challenge or code_challenge_method
+                'scope' => 'mcp:read mcp:write',
+                'state' => bin2hex(random_bytes(16))
                 ]
             )
         );
 
         $authResponse = $this->oauthServer->authorize($authRequest, $this->createResponse());
 
-        // Should still allow authorization (PKCE validation happens at token exchange)
-        $this->assertEquals(200, $authResponse->getStatusCode());
+        $this->assertEquals(400, $authResponse->getStatusCode());
 
-        // 2. Complete auth flow to get code
-        $_SESSION['oauth_user'] = [
-            'user_id' => 1,
-            'agency_id' => 1,
-            'name' => 'Test User',
-            'email' => 'test@example.com'
-        ];
-
-        $consentRequest = $this->createRequest('POST', '/oauth/consent')
-            ->withParsedBody(['action' => 'allow']);
-
-        $consentResponse = $this->oauthServer->consent($consentRequest, $this->createResponse());
-        $location = $consentResponse->getHeaderLine('Location');
-        parse_str(parse_url($location, PHP_URL_QUERY), $params);
-        $authCode = $params['code'];
-
-        // 3. Token exchange WITHOUT code_verifier should fail
-        $tokenRequest = $this->createRequest('POST', '/oauth/token')
-            ->withParsedBody(
-                [
-                'grant_type' => 'authorization_code',
-                'code' => $authCode,
-                'client_id' => 'test-client-id',
-                'redirect_uri' => 'https://client.example.com/callback'
-                // Note: No code_verifier
-                ]
-            );
-
-        $tokenResponse = $this->oauthServer->token($tokenRequest, $this->createResponse());
-
-        $this->assertEquals(400, $tokenResponse->getStatusCode());
-        $errorData = json_decode((string) $tokenResponse->getBody(), true);
-        $this->assertEquals('invalid_grant', $errorData['error']);
-        $this->assertStringContainsString('code_verifier', $errorData['error_description']);
-
-        session_destroy();
+        $error = json_decode((string) $authResponse->getBody(), true);
+        $this->assertEquals('invalid_request', $error['error']);
+        $this->assertStringContainsString('code_challenge', $error['error_description']);
     }
 
-    /**
-     * OAuth 2.1 REQUIREMENT: Refresh token rotation
-     */
     public function testRefreshTokenRotation(): void
     {
-        // Setup: Create an access token with refresh token
+
         $originalAccessToken = 'original-access-token';
         $originalRefreshToken = 'original-refresh-token';
 
@@ -256,7 +204,6 @@ class OAuthServerTest extends TestCase
             ]
         );
 
-        // 1. Use refresh token to get new tokens
         $refreshRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
@@ -271,7 +218,6 @@ class OAuthServerTest extends TestCase
         $this->assertEquals(200, $refreshResponse->getStatusCode());
         $tokenData = json_decode((string) $refreshResponse->getBody(), true);
 
-        // Should get new tokens
         $newAccessToken = $tokenData['access_token'];
         $newRefreshToken = $tokenData['refresh_token'];
 
@@ -280,11 +226,9 @@ class OAuthServerTest extends TestCase
         $this->assertEquals('Bearer', $tokenData['token_type']);
         $this->assertEquals(3600, $tokenData['expires_in']);
 
-        // 2. Original access token should be revoked
         $originalTokenData = $this->storage->validateToken($originalAccessToken);
         $this->assertNull($originalTokenData, 'Original access token should be revoked');
 
-        // 3. Original refresh token should no longer work
         $secondRefreshRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
@@ -300,7 +244,6 @@ class OAuthServerTest extends TestCase
         $errorData = json_decode((string) $secondRefreshResponse->getBody(), true);
         $this->assertEquals('invalid_grant', $errorData['error']);
 
-        // 4. New refresh token should work
         $thirdRefreshRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
@@ -311,19 +254,24 @@ class OAuthServerTest extends TestCase
             );
 
         $thirdRefreshResponse = $this->oauthServer->token($thirdRefreshRequest, $this->createResponse());
-        $this->assertEquals(200, $thirdRefreshResponse->getStatusCode());
+
+        $this->assertEquals(
+            400,
+            $thirdRefreshResponse->getStatusCode(),
+            'Replaying a rotated refresh token revokes the whole family, including the current token'
+        );
     }
 
     public function testRefreshTokenWithExpiredToken(): void
     {
-        // Create expired access token with valid refresh token
+
         $this->storage->storeAccessToken(
             [
             'access_token' => 'expired-access-token',
             'refresh_token' => 'valid-refresh-token',
             'client_id' => 'test-client-id',
             'scope' => 'mcp:read',
-            'expires_at' => time() - 3600, // Expired 1 hour ago
+            'expires_at' => time() - 3600,
             'agency_id' => 1,
             'user_id' => 1
             ]
@@ -353,7 +301,6 @@ class OAuthServerTest extends TestCase
     {
         session_start();
 
-        // 1. Start authorization with PKCE
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
@@ -381,14 +328,13 @@ class OAuthServerTest extends TestCase
         ];
 
         $consentRequest = $this->createRequest('POST', '/oauth/consent')
-            ->withParsedBody(['action' => 'allow']);
+            ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']);
 
         $consentResponse = $this->oauthServer->consent($consentRequest, $this->createResponse());
         $location = $consentResponse->getHeaderLine('Location');
         parse_str(parse_url($location, PHP_URL_QUERY), $params);
         $authCode = $params['code'];
 
-        // 2. Use wrong code verifier
         $wrongCodeVerifier = $this->generateCodeVerifier();
 
         $tokenRequest = $this->createRequest('POST', '/oauth/token')
@@ -416,7 +362,6 @@ class OAuthServerTest extends TestCase
     {
         session_start();
 
-        // 1. Authorization for confidential client
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
@@ -445,7 +390,7 @@ class OAuthServerTest extends TestCase
 
         $consentResponse = $this->oauthServer->consent(
             $this->createRequest('POST', '/oauth/consent')
-                ->withParsedBody(['action' => 'allow']),
+                ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']),
             $this->createResponse()
         );
 
@@ -453,7 +398,6 @@ class OAuthServerTest extends TestCase
         parse_str(parse_url($location, PHP_URL_QUERY), $params);
         $authCode = $params['code'];
 
-        // 2. Token exchange with client secret
         $tokenRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
@@ -479,7 +423,6 @@ class OAuthServerTest extends TestCase
     {
         session_start();
 
-        // Setup auth code for confidential client
         $codeVerifier = $this->generateCodeVerifier();
         $codeChallenge = $this->generateCodeChallenge($codeVerifier);
 
@@ -508,7 +451,7 @@ class OAuthServerTest extends TestCase
 
         $consentResponse = $this->oauthServer->consent(
             $this->createRequest('POST', '/oauth/consent')
-                ->withParsedBody(['action' => 'allow']),
+                ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']),
             $this->createResponse()
         );
 
@@ -516,7 +459,6 @@ class OAuthServerTest extends TestCase
         parse_str(parse_url($location, PHP_URL_QUERY), $params);
         $authCode = $params['code'];
 
-        // Token exchange with wrong client secret
         $tokenRequest = $this->createRequest('POST', '/oauth/token')
             ->withParsedBody(
                 [
@@ -540,7 +482,7 @@ class OAuthServerTest extends TestCase
 
     public function testTokenRevocation(): void
     {
-        // Create access token
+
         $this->storage->storeAccessToken(
             [
             'access_token' => 'revoke-test-token',
@@ -553,18 +495,20 @@ class OAuthServerTest extends TestCase
             ]
         );
 
-        // Verify token is valid
         $this->assertNotNull($this->storage->validateToken('revoke-test-token'));
 
-        // Revoke token
         $revokeRequest = $this->createRequest('POST', '/oauth/revoke')
-            ->withParsedBody(['token' => 'revoke-test-token']);
+            ->withParsedBody(
+                [
+                'token' => 'revoke-test-token',
+                'client_id' => 'test-client-id'
+                ]
+            );
 
         $revokeResponse = $this->oauthServer->revoke($revokeRequest, $this->createResponse());
 
         $this->assertEquals(200, $revokeResponse->getStatusCode());
 
-        // Token should no longer be valid
         $this->assertNull($this->storage->validateToken('revoke-test-token'));
     }
 
@@ -600,16 +544,289 @@ class OAuthServerTest extends TestCase
 
         $consentResponse = $this->oauthServer->consent(
             $this->createRequest('POST', '/oauth/consent')
-                ->withParsedBody(['action' => 'allow']),
+                ->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']),
             $this->createResponse()
         );
 
-        // Should return HTML page with auth code
         $this->assertEquals(200, $consentResponse->getStatusCode());
         $this->assertEquals('text/html', $consentResponse->getHeaderLine('Content-Type'));
         $this->assertStringContainsString('Authorization Successful', (string) $consentResponse->getBody());
 
         session_destroy();
+    }
+
+    /**
+     * RFC 8707: the resource parameter is optional and only validated when present
+     */
+    public function testAuthorizeAcceptsRequestWithoutResourceParameter(): void
+    {
+        $response = $this->authorizeWithResource(null);
+
+        $this->assertEquals(200, $response->getStatusCode());
+        $this->assertStringContainsString('Test MCP Client', (string) $response->getBody());
+    }
+
+    /**
+     * @dataProvider invalidResourceProvider
+     */
+    public function testAuthorizeRejectsMalformedResourceParameter(string $resource): void
+    {
+        $response = $this->authorizeWithResource($resource);
+        $error = json_decode((string) $response->getBody(), true);
+
+        $this->assertEquals(400, $response->getStatusCode());
+        $this->assertEquals('invalid_request', $error['error']);
+    }
+
+    public static function invalidResourceProvider(): array
+    {
+        return [
+            'fragment' => ['https://localhost:8080/mcp/agency#fragment'],
+            'traversal' => ['https://localhost:8080/mcp/../admin'],
+            'foreign host' => ['https://other.example.com/mcp/agency']
+        ];
+    }
+
+    private function authorizeWithResource(?string $resource): \Psr\Http\Message\ResponseInterface
+    {
+        $params = [
+            'response_type' => 'code',
+            'client_id' => 'test-client-id',
+            'redirect_uri' => 'https://client.example.com/callback',
+            'scope' => 'mcp:read mcp:write',
+            'state' => 'state-value',
+            'code_challenge' => $this->generateCodeChallenge($this->generateCodeVerifier()),
+            'code_challenge_method' => 'S256'
+        ];
+
+        if ($resource !== null) {
+            $params['resource'] = $resource;
+        }
+
+        $response = $this->oauthServer->authorize(
+            $this->createRequest('GET', '/oauth/authorize')->withQueryParams($params),
+            $this->createResponse()
+        );
+
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_destroy();
+        }
+
+        $_SESSION = [];
+
+        return $response;
+    }
+
+    /**
+     * OAuth pages follow the operating system color scheme
+     */
+    public function testOAuthPagesSupportLightAndDark(): void
+    {
+        $html = (string) $this->renderConsent($this->oauthServer)->getBody();
+
+        $this->assertStringContainsString("<meta name='color-scheme' content='light dark'>", $html);
+        $this->assertStringContainsString('color-scheme: light dark', $html);
+        $this->assertStringContainsString('@media (prefers-color-scheme: dark)', $html);
+
+        [$light, $dark] = $this->extractSchemes($html);
+
+        $this->assertNotEquals($light['--bg'], $dark['--bg']);
+        $this->assertNotEquals($light['--fg'], $dark['--fg']);
+        $this->assertNotEquals($light['--surface'], $dark['--surface']);
+    }
+
+    public function testAuthorizationCodePageIsThemed(): void
+    {
+        session_start();
+
+        $codeVerifier = $this->generateCodeVerifier();
+
+        $this->oauthServer->authorize(
+            $this->createRequest('GET', '/oauth/authorize')
+                ->withQueryParams(
+                    [
+                    'response_type' => 'code',
+                    'client_id' => 'test-client-id',
+                    'redirect_uri' => 'urn:ietf:wg:oauth:2.0:oob',
+                    'scope' => 'mcp:read mcp:write',
+                    'state' => 'state-value',
+                    'code_challenge' => $this->generateCodeChallenge($codeVerifier),
+                    'code_challenge_method' => 'S256'
+                    ]
+                ),
+            $this->createResponse()
+        );
+
+        $_SESSION['oauth_user'] = [
+            'user_id' => 1,
+            'agency_id' => 1,
+            'name' => 'Test User',
+            'email' => 'test@example.com'
+        ];
+
+        $response = $this->oauthServer->consent(
+            $this->createRequest('POST', '/oauth/consent')->withParsedBody(['action' => 'allow', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']),
+            $this->createResponse()
+        );
+
+        $html = (string) $response->getBody();
+
+        $this->assertEquals(200, $response->getStatusCode());
+        $this->assertStringContainsString('Authorization Successful', $html);
+        $this->assertStringContainsString('@media (prefers-color-scheme: dark)', $html);
+
+        [$light, $dark] = $this->extractSchemes($html);
+        $this->assertNotEquals($light['--bg'], $dark['--bg']);
+
+        session_destroy();
+    }
+
+    public function testOAuthPageColorsAreConfigurable(): void
+    {
+        $server = $this->createThemedServer(
+            [
+                'background_color' => '#101820',
+                'text_color' => '#f2f4f8',
+                'accent_color' => ['light' => '#ff6b35', 'dark' => '#ffa07a']
+            ]
+        );
+
+        [$light, $dark] = $this->extractSchemes((string) $this->renderConsent($server)->getBody());
+
+        $this->assertEquals('#101820', $light['--bg']);
+        $this->assertEquals('#101820', $dark['--bg']);
+        $this->assertEquals('#f2f4f8', $light['--fg']);
+        $this->assertEquals('#f2f4f8', $dark['--fg']);
+        $this->assertEquals('#ff6b35', $light['--accent']);
+        $this->assertEquals('#ffa07a', $dark['--accent']);
+    }
+
+    public function testUnsetOAuthPageColorsKeepTheirDefaults(): void
+    {
+        $server = $this->createThemedServer(['accent_color' => '#ff6b35']);
+
+        [$light, $dark] = $this->extractSchemes((string) $this->renderConsent($server)->getBody());
+
+        $this->assertEquals('#ff6b35', $light['--accent']);
+        $this->assertNotEquals($light['--bg'], $dark['--bg']);
+        $this->assertNotEquals($light['--fg'], $dark['--fg']);
+    }
+
+    /**
+     * @dataProvider invalidColorProvider
+     */
+    public function testOAuthPageColorsRejectStyleInjection(string $color): void
+    {
+        $server = $this->createThemedServer(['background_color' => $color]);
+        $html = (string) $this->renderConsent($server)->getBody();
+
+        [$light, $dark] = $this->extractSchemes($html);
+
+        $this->assertStringNotContainsString('evil.example.com', $html);
+        $this->assertEquals('#f6f8fa', $light['--bg']);
+        $this->assertEquals('#0d1117', $dark['--bg']);
+    }
+
+    public static function invalidColorProvider(): array
+    {
+        return [
+            'declaration break out' => ['red; } body { background: url(https://evil.example.com/x.png)'],
+            'url value' => ['url(https://evil.example.com/x.png)'],
+            'expression' => ['image-set("https://evil.example.com/x.png")'],
+            'comment escape' => ['#fff; } /* evil.example.com */ :root { --fg: red'],
+            'empty' => ['']
+        ];
+    }
+
+    private function createThemedServer(array $ui): OAuthServer
+    {
+        return new OAuthServer(
+            $this->storage,
+            $this->responseFactory,
+            $this->streamFactory,
+            [
+                'base_url' => 'https://localhost:8080',
+                'oauth' => ['ui' => $ui]
+            ]
+        );
+    }
+
+    /**
+     * Pull the light and dark custom property values out of a rendered page
+     *
+     * @return array{0: array<string, string>, 1: array<string, string>}
+     */
+    private function extractSchemes(string $html): array
+    {
+        $this->assertSame(
+            1,
+            preg_match('/:root \{ color-scheme: light dark; (.+?) \}/', $html, $lightMatch),
+            'No light palette found'
+        );
+        $this->assertSame(
+            1,
+            preg_match('/@media \(prefers-color-scheme: dark\) \{ :root \{ (.+?) \} \}/', $html, $darkMatch),
+            'No dark palette found'
+        );
+
+        return [$this->parseDeclarations($lightMatch[1]), $this->parseDeclarations($darkMatch[1])];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function parseDeclarations(string $declarations): array
+    {
+        $parsed = [];
+
+        foreach (explode(';', $declarations) as $declaration) {
+            if (strpos($declaration, ':') === false) {
+                continue;
+            }
+
+            [$property, $value] = explode(':', $declaration, 2);
+            $parsed[trim($property)] = trim($value);
+        }
+
+        $this->assertNotEmpty($parsed);
+
+        return $parsed;
+    }
+
+    private function renderConsent(OAuthServer $server): \Psr\Http\Message\ResponseInterface
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_start();
+        }
+
+        $_SESSION['oauth_csrf'] = bin2hex(random_bytes(16));
+        $_SESSION['oauth_request'] = [
+            'client_id' => 'test-client-id',
+            'client_name' => 'Test MCP Client',
+            'redirect_uri' => 'https://client.example.com/callback',
+            'scope' => 'mcp:read mcp:write',
+            'state' => 'state-value',
+            'code_challenge' => 'challenge',
+            'code_challenge_method' => 'S256'
+        ];
+        $_SESSION['oauth_user'] = [
+            'user_id' => 1,
+            'agency_id' => 1,
+            'name' => 'Test User',
+            'email' => 'test@example.com'
+        ];
+
+        $response = $server->consent(
+            $this->createRequest('POST', '/oauth/consent')->withParsedBody(['action' => 'invalid', 'csrf_token' => $_SESSION['oauth_csrf'] ?? '']),
+            $this->createResponse()
+        );
+
+        $this->assertEquals(200, $response->getStatusCode());
+
+        session_destroy();
+        $_SESSION = [];
+
+        return $response;
     }
 
     /**

@@ -14,8 +14,10 @@ interface StorageInterface
 
     /**
      * Retrieve pending messages for a session
+     *
+     * @param string|null $afterId return only messages stored after this message id
      */
-    public function getMessages(string $sessionId, array $context = []): array;
+    public function getMessages(string $sessionId, array $context = [], ?string $afterId = null): array;
 
     /**
      * Delete a message after delivery
@@ -78,6 +80,15 @@ interface StorageInterface
     public function storeAccessToken(array $tokenData): bool;
 
     /**
+     * Extend the expiry of a stored access token
+     *
+     * @param string $accessToken token to extend
+     * @param int $expiresAt new expiry as a unix timestamp
+     * @return bool true when the token was extended
+     */
+    public function touchAccessToken(string $accessToken, int $expiresAt): bool;
+
+    /**
      * Get token data by refresh token
      */
     public function getTokenByRefreshToken(string $refreshToken, string $clientId): ?array;
@@ -86,6 +97,14 @@ interface StorageInterface
      * Revoke access or refresh token
      */
     public function revokeToken(string $token): bool;
+
+    /**
+     * Revoke every live token issued to the same client and user as a refresh token
+     *
+     * @param string $refreshToken the refresh token identifying the family
+     * @return bool true when the token was found and its family revoked
+     */
+    public function revokeTokenFamily(string $refreshToken): bool;
 
     /**
      * Get user data by user ID

@@ -10,7 +10,7 @@ class ProtocolFeaturesTest extends TestCase
 {
     private MessageHandler $messageHandler;
     private MemoryStorage $storage;
-    private array $supportedVersions = ['2025-06-18', '2025-03-26', '2024-11-05'];
+    private array $supportedVersions = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
     protected function setUp(): void
     {
@@ -21,7 +21,6 @@ class ProtocolFeaturesTest extends TestCase
         $resourceRegistry = $this->createTestResourceRegistry();
         $this->storage = $this->createTestStorage();
 
-        // Add test prompts with validation
         $promptRegistry->register(
             'template_prompt',
             function ($arguments, $context) {
@@ -56,11 +55,81 @@ class ProtocolFeaturesTest extends TestCase
             ]
         );
 
-        // Add test resource that can fail
+        $toolRegistry->register(
+            'content_tool',
+            function ($params, $context) {
+                return [
+                    'content' => [
+                        ['type' => 'text', 'text' => 'plain text answer'],
+                        ['type' => 'image', 'data' => 'aGk=', 'mimeType' => 'image/png']
+                    ]
+                ];
+            },
+            ['description' => 'Returns content blocks directly']
+        );
+
+        $toolRegistry->register(
+            'task_tool',
+            function ($params, $context) {
+                return ['content' => [['type' => 'text', 'text' => 'task output']]];
+            },
+            ['description' => 'Supports task execution', 'execution' => ['taskSupport' => 'optional']]
+        );
+
+        $toolRegistry->register(
+            'task_only_tool',
+            function ($params, $context) {
+                return ['content' => [['type' => 'text', 'text' => 'task only']]];
+            },
+            ['description' => 'Requires task execution', 'execution' => ['taskSupport' => 'required']]
+        );
+
+        $toolRegistry->register(
+            'schema_tool',
+            function ($params, $context) {
+                return ['content' => [], 'structuredContent' => ['conditions' => 'sunny']];
+            },
+            [
+                'description' => 'Declares an output schema it does not satisfy',
+                'outputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'temperature' => ['type' => 'number'],
+                        'conditions' => ['type' => 'string']
+                    ],
+                    'required' => ['temperature', 'conditions']
+                ]
+            ]
+        );
+
+        $toolRegistry->register(
+            'failing_tool',
+            function ($params, $context) {
+                throw new \RuntimeException('upstream is down, retry in a minute');
+            },
+            ['description' => 'Always fails']
+        );
+
+        $promptRegistry->register(
+            'enum_prompt',
+            function ($arguments, $context) {
+                return ['description' => 'Enum prompt', 'messages' => []];
+            },
+            [
+                'description' => 'Prompt with an enum argument',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'flavour' => ['type' => 'string', 'enum' => ['vanilla', 'chocolate', 'strawberry']]
+                    ]
+                ]
+            ]
+        );
+
         $resourceRegistry->register(
             'test://protected',
             function ($uri, $context) {
-                // Check for agency_id in the context structure
+
                 $agencyId = $context['agency_id'] ?? $context['token_data']['agency_id'] ?? $context['context_data']['id'] ?? null;
                 if (empty($agencyId)) {
                     throw new \RuntimeException('Access denied - no agency context');
@@ -77,7 +146,6 @@ class ProtocolFeaturesTest extends TestCase
             }
         );
 
-        // Add test tool with structured output schema
         $toolRegistry->register(
             'structured_output_tool',
             function ($params, $context) {
@@ -125,7 +193,6 @@ class ProtocolFeaturesTest extends TestCase
             ]
         );
 
-        // Add audio content tool
         $toolRegistry->register(
             'audio_tool',
             function ($params, $context) {
@@ -173,10 +240,9 @@ class ProtocolFeaturesTest extends TestCase
      */
     private function initializeSession(string $version): string
     {
-        // Generate proper MCP session ID format: protocolVersion_hexstring
+
         $sessionId = $this->generateMcpSessionId($version);
 
-        // Store session with required protocol_version field
         $this->storage->storeSession(
             $sessionId,
             [
@@ -188,15 +254,16 @@ class ProtocolFeaturesTest extends TestCase
             3600
         );
 
-        // Process initialize message to complete session setup
         $initMessage = [
             'jsonrpc' => '2.0',
             'method' => 'initialize',
             'params' => [
                 'protocolVersion' => $version,
                 'capabilities' => [
-                    'elicitation' => $version === '2025-06-18' ? [] : null,
-                    'structured_outputs' => $version === '2025-06-18' ? [] : null
+                    'sampling' => [],
+                    'roots' => ['listChanged' => true],
+                    'elicitation' => strcmp($version, '2025-06-18') >= 0 ? [] : null,
+                    'structured_outputs' => strcmp($version, '2025-06-18') >= 0 ? [] : null
                 ],
                 'clientInfo' => [
                     'name' => 'Test Client',
@@ -225,10 +292,6 @@ class ProtocolFeaturesTest extends TestCase
 
         return $sessionId;
     }
-
-    // ===================
-    // ELICITATION TESTS (2025-06-18 only)
-    // ===================
 
     public function testElicitationCreateRequest(): void
     {
@@ -289,7 +352,6 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        // Should return 202 but with error queued
         $this->assertEquals(200, $response->getStatusCode());
     }
 
@@ -432,20 +494,21 @@ class ProtocolFeaturesTest extends TestCase
 
         $this->assertEquals(200, $response->getStatusCode());
         $data = json_decode((string) $response->getBody(), true);
-        $this->assertArrayHasKey('elicitation', $data['result']['capabilities']);
+        $this->assertArrayNotHasKey('elicitation', $data['result']['capabilities']);
+        $this->assertArrayNotHasKey('sampling', $data['result']['capabilities']);
+        $this->assertArrayNotHasKey('roots', $data['result']['capabilities']);
     }
 
     public function testElicitationSensitiveInfoPrevention(): void
     {
-        // This test verifies that the protocol discourages sensitive info collection
-        // Implementation should be handled by the client, but server can provide guidance
+
         $sessionId = $this->initializeSession('2025-06-18');
 
         $sensitiveElicitationMessage = [
             'jsonrpc' => '2.0',
             'method' => 'elicitation/create',
             'params' => [
-                'message' => 'Please provide your password', // This should be discouraged
+                'message' => 'Please provide your password',
                 'requestedSchema' => [
                     'type' => 'object',
                     'properties' => [
@@ -465,7 +528,6 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        // Protocol allows this but clients should implement their own validation
         $this->assertEquals(200, $response->getStatusCode());
     }
 
@@ -473,7 +535,6 @@ class ProtocolFeaturesTest extends TestCase
     {
         $sessionId = $this->initializeSession('2025-06-18');
 
-        // First elicitation request
         $firstElicitation = [
             'jsonrpc' => '2.0',
             'method' => 'elicitation/create',
@@ -500,7 +561,6 @@ class ProtocolFeaturesTest extends TestCase
 
         $this->assertEquals(200, $response1->getStatusCode());
 
-        // Second elicitation request (multi-turn)
         $secondElicitation = [
             'jsonrpc' => '2.0',
             'method' => 'elicitation/create',
@@ -526,10 +586,6 @@ class ProtocolFeaturesTest extends TestCase
         $this->assertEquals(200, $response2->getStatusCode());
     }
 
-    // ===================
-    // STRUCTURED TOOL OUTPUT TESTS (2025-06-18 only)
-    // ===================
-
     public function testToolOutputSchemaDeclaration(): void
     {
         $sessionId = $this->initializeSession('2025-06-18');
@@ -551,7 +607,6 @@ class ProtocolFeaturesTest extends TestCase
 
         $this->assertEquals(200, $response->getStatusCode());
 
-        // Check that tools with output schemas are properly listed
         $responseData = json_decode((string) $response->getBody(), true);
         $result = $responseData['result'] ?? [];
 
@@ -622,7 +677,6 @@ class ProtocolFeaturesTest extends TestCase
 
         $this->assertEquals(200, $response->getStatusCode());
 
-        // Verify structured content is present in the inline response
         $responseData = json_decode((string) $response->getBody(), true);
         $result = $responseData['result'] ?? [];
 
@@ -662,7 +716,7 @@ class ProtocolFeaturesTest extends TestCase
 
     public function testToolOutputSchemaMimeTypeClarity(): void
     {
-        // Test that MIME types are properly handled with structured output
+
         $sessionId = $this->initializeSession('2025-06-18');
 
         $toolCallMessage = [
@@ -689,10 +743,6 @@ class ProtocolFeaturesTest extends TestCase
 
         $this->assertEquals(200, $response->getStatusCode());
     }
-
-    // ===================
-    // RESOURCE LINKS TESTS (2025-06-18 only)
-    // ===================
 
     public function testResourceLinkInToolResult(): void
     {
@@ -722,14 +772,13 @@ class ProtocolFeaturesTest extends TestCase
 
         $this->assertEquals(200, $response->getStatusCode());
 
-        // Verify resource links are present
         $responseData = json_decode((string) $response->getBody(), true);
         $result = $responseData['result'] ?? [];
 
-        if (!empty($result)) {
-            $this->assertArrayHasKey('resourceLinks', $result);
-            $this->assertIsArray($result['resourceLinks']);
-        }
+        $this->assertArrayHasKey('content', $result);
+
+        $linkTypes = array_column($result['content'], 'type');
+        $this->assertContains('resource_link', $linkTypes);
     }
 
     public function testResourceLinkUriReference(): void
@@ -763,7 +812,7 @@ class ProtocolFeaturesTest extends TestCase
 
     public function testResourceLinkVsInlineContent(): void
     {
-        // Test that resource links are used instead of inlining large content
+
         $sessionId = $this->initializeSession('2025-06-18');
 
         $toolCallMessage = [
@@ -790,10 +839,6 @@ class ProtocolFeaturesTest extends TestCase
 
         $this->assertEquals(200, $response->getStatusCode());
     }
-
-    // ===================
-    // TOOL ANNOTATIONS TESTS (2025-03-26+)
-    // ===================
 
     public function testToolAnnotationReadOnlyHint(): void
     {
@@ -875,7 +920,7 @@ class ProtocolFeaturesTest extends TestCase
             'jsonrpc' => '2.0',
             'method' => 'tools/call',
             'params' => [
-                'name' => 'structured_output_tool', // This tool has destructiveHint: true
+                'name' => 'structured_output_tool',
                 'arguments' => [
                     'id' => 'permission-test',
                     'input' => 'test permissions'
@@ -898,7 +943,7 @@ class ProtocolFeaturesTest extends TestCase
 
     public function testToolAnnotationFrontendAdaptation(): void
     {
-        // Test that annotations help frontend adapt UI appropriately
+
         $sessionId = $this->initializeSession('2025-06-18');
 
         $toolsListMessage = [
@@ -940,7 +985,6 @@ class ProtocolFeaturesTest extends TestCase
 
         $this->assertEquals(202, $response->getStatusCode());
 
-        // Verify annotations are not included in 2024-11-05
         $messages = $this->storage->getMessages($sessionId);
 
         if (!empty($messages)) {
@@ -954,10 +998,6 @@ class ProtocolFeaturesTest extends TestCase
             }
         }
     }
-
-    // ===================
-    // CONTENT TYPES TESTS (2025-03-26+)
-    // ===================
 
     public function testAudioDataSupport(): void
     {
@@ -1103,13 +1143,8 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        // Should still work, but audio content will be processed differently
         $this->assertEquals(202, $response->getStatusCode());
     }
-
-    // ===================
-    // PROGRESS & COMPLETIONS TESTS (2025-03-26+)
-    // ===================
 
     public function testProgressNotificationWithMessage(): void
     {
@@ -1269,13 +1304,8 @@ class ProtocolFeaturesTest extends TestCase
             $this->createResponse()
         );
 
-        // Should return 202 but with error queued for unsupported method
         $this->assertEquals(202, $response->getStatusCode());
     }
-
-    // ===================
-    // META FIELDS TESTS (2025-06-18 only)
-    // ===================
 
     public function testMetaFieldInInterfaces(): void
     {
@@ -1372,10 +1402,6 @@ class ProtocolFeaturesTest extends TestCase
         $this->assertEquals(200, $response->getStatusCode());
     }
 
-    // ===================
-    // VERSION COMPATIBILITY TESTS
-    // ===================
-
     public function testVersionSpecificFeatureGating(): void
     {
         $featureTests = [
@@ -1397,10 +1423,8 @@ class ProtocolFeaturesTest extends TestCase
             $sessionId = $this->initializeSession($version);
             $context = $this->createTestContext(['protocol_version' => $version]);
 
-            // Streamable HTTP (2025-03-26+) answers inline with 200; HTTP+SSE queues with 202.
             $expectedStatus = strcmp($version, '2025-03-26') >= 0 ? 200 : 202;
 
-            // Test supported features
             foreach ($tests['supported'] as $method) {
                 $message = [
                     'jsonrpc' => '2.0',
@@ -1423,7 +1447,6 @@ class ProtocolFeaturesTest extends TestCase
                 );
             }
 
-            // Test unsupported features
             foreach ($tests['unsupported'] as $method) {
                 $message = [
                     'jsonrpc' => '2.0',
@@ -1439,7 +1462,6 @@ class ProtocolFeaturesTest extends TestCase
                     $this->createResponse()
                 );
 
-                // Unsupported methods return an error using the version's transport.
                 $this->assertEquals(
                     $expectedStatus,
                     $response->getStatusCode(),
@@ -1471,4 +1493,670 @@ class ProtocolFeaturesTest extends TestCase
                 return [];
         }
     }
+
+    public function testInitializeNegotiates20251125(): void
+    {
+        $sessionId = $this->generateMcpSessionId('2025-11-25');
+
+        $response = $this->messageHandler->handleInitialize(
+            ['protocolVersion' => '2025-11-25'],
+            1,
+            $sessionId,
+            '2025-11-25',
+            $this->createResponse()
+        );
+
+        $data = json_decode((string) $response->getBody(), true);
+
+        $this->assertEquals('2025-11-25', $data['result']['protocolVersion']);
+        $this->assertArrayHasKey('completions', $data['result']['capabilities']);
+        $this->assertArrayHasKey('logging', $data['result']['capabilities']);
+        $this->assertArrayNotHasKey('sampling', $data['result']['capabilities']);
+    }
+
+    public function testToolContentIsNotReserialized(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $response = $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'tools/call',
+                'params' => ['name' => 'content_tool', 'arguments' => []],
+                'id' => 501
+            ],
+            $sessionId,
+            $this->createTestContext(['protocol_version' => '2025-11-25']),
+            $this->createResponse()
+        );
+
+        $result = json_decode((string) $response->getBody(), true)['result'];
+
+        $this->assertEquals('text', $result['content'][0]['type']);
+        $this->assertEquals('plain text answer', $result['content'][0]['text']);
+        $this->assertEquals('image', $result['content'][1]['type']);
+        $this->assertFalse($result['isError']);
+    }
+
+    public function testToolFailureIsReportedAsToolError(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $response = $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'tools/call',
+                'params' => ['name' => 'failing_tool', 'arguments' => []],
+                'id' => 502
+            ],
+            $sessionId,
+            $this->createTestContext(['protocol_version' => '2025-11-25']),
+            $this->createResponse()
+        );
+
+        $data = json_decode((string) $response->getBody(), true);
+
+        $this->assertArrayHasKey('result', $data);
+        $this->assertTrue($data['result']['isError']);
+        $this->assertStringContainsString('upstream is down', $data['result']['content'][0]['text']);
+    }
+
+    public function testUnknownToolIsAProtocolError(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $response = $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'tools/call',
+                'params' => ['name' => 'no_such_tool', 'arguments' => []],
+                'id' => 503
+            ],
+            $sessionId,
+            $this->createTestContext(['protocol_version' => '2025-11-25']),
+            $this->createResponse()
+        );
+
+        $data = json_decode((string) $response->getBody(), true);
+
+        $this->assertEquals(-32602, $data['error']['code']);
+        $this->assertStringContainsString('tools/list', $data['error']['message']);
+    }
+
+    public function testPingReturnsAnEmptyResult(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $response = $this->messageHandler->processMessage(
+            ['jsonrpc' => '2.0', 'method' => 'ping', 'id' => 504],
+            $sessionId,
+            $this->createTestContext(['protocol_version' => '2025-11-25']),
+            $this->createResponse()
+        );
+
+        $this->assertStringContainsString('"result":{}', (string) $response->getBody());
+    }
+
+    public function testCompletionCompleteReturnsSpecShape(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $response = $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'completion/complete',
+                'params' => [
+                    'ref' => ['type' => 'ref/prompt', 'name' => 'enum_prompt'],
+                    'argument' => ['name' => 'flavour', 'value' => 'va']
+                ],
+                'id' => 505
+            ],
+            $sessionId,
+            $this->createTestContext(['protocol_version' => '2025-11-25']),
+            $this->createResponse()
+        );
+
+        $completion = json_decode((string) $response->getBody(), true)['result']['completion'];
+
+        $this->assertEquals(['vanilla'], $completion['values']);
+        $this->assertEquals(1, $completion['total']);
+        $this->assertFalse($completion['hasMore']);
+    }
+
+    public function testClientResponseToServerRequestIsStored(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $requestId = $this->messageHandler->requestSampling(
+            $sessionId,
+            [['role' => 'user', 'content' => ['type' => 'text', 'text' => 'hi']]],
+            ['maxTokens' => 10]
+        );
+
+        $response = $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'id' => $requestId,
+                'result' => ['role' => 'assistant', 'content' => ['type' => 'text', 'text' => 'hello'], 'model' => 'test-model']
+            ],
+            $sessionId,
+            $this->createTestContext(['protocol_version' => '2025-11-25']),
+            $this->createResponse()
+        );
+
+        $this->assertEquals(202, $response->getStatusCode());
+
+        $stored = $this->storage->getSamplingResponse($sessionId, $requestId);
+
+        $this->assertNotNull($stored);
+        $this->assertEquals('sampling_response', $stored['data']['type']);
+        $this->assertEquals('test-model', $stored['data']['result']['model']);
+    }
+
+    public function testSamplingRequestOmitsUnsetOptions(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $this->messageHandler->requestSampling(
+            $sessionId,
+            [['role' => 'user', 'content' => ['type' => 'text', 'text' => 'hi']]],
+            ['maxTokens' => 50]
+        );
+
+        $messages = $this->storage->getMessages($sessionId);
+        $params = $messages[0]['data']['params'];
+
+        $this->assertEquals(50, $params['maxTokens']);
+        $this->assertArrayNotHasKey('temperature', $params);
+        $this->assertArrayNotHasKey('stopSequences', $params);
+    }
+
+    public function testResourceSubscriptionGatesUpdateNotifications(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+        $context = $this->createTestContext(['protocol_version' => '2025-11-25']);
+
+        $this->messageHandler->sendResourceUpdatedNotification($sessionId, 'test://protected');
+        $this->assertCount(0, $this->storage->getMessages($sessionId));
+
+        $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'resources/subscribe',
+                'params' => ['uri' => 'test://protected'],
+                'id' => 506
+            ],
+            $sessionId,
+            $context,
+            $this->createResponse()
+        );
+
+        $this->messageHandler->sendResourceUpdatedNotification($sessionId, 'test://protected');
+
+        $messages = $this->storage->getMessages($sessionId);
+        $this->assertCount(1, $messages);
+        $this->assertEquals('notifications/resources/updated', $messages[0]['data']['method']);
+    }
+
+    public function testLogMessagesHonourTheLevelTheClientSet(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+        $context = $this->createTestContext(['protocol_version' => '2025-11-25']);
+
+        $this->messageHandler->sendLogMessage($sessionId, 'error', 'before');
+        $this->assertCount(0, $this->storage->getMessages($sessionId));
+
+        $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'logging/setLevel',
+                'params' => ['level' => 'warning'],
+                'id' => 507
+            ],
+            $sessionId,
+            $context,
+            $this->createResponse()
+        );
+
+        $this->messageHandler->sendLogMessage($sessionId, 'debug', 'too quiet');
+        $this->assertCount(0, $this->storage->getMessages($sessionId));
+
+        $this->messageHandler->sendLogMessage($sessionId, 'error', 'loud enough');
+
+        $messages = $this->storage->getMessages($sessionId);
+        $this->assertCount(1, $messages);
+        $this->assertEquals('notifications/message', $messages[0]['data']['method']);
+        $this->assertEquals('loud enough', $messages[0]['data']['params']['data']);
+    }
+
+    public function testProgressNotificationsNeedAProgressToken(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+        $context = $this->createTestContext(['protocol_version' => '2025-11-25']);
+
+        $this->messageHandler->processMessage(
+            ['jsonrpc' => '2.0', 'method' => 'ping', 'id' => 508],
+            $sessionId,
+            $context,
+            $this->createResponse()
+        );
+
+        $this->messageHandler->sendProgressNotification($sessionId, 10, 'working');
+        $this->assertCount(0, $this->storage->getMessages($sessionId));
+
+        $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'ping',
+                'params' => ['_meta' => ['progressToken' => 'tok-1']],
+                'id' => 509
+            ],
+            $sessionId,
+            $context,
+            $this->createResponse()
+        );
+
+        $this->messageHandler->sendProgressNotification($sessionId, 10, 'working', 100);
+
+        $messages = $this->storage->getMessages($sessionId);
+        $params = $messages[0]['data']['params'];
+
+        $this->assertEquals('tok-1', $params['progressToken']);
+        $this->assertEquals(10, $params['progress']);
+        $this->assertEquals(100, $params['total']);
+        $this->assertEquals('working', $params['message']);
+    }
+
+    public function testCancellationDropsOnlyTheCancelledRequest(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+        $context = $this->createTestContext(['protocol_version' => '2025-11-25']);
+
+        $keep = $this->messageHandler->requestRootsList($sessionId);
+        $cancel = $this->messageHandler->requestRootsList($sessionId);
+
+        $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'notifications/cancelled',
+                'params' => ['requestId' => $cancel]
+            ],
+            $sessionId,
+            $context,
+            $this->createResponse()
+        );
+
+        $remaining = array_column(array_column($this->storage->getMessages($sessionId), 'data'), 'id');
+
+        $this->assertContains($keep, $remaining);
+        $this->assertNotContains($cancel, $remaining);
+    }
+
+    public function testIconsAreGatedByProtocolVersion(): void
+    {
+        $icon = [['src' => 'https://example.com/i.svg', 'mimeType' => 'image/svg+xml', 'sizes' => ['any']]];
+
+        $tools = new \Seolinkmap\Waasup\Tools\Registry\ToolRegistry();
+        $tools->register('icon_tool', fn ($p, $c) => [], ['description' => 'd', 'icons' => $icon]);
+
+        $prompts = new \Seolinkmap\Waasup\Prompts\Registry\PromptRegistry();
+        $prompts->register('icon_prompt', fn ($a, $c) => [], ['description' => 'd', 'icons' => $icon]);
+
+        $resources = new \Seolinkmap\Waasup\Resources\Registry\ResourceRegistry();
+        $resources->register('res://icon', fn ($u, $c) => [], ['icons' => $icon]);
+        $resources->registerTemplate('res://icon/{id}', fn ($u, $c) => [], ['icons' => $icon]);
+
+        $this->assertArrayHasKey('icons', $tools->getToolsList('2025-11-25')['tools'][0]);
+        $this->assertArrayHasKey('icons', $prompts->getPromptsList('2025-11-25')['prompts'][0]);
+        $this->assertArrayHasKey('icons', $resources->getResourcesList('2025-11-25')['resources'][0]);
+        $this->assertArrayHasKey('icons', $resources->getResourceTemplatesList('2025-11-25')['resourceTemplates'][0]);
+
+        $this->assertArrayNotHasKey('icons', $tools->getToolsList('2025-06-18')['tools'][0]);
+        $this->assertArrayNotHasKey('icons', $prompts->getPromptsList('2025-06-18')['prompts'][0]);
+        $this->assertArrayNotHasKey('icons', $resources->getResourcesList('2025-06-18')['resources'][0]);
+        $this->assertArrayNotHasKey('icons', $resources->getResourceTemplatesList('2025-06-18')['resourceTemplates'][0]);
+    }
+
+    public function testTitlesAreGatedByProtocolVersion(): void
+    {
+        $tools = new \Seolinkmap\Waasup\Tools\Registry\ToolRegistry();
+        $tools->register('titled_tool', fn ($p, $c) => [], ['description' => 'd', 'title' => 'Titled Tool']);
+
+        $prompts = new \Seolinkmap\Waasup\Prompts\Registry\PromptRegistry();
+        $prompts->register('titled_prompt', fn ($a, $c) => [], ['description' => 'd', 'title' => 'Titled Prompt']);
+
+        $resources = new \Seolinkmap\Waasup\Resources\Registry\ResourceRegistry();
+        $resources->register('res://titled', fn ($u, $c) => [], ['title' => 'Titled Resource']);
+        $resources->registerTemplate('res://titled/{id}', fn ($u, $c) => [], ['title' => 'Titled Template']);
+
+        $this->assertEquals('Titled Tool', $tools->getToolsList('2025-06-18')['tools'][0]['title']);
+        $this->assertEquals('Titled Prompt', $prompts->getPromptsList('2025-06-18')['prompts'][0]['title']);
+        $this->assertEquals('Titled Resource', $resources->getResourcesList('2025-06-18')['resources'][0]['title']);
+        $this->assertEquals('Titled Template', $resources->getResourceTemplatesList('2025-06-18')['resourceTemplates'][0]['title']);
+
+        $this->assertArrayNotHasKey('title', $tools->getToolsList('2025-03-26')['tools'][0]);
+        $this->assertArrayNotHasKey('title', $prompts->getPromptsList('2025-03-26')['prompts'][0]);
+        $this->assertArrayNotHasKey('title', $resources->getResourcesList('2025-03-26')['resources'][0]);
+        $this->assertArrayNotHasKey('title', $resources->getResourceTemplatesList('2025-03-26')['resourceTemplates'][0]);
+    }
+
+    public function testServerRefusesRequestsTheClientCannotAnswer(): void
+    {
+        $sessionId = $this->generateMcpSessionId('2025-11-25');
+
+        $this->messageHandler->handleInitialize(
+            ['protocolVersion' => '2025-11-25', 'capabilities' => ['roots' => []]],
+            1,
+            $sessionId,
+            '2025-11-25',
+            $this->createResponse()
+        );
+
+        $this->messageHandler->requestRootsList($sessionId);
+        $this->assertCount(1, $this->storage->getMessages($sessionId));
+
+        $this->expectException(\Seolinkmap\Waasup\Exception\ProtocolException::class);
+        $this->expectExceptionMessage("did not declare the 'sampling' capability");
+
+        $this->messageHandler->requestSampling(
+            $sessionId,
+            [['role' => 'user', 'content' => ['type' => 'text', 'text' => 'hi']]],
+            ['maxTokens' => 10]
+        );
+    }
+
+    public function testStructuredContentIsCheckedAgainstOutputSchema(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+        $context = $this->createTestContext(['protocol_version' => '2025-11-25']);
+
+        $response = $this->messageHandler->processMessage(
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'tools/call',
+                'params' => ['name' => 'schema_tool', 'arguments' => []],
+                'id' => 601
+            ],
+            $sessionId,
+            $context,
+            $this->createResponse()
+        );
+
+        $data = json_decode((string) $response->getBody(), true);
+
+        $this->assertEquals(-32603, $data['error']['code']);
+        $this->assertStringContainsString("required property 'temperature' is missing", $data['error']['message']);
+    }
+
+    public function testDuplicateRequestIdsAreRefusedAcrossWorkers(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+        $context = $this->createTestContext(['protocol_version' => '2025-11-25']);
+        $ping = ['jsonrpc' => '2.0', 'method' => 'ping', 'id' => 'reused-id'];
+
+        $this->messageHandler->processMessage($ping, $sessionId, $context, $this->createResponse());
+
+        $otherWorker = new MessageHandler(
+            $this->createTestToolRegistry(),
+            $this->createTestPromptRegistry(),
+            $this->createTestResourceRegistry(),
+            $this->storage,
+            ['supported_versions' => $this->supportedVersions]
+        );
+
+        $this->expectException(\Seolinkmap\Waasup\Exception\ProtocolException::class);
+        $this->expectExceptionMessage('Duplicate request id reused-id');
+
+        $otherWorker->processMessage($ping, $sessionId, $context, $this->createResponse());
+    }
+
+    public function testListsPaginateWithOpaqueCursors(): void
+    {
+        $tools = new \Seolinkmap\Waasup\Tools\Registry\ToolRegistry();
+        foreach (['alpha', 'bravo', 'charlie', 'delta', 'echo'] as $name) {
+            $tools->register($name, fn ($p, $c) => [], ['description' => $name]);
+        }
+
+        $handler = new MessageHandler(
+            $tools,
+            $this->createTestPromptRegistry(),
+            $this->createTestResourceRegistry(),
+            $this->storage,
+            [
+                'supported_versions' => $this->supportedVersions,
+                'pagination' => ['page_size' => 2]
+            ]
+        );
+
+        $sessionId = $this->initializeSession('2025-11-25');
+        $context = $this->createTestContext(['protocol_version' => '2025-11-25']);
+
+        $seen = [];
+        $cursor = null;
+        $requestId = 700;
+
+        do {
+            $params = $cursor === null ? [] : ['cursor' => $cursor];
+
+            $response = $handler->processMessage(
+                ['jsonrpc' => '2.0', 'method' => 'tools/list', 'params' => $params, 'id' => $requestId++],
+                $sessionId,
+                $context,
+                $this->createResponse()
+            );
+
+            $result = json_decode((string) $response->getBody(), true)['result'];
+
+            $this->assertLessThanOrEqual(2, count($result['tools']));
+
+            $seen = array_merge($seen, array_column($result['tools'], 'name'));
+            $cursor = $result['nextCursor'] ?? null;
+        } while ($cursor !== null);
+
+        $this->assertEquals(['alpha', 'bravo', 'charlie', 'delta', 'echo'], $seen);
+    }
+
+    public function testFinalPageOmitsNextCursor(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $response = $this->messageHandler->processMessage(
+            ['jsonrpc' => '2.0', 'method' => 'prompts/list', 'id' => 710],
+            $sessionId,
+            $this->createTestContext(['protocol_version' => '2025-11-25']),
+            $this->createResponse()
+        );
+
+        $result = json_decode((string) $response->getBody(), true)['result'];
+
+        $this->assertArrayNotHasKey('nextCursor', $result);
+    }
+
+    public function testStreamResumesFromLastEventId(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        foreach (['one', 'two', 'three'] as $name) {
+            $this->storage->storeMessage($sessionId, ['jsonrpc' => '2.0', 'method' => "notifications/{$name}"]);
+        }
+
+        $all = $this->storage->getMessages($sessionId);
+        $this->assertCount(3, $all);
+
+        $afterFirst = $this->storage->getMessages($sessionId, [], (string)$all[0]['id']);
+        $this->assertCount(2, $afterFirst);
+        $this->assertEquals('notifications/two', $afterFirst[0]['data']['method']);
+
+        $afterLast = $this->storage->getMessages($sessionId, [], (string)$all[2]['id']);
+        $this->assertSame([], $afterLast);
+    }
+
+    public function testToolNamesAreValidatedAtRegistration(): void
+    {
+        $registry = new \Seolinkmap\Waasup\Tools\Registry\ToolRegistry();
+
+        $registry->register('valid.tool-name_9', fn ($p, $c) => [], ['description' => 'ok']);
+        $this->assertTrue($registry->hasTool('valid.tool-name_9'));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('may only contain letters');
+
+        $registry->register('invalid name', fn ($p, $c) => [], ['description' => 'bad']);
+    }
+
+    public function testRefreshTokenReuseRevokesTheFamily(): void
+    {
+        $storage = new MemoryStorage();
+
+        $storage->storeAccessToken(
+            [
+                'client_id' => 'c1',
+                'user_id' => 7,
+                'access_token' => 'access-old',
+                'refresh_token' => 'refresh-old',
+                'scope' => 'mcp:read',
+                'expires_at' => time() + 3600,
+                'agency_id' => 1
+            ]
+        );
+        $storage->storeAccessToken(
+            [
+                'client_id' => 'c1',
+                'user_id' => 7,
+                'access_token' => 'access-new',
+                'refresh_token' => 'refresh-new',
+                'scope' => 'mcp:read',
+                'expires_at' => time() + 3600,
+                'agency_id' => 1
+            ]
+        );
+
+        $this->assertTrue($storage->revokeTokenFamily('refresh-old'));
+        $this->assertNull($storage->getTokenByRefreshToken('refresh-new', 'c1'));
+        $this->assertFalse($storage->revokeTokenFamily('never-issued'));
+    }
+
+    private function call(string $sessionId, string $method, array $params, int $id): array
+    {
+        $message = ['jsonrpc' => '2.0', 'method' => $method, 'id' => $id];
+
+        if ($params !== []) {
+            $message['params'] = $params;
+        }
+
+        $response = $this->messageHandler->processMessage(
+            $message,
+            $sessionId,
+            $this->createTestContext(['protocol_version' => '2025-11-25']),
+            $this->createResponse()
+        );
+
+        return json_decode((string) $response->getBody(), true);
+    }
+
+    public function testTaskAugmentedCallReturnsATaskAndKeepsItsResult(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $created = $this->call($sessionId, 'tools/call', ['name' => 'task_tool', 'arguments' => [], 'task' => ['ttl' => 60000]], 801);
+        $task = $created['result']['task'];
+
+        $this->assertNotEmpty($task['taskId']);
+        $this->assertEquals(60000, $task['ttl']);
+        $this->assertNotEmpty($task['createdAt']);
+        $this->assertNotEmpty($task['lastUpdatedAt']);
+        $this->assertArrayNotHasKey('content', $created['result']);
+
+        $fetched = $this->call($sessionId, 'tasks/get', ['taskId' => $task['taskId']], 802);
+        $this->assertEquals($task['taskId'], $fetched['result']['taskId']);
+        $this->assertContains($fetched['result']['status'], ['completed', 'working']);
+
+        $result = $this->call($sessionId, 'tasks/result', ['taskId' => $task['taskId']], 803);
+        $this->assertEquals('task output', $result['result']['content'][0]['text']);
+        $this->assertEquals(
+            ['taskId' => $task['taskId']],
+            $result['result']['_meta']['io.modelcontextprotocol/related-task']
+        );
+
+        $listed = $this->call($sessionId, 'tasks/list', [], 804);
+        $this->assertCount(1, $listed['result']['tasks']);
+        $this->assertArrayNotHasKey('result', $listed['result']['tasks'][0]);
+    }
+
+    public function testTaskSupportIsEnforcedPerTool(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $forbidden = $this->call($sessionId, 'tools/call', ['name' => 'test_tool', 'arguments' => [], 'task' => []], 811);
+        $this->assertEquals(-32601, $forbidden['error']['code']);
+
+        $required = $this->call($sessionId, 'tools/call', ['name' => 'task_only_tool', 'arguments' => []], 812);
+        $this->assertEquals(-32601, $required['error']['code']);
+
+        $ok = $this->call($sessionId, 'tools/call', ['name' => 'task_only_tool', 'arguments' => [], 'task' => []], 813);
+        $this->assertArrayHasKey('task', $ok['result']);
+    }
+
+    public function testTaskErrorsFollowTheSpecifiedCodes(): void
+    {
+        $sessionId = $this->initializeSession('2025-11-25');
+
+        $unknown = $this->call($sessionId, 'tasks/get', ['taskId' => 'does-not-exist'], 821);
+        $this->assertEquals(-32602, $unknown['error']['code']);
+
+        $created = $this->call($sessionId, 'tools/call', ['name' => 'task_tool', 'arguments' => [], 'task' => []], 822);
+        $taskId = $created['result']['task']['taskId'];
+
+        $cancelled = $this->call($sessionId, 'tasks/cancel', ['taskId' => $taskId], 823);
+        $this->assertEquals(-32602, $cancelled['error']['code']);
+        $this->assertStringContainsString('terminal status', $cancelled['error']['message']);
+    }
+
+    public function testTasksAreAbsentBefore20251125(): void
+    {
+        $sessionId = $this->initializeSession('2025-06-18');
+        $context = $this->createTestContext(['protocol_version' => '2025-06-18']);
+
+        $response = $this->messageHandler->processMessage(
+            ['jsonrpc' => '2.0', 'method' => 'tasks/get', 'params' => ['taskId' => 'x'], 'id' => 831],
+            $sessionId,
+            $context,
+            $this->createResponse()
+        );
+
+        $data = json_decode((string) $response->getBody(), true);
+        $this->assertEquals(-32601, $data['error']['code']);
+
+        $tools = $this->messageHandler->processMessage(
+            ['jsonrpc' => '2.0', 'method' => 'tools/list', 'id' => 832],
+            $sessionId,
+            $context,
+            $this->createResponse()
+        );
+
+        foreach (json_decode((string) $tools->getBody(), true)['result']['tools'] as $tool) {
+            $this->assertArrayNotHasKey('execution', $tool);
+        }
+    }
+
+    public function testBothAuthorizationServerDiscoveryDocumentsAreServed(): void
+    {
+        $provider = new \Seolinkmap\Waasup\Discovery\WellKnownProvider(
+            ['oauth' => ['base_url' => 'https://auth.example.com']]
+        );
+
+        foreach (['authorizationServer', 'openidConfiguration'] as $method) {
+            $request = $this->createRequest('GET', '/.well-known/x')
+                ->withHeader('MCP-Protocol-Version', '2025-11-25');
+
+            $response = $provider->{$method}($request, $this->createResponse());
+            $document = json_decode((string) $response->getBody(), true);
+
+            $this->assertEquals('https://auth.example.com', $document['issuer']);
+            $this->assertEquals(['S256'], $document['code_challenge_methods_supported']);
+            $this->assertArrayHasKey('authorization_endpoint', $document);
+            $this->assertArrayHasKey('token_endpoint', $document);
+        }
+    }
+
 }

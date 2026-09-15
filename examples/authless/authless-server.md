@@ -335,7 +335,10 @@ $toolRegistry->register('product_info', function($params, $context) {
     $productId = $params['product_id'] ?? null;
 
     if (!$productId) {
-        return ['error' => 'Product ID required'];
+        return [
+            'content' => [['type' => 'text', 'text' => 'Product ID is required.']],
+            'isError' => true
+        ];
     }
 
     // Your product lookup logic
@@ -381,11 +384,17 @@ $toolRegistry->register('safe_tool', function($params, $context) {
     $query = $params['query'] ?? '';
 
     if (strlen($query) > 100) {
-        return ['error' => 'Query too long (max 100 characters)'];
+        return [
+            'content' => [['type' => 'text', 'text' => 'Query is too long; the maximum is 100 characters.']],
+            'isError' => true
+        ];
     }
 
     if (empty($query)) {
-        return ['error' => 'Query cannot be empty'];
+        return [
+            'content' => [['type' => 'text', 'text' => 'Query cannot be empty.']],
+            'isError' => true
+        ];
     }
 
     // Sanitize for your use case

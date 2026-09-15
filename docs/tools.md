@@ -101,6 +101,87 @@ function ($params, $context) {
 }
 ```
 
+### Tool Return Values
+
+A tool can return in one of three shapes, and the server treats each differently.
+
+**A plain array** is serialized to JSON and delivered as a single text block. This is the
+simplest form and every example above uses it:
+
+```php
+return ['customer' => $customer, 'retrieved_at' => date('c')];
+```
+
+**Content blocks** are delivered to the client exactly as written, which is how you return
+anything that is not text. Use this for images, audio, resource links and embedded
+resources:
+
+```php
+return [
+    'content' => [
+        ['type' => 'text', 'text' => 'Chart for Q3:'],
+        ['type' => 'image', 'data' => base64_encode($png), 'mimeType' => 'image/png'],
+        ['type' => 'resource_link', 'uri' => 'file:///reports/q3.pdf', 'name' => 'q3.pdf']
+    ]
+];
+```
+
+**Structured content** pairs machine-readable data with its text rendering. Declare an
+`outputSchema` and the server checks what you return against it, refusing the call with
+`-32603` if the structured content is missing or does not match:
+
+```php
+$toolRegistry->register(
+    'get_weather',
+    function ($params, $context) {
+        $data = ['temperature' => 22.5, 'conditions' => 'Partly cloudy'];
+
+        return [
+            'content' => [['type' => 'text', 'text' => json_encode($data)]],
+            'structuredContent' => $data
+        ];
+    },
+    [
+        'description' => 'Current weather for a location',
+        'outputSchema' => [
+            'type' => 'object',
+            'properties' => [
+                'temperature' => ['type' => 'number'],
+                'conditions' => ['type' => 'string']
+            ],
+            'required' => ['temperature', 'conditions']
+        ]
+    ]
+);
+```
+
+The check covers the declared type, required properties and each declared property's
+type. Nested subschemas and composition keywords are not checked.
+
+### Reporting Tool Failures
+
+Failures are reported at one of two levels:
+
+- **Tool execution errors** are returned as a result with `'isError' => true`. Use this
+  for API failures, validation problems and business rules.
+- **Protocol errors** are raised by the server rather than the tool: an unknown tool
+  name, or a malformed request.
+
+```php
+return [
+    'content' => [
+        [
+            'type' => 'text',
+            'text' => 'Invalid departure date: must be in the future. Today is ' . date('m/d/Y') . '.'
+        ]
+    ],
+    'isError' => true
+];
+```
+
+Throwing an exception from your tool produces the same result: the server catches it and
+returns an `isError` result carrying the exception message.
+
 ### Advanced Tool Patterns
 
 **Context-Aware Data Access**:
@@ -226,12 +307,16 @@ Annotations help AI assistants understand tool behavior and make better decision
     'readOnlyHint' => false,         // Tool modifies data
     'destructiveHint' => true,       // Tool could delete/damage data
     'idempotentHint' => false,       // Repeated calls have different effects
-    'openWorldHint' => true,         // Tool accepts flexible parameters
-    'requiresUserConfirmation' => true, // Suggest user approval first
-    'sensitive' => true,             // Tool accesses sensitive data
-    'experimental' => false          // Tool is stable for production use
+    'openWorldHint' => true          // Tool accepts flexible parameters
 ]
 ```
+
+Annotations are sent only when you declare them. A tool that declares none is advertised
+with no hints.
+
+`readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint` are the hints the
+specification defines. Any other key you add travels as extra metadata and clients are
+free to ignore it.
 
 ## AI-Helpful Error Messaging
 
@@ -241,16 +326,25 @@ Design error messages that guide AI assistants to make better next moves, rather
 
 **Instead of generic "not found":**
 ```php
-// Poor: Generic error
+// Poor: Generic error, and not flagged as a failure
 return ['error' => 'Customer not found'];
 
-// Better: Helpful guidance
+// Better: helpful guidance, flagged as a failure
 return [
-    'error' => 'No customer found with ID ' . $customerId,
-    'help' => 'Try using search_customers tool to find customers by name or email',
-    'suggestion' => 'Customer IDs are numeric values. Use list_customers to see available IDs.'
+    'content' => [
+        [
+            'type' => 'text',
+            'text' => 'No customer found with ID ' . $customerId . '. '
+                . 'Use search_customers to find customers by name or email, or '
+                . 'list_customers to see available IDs. Customer IDs are numeric.'
+        ]
+    ],
+    'isError' => true
 ];
 ```
+
+Without `isError` the result is reported as a success and the error text is treated as
+the answer.
 
 **Guide AI through required workflows:**
 ```php
@@ -534,6 +628,60 @@ $toolRegistry->register(
     }
 );
 ```
+
+**Display Icons and Titles** (icons 2025-11-25, titles 2025-06-18):
+```php
+$toolRegistry->register(
+    'get_weather',
+    function ($params, $context) { /* ... */ },
+    [
+        'title' => 'Weather Lookup',
+        'description' => 'Current weather for a location',
+        'icons' => [
+            [
+                'src' => 'https://example.com/weather.svg',
+                'mimeType' => 'image/svg+xml',
+                'sizes' => ['any']
+            ]
+        ]
+    ]
+);
+```
+
+Both are withheld from clients on protocol versions that predate them. Prompts, resources
+and resource templates accept the same `title` and `icons` keys. Class-based tools,
+prompts and resources supply them through `getTitle()` and `getIcons()`, which
+`AbstractTool`, `AbstractPrompt` and `AbstractResource` implement from optional
+constructor arguments.
+
+**Task Execution** (2025-11-25):
+```php
+$toolRegistry->register(
+    'generate_report',
+    function ($params, $context) { /* ... */ },
+    [
+        'description' => 'Build a report',
+        'execution' => ['taskSupport' => 'optional']
+    ]
+);
+```
+
+A tool only accepts task augmentation when it declares `execution.taskSupport`. `optional`
+lets a client call it either way, `required` means a plain call is refused. Without the
+key, a client that sends a `task` parameter is refused with `-32601`.
+
+The client calls the tool with a `task` parameter and receives a task id instead of the
+result, then retrieves the result with `tasks/result`:
+
+```json
+{"method": "tools/call", "params": {"name": "generate_report", "arguments": {}, "task": {"ttl": 60000}}}
+{"result": {"task": {"taskId": "...", "status": "completed", "ttl": 60000, "pollInterval": 1000}}}
+{"method": "tasks/result", "params": {"taskId": "..."}}
+```
+
+Your tool code is unchanged. The call runs during the originating request and the task is
+terminal when the task id is returned. `tasks/get`, `tasks/list` and `tasks/cancel` operate
+on tasks held against the session.
 
 **Structured Outputs** (2025-06-18):
 ```php

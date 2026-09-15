@@ -14,7 +14,10 @@ class DatabaseStorageTest extends TestCase
     {
         parent::setUp();
 
-        // Create in-memory SQLite database for testing
+        if (!in_array('sqlite', \PDO::getAvailableDrivers(), true)) {
+            $this->markTestSkipped('The pdo_sqlite driver is not available');
+        }
+
         $this->pdo = new \PDO('sqlite::memory:');
         $this->pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 
@@ -24,7 +27,7 @@ class DatabaseStorageTest extends TestCase
 
     private function createDatabaseSchema(): void
     {
-        // Create tables for testing
+
         $this->pdo->exec(
             "
             CREATE TABLE mcp_messages (
@@ -63,6 +66,8 @@ class DatabaseStorageTest extends TestCase
                 code_challenge_method VARCHAR(10) DEFAULT NULL,
                 agency_id INTEGER NOT NULL,
                 user_id INTEGER DEFAULT NULL,
+                resource VARCHAR(255) DEFAULT NULL,
+                aud TEXT DEFAULT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         "
@@ -94,13 +99,12 @@ class DatabaseStorageTest extends TestCase
         "
         );
 
-        // Insert test data
         $this->seedTestData();
     }
 
     private function seedTestData(): void
     {
-        // Insert test agency
+
         $this->pdo->exec(
             "
             INSERT INTO mcp_agencies (id, uuid, name, active)
@@ -108,7 +112,6 @@ class DatabaseStorageTest extends TestCase
         "
         );
 
-        // Insert test token
         $this->pdo->exec(
             "
             INSERT INTO mcp_oauth_tokens (access_token, token_type, scope, expires_at, agency_id)
@@ -153,7 +156,7 @@ class DatabaseStorageTest extends TestCase
 
     public function testValidateExpiredToken(): void
     {
-        // Insert expired token
+
         $this->pdo->exec(
             "
             INSERT INTO mcp_oauth_tokens (access_token, token_type, scope, expires_at, agency_id)
@@ -163,6 +166,237 @@ class DatabaseStorageTest extends TestCase
 
         $result = $this->storage->validateToken('expired-token');
         $this->assertNull($result);
+    }
+
+    public function testStoreAccessTokenPersistsResourceBinding(): void
+    {
+        $storage = $this->createStorage('https://mcp.example.com/mcp/agency-uuid');
+        $expiresAt = time() + 3600;
+
+        $result = $storage->storeAccessToken(
+            [
+                'client_id' => 'test-client',
+                'access_token' => 'stored-token',
+                'refresh_token' => 'stored-refresh',
+                'scope' => 'mcp:read mcp:write',
+                'expires_at' => $expiresAt,
+                'agency_id' => 1,
+                'user_id' => 1
+            ]
+        );
+
+        $this->assertTrue($result);
+
+        $stored = $storage->validateToken('stored-token');
+
+        $this->assertNotNull($stored);
+        $this->assertEquals('stored-refresh', $stored['refresh_token']);
+        $this->assertEquals('mcp:read mcp:write', $stored['scope']);
+        $this->assertEquals('Bearer', $stored['token_type']);
+        $this->assertEquals(date('Y-m-d H:i:s', $expiresAt), $stored['expires_at']);
+        $this->assertEquals(0, $stored['revoked']);
+        $this->assertEquals('https://mcp.example.com/mcp/agency-uuid', $stored['resource']);
+        $this->assertEquals(['https://mcp.example.com/mcp/agency-uuid'], $stored['aud']);
+        $this->assertEqualsWithDelta(time(), strtotime($stored['created_at']), 5);
+    }
+
+    public function testStoreAccessTokenWithoutConfiguredStorage(): void
+    {
+        $storage = new DatabaseStorage($this->pdo);
+        $raised = [];
+
+        set_error_handler(
+            function (int $severity, string $message) use (&$raised): bool {
+                $raised[] = $message;
+                return true;
+            }
+        );
+
+        try {
+            $result = $storage->storeAccessToken(
+                [
+                    'client_id' => 'test-client',
+                    'access_token' => 'defaulted-token',
+                    'refresh_token' => 'defaulted-refresh',
+                    'scope' => 'mcp:read',
+                    'expires_at' => time() + 3600,
+                    'agency_id' => 1,
+                    'user_id' => 1
+                ]
+            );
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame([], $raised, 'Storing a token raised PHP errors');
+        $this->assertTrue($result);
+
+        $stored = $storage->validateToken('defaulted-token');
+
+        $this->assertNotNull($stored);
+        $this->assertEquals('defaulted-refresh', $stored['refresh_token']);
+        $this->assertNull($stored['resource'] ?? null);
+    }
+
+    public function testStoreAccessTokenKeepsExplicitAudience(): void
+    {
+        $storage = $this->createStorage('https://mcp.example.com/mcp/agency-uuid');
+
+        $storage->storeAccessToken(
+            [
+                'client_id' => 'test-client',
+                'access_token' => 'audience-token',
+                'refresh_token' => 'audience-refresh',
+                'scope' => 'mcp:read',
+                'expires_at' => time() + 3600,
+                'agency_id' => 1,
+                'user_id' => 1,
+                'aud' => ['https://mcp.example.com/mcp/agency-uuid', 'https://mcp.example.com/mcp/other']
+            ]
+        );
+
+        $stored = $storage->validateToken('audience-token');
+
+        $this->assertNotNull($stored);
+        $this->assertEquals(
+            ['https://mcp.example.com/mcp/agency-uuid', 'https://mcp.example.com/mcp/other'],
+            $stored['aud']
+        );
+    }
+
+    public function testStoreAccessTokenWithoutBaseUrlHasNoResourceBinding(): void
+    {
+        $storage = $this->createStorage(null);
+
+        $storage->storeAccessToken(
+            [
+                'client_id' => 'test-client',
+                'access_token' => 'unbound-token',
+                'refresh_token' => 'unbound-refresh',
+                'scope' => 'mcp:read',
+                'expires_at' => time() + 3600,
+                'agency_id' => 1,
+                'user_id' => 1,
+                'aud' => ['https://mcp.example.com/mcp/agency-uuid']
+            ]
+        );
+
+        $stored = $storage->validateToken('unbound-token');
+
+        $this->assertNotNull($stored);
+        $this->assertNull($stored['resource'] ?? null);
+        $this->assertNull($stored['aud'] ?? null);
+    }
+
+    public function testStoreAccessTokenRejectsDuplicateToken(): void
+    {
+        $storage = $this->createStorage('https://mcp.example.com/mcp/agency-uuid');
+        $tokenData = [
+            'client_id' => 'test-client',
+            'access_token' => 'duplicate-token',
+            'refresh_token' => 'duplicate-refresh',
+            'scope' => 'mcp:read',
+            'expires_at' => time() + 3600,
+            'agency_id' => 1,
+            'user_id' => 1
+        ];
+
+        $this->assertTrue($storage->storeAccessToken($tokenData));
+
+        $tokenData['refresh_token'] = 'second-refresh';
+        $this->assertFalse($storage->storeAccessToken($tokenData));
+
+        $stored = $storage->validateToken('duplicate-token');
+        $this->assertEquals('duplicate-refresh', $stored['refresh_token']);
+    }
+
+    public function testStoredAccessTokenIsReachableByRefreshTokenUntilRevoked(): void
+    {
+        $storage = $this->createStorage('https://mcp.example.com/mcp/agency-uuid');
+
+        $storage->storeAccessToken(
+            [
+                'client_id' => 'test-client',
+                'access_token' => 'refreshable-token',
+                'refresh_token' => 'refreshable-refresh',
+                'scope' => 'mcp:read',
+                'expires_at' => time() + 3600,
+                'agency_id' => 1,
+                'user_id' => 1
+            ]
+        );
+
+        $byRefresh = $storage->getTokenByRefreshToken('refreshable-refresh', 'test-client');
+
+        $this->assertNotNull($byRefresh);
+        $this->assertEquals('refreshable-token', $byRefresh['access_token']);
+        $this->assertNull($storage->getTokenByRefreshToken('refreshable-refresh', 'other-client'));
+
+        $this->assertTrue($storage->revokeToken('refreshable-refresh'));
+        $this->assertNull($storage->getTokenByRefreshToken('refreshable-refresh', 'test-client'));
+        $this->assertNull($storage->validateToken('refreshable-token'));
+    }
+
+    private function createStorage(?string $baseUrl): DatabaseStorage
+    {
+        return new DatabaseStorage($this->pdo, ['base_url' => $baseUrl]);
+    }
+
+    public function testTouchAccessTokenExtendsExpiry(): void
+    {
+        $newExpiry = time() + 7200;
+
+        $this->assertTrue($this->storage->touchAccessToken('test-token', $newExpiry));
+
+        $stored = $this->storage->validateToken('test-token');
+        $this->assertNotNull($stored);
+        $this->assertEquals(date('Y-m-d H:i:s', $newExpiry), $stored['expires_at']);
+        $this->assertEquals('mcp:read mcp:write', $stored['scope']);
+    }
+
+    public function testTouchAccessTokenRevivesNothingRevoked(): void
+    {
+        $this->pdo->exec(
+            "
+            INSERT INTO mcp_oauth_tokens (access_token, token_type, scope, expires_at, revoked, agency_id)
+            VALUES ('revoked-token', 'Bearer', 'mcp:read', datetime('now', '+1 hour'), 1, 1)
+        "
+        );
+
+        $this->assertFalse($this->storage->touchAccessToken('revoked-token', time() + 7200));
+        $this->assertNull($this->storage->validateToken('revoked-token'));
+    }
+
+    public function testTouchAccessTokenIgnoresAuthorizationCodes(): void
+    {
+        $storage = $this->createStorage('https://mcp.example.com/mcp/agency-uuid');
+        $expiresAt = time() + 300;
+
+        $storage->storeAuthorizationCode(
+            'auth-code-value',
+            [
+                'client_id' => 'test-client',
+                'scope' => 'mcp:read',
+                'expires_at' => $expiresAt,
+                'code_challenge' => 'challenge',
+                'code_challenge_method' => 'S256',
+                'agency_id' => 1,
+                'user_id' => 1
+            ]
+        );
+
+        $this->assertFalse($storage->touchAccessToken('auth-code-value', time() + 7200));
+
+        $code = $storage->getAuthorizationCode('auth-code-value', 'test-client');
+        $this->assertNotNull($code);
+        $this->assertEquals(date('Y-m-d H:i:s', $expiresAt), $code['expires_at']);
+        $this->assertEquals('challenge', $code['code_challenge']);
+        $this->assertEquals('https://mcp.example.com/mcp/agency-uuid', $code['resource']);
+    }
+
+    public function testTouchAccessTokenRejectsUnknownToken(): void
+    {
+        $this->assertFalse($this->storage->touchAccessToken('no-such-token', time() + 7200));
     }
 
     public function testGetContextData(): void
@@ -185,10 +419,9 @@ class DatabaseStorageTest extends TestCase
 
     public function testCleanup(): void
     {
-        // Add some test messages
+
         $this->storage->storeMessage('session1', ['test' => 'message']);
 
-        // Add expired message directly
         $this->pdo->exec(
             "
             INSERT INTO mcp_messages (session_id, message_data, created_at)

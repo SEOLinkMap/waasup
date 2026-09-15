@@ -29,16 +29,12 @@ trait UtilityTrait
         }
     }
 
-
-
-
-
     /**
      * Get base URL from request
      */
     private function getBaseUrl(Request $request): string
     {
-        // Use configured base URL if available
+
         if (!empty($this->config['base_url'])) {
             return $this->config['base_url'];
         }
@@ -51,9 +47,34 @@ trait UtilityTrait
     /**
      * Validate OAuth state parameter
      */
-    private function validateState(string $state): bool
+    private function validateState(?string $state): bool
     {
-        return isset($_SESSION['oauth_state']) && hash_equals($_SESSION['oauth_state'], $state);
+        return $state !== null && isset($_SESSION['oauth_state']) && hash_equals($_SESSION['oauth_state'], $state);
+    }
+
+    /**
+     * Validate the CSRF token posted back by an OAuth form
+     *
+     * @return bool true when it matches the token issued with this OAuth request
+     */
+    private function validateCsrfToken(?string $token): bool
+    {
+        return $token !== null && isset($_SESSION['oauth_csrf']) && hash_equals($_SESSION['oauth_csrf'], $token);
+    }
+
+    /**
+     * Compare a presented client secret against the registered one
+     *
+     * @param array $client registered client row
+     * @return bool true when the client authenticated, or registered without a secret
+     */
+    private function clientSecretMatches(array $client, ?string $presented): bool
+    {
+        if (empty($client['client_secret'])) {
+            return true;
+        }
+
+        return $presented !== null && hash_equals((string)$client['client_secret'], $presented);
     }
 
     /**
@@ -63,8 +84,6 @@ trait UtilityTrait
     {
         unset($_SESSION['oauth_request'], $_SESSION['oauth_user'], $_SESSION['oauth_state'], $_SESSION['oauth_verification_mode']);
     }
-
-
 
     /**
      * Generate OAuth error response
@@ -76,7 +95,6 @@ trait UtilityTrait
             $data['error_description'] = $description;
         }
 
-        // OAuth 2.1 Section 5.3 status code mapping
         $status = match ($error) {
             'invalid_token' => 401,
             'insufficient_scope' => 403,
@@ -90,7 +108,6 @@ trait UtilityTrait
             default => 400
         };
 
-        // OAuth 2.1 Section 5.3.1 - WWW-Authenticate header required
         $wwwAuth = 'Bearer realm="OAuth Server"';
         if ($error) {
             $wwwAuth .= ', error="' . $error . '"';
@@ -120,8 +137,25 @@ trait UtilityTrait
         return [
             'base_url' => null,
             'session_user_id' => null,
+            'scopes_supported' => ['mcp:read', 'mcp:write'],
             'oauth' => [
+                'access_token_lifetime' => 3600,
+                'refresh_token_lifetime' => null,
+                'authorization_code_lifetime' => 300,
+                'ui' => [
+                    'background_color' => null,
+                    'text_color' => null,
+                    'accent_color' => null
+                ],
                 'auth_server' => [
+                    'endpoints' => [
+                        'authorize' => '/oauth/authorize',
+                        'token' => '/oauth/token',
+                        'verify' => '/oauth/verify',
+                        'consent' => '/oauth/consent',
+                        'register' => '/oauth/register',
+                        'revoke' => '/oauth/revoke'
+                    ],
                     'providers' => [
                         'google' => [
                             'client_id' => null,

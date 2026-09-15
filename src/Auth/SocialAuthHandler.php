@@ -11,6 +11,8 @@ use Seolinkmap\Waasup\Storage\StorageInterface;
 
 class SocialAuthHandler
 {
+    use RenderingTrait;
+
     private StorageInterface $storage;
     private ResponseFactoryInterface $responseFactory;
     private StreamFactoryInterface $streamFactory;
@@ -255,7 +257,11 @@ class SocialAuthHandler
 
     private function renderAuthForm(Response $response, array $data = []): Response
     {
-        $clientName = $_SESSION['oauth_request']['client_name'] ?? 'Unknown Application';
+        $clientName = htmlspecialchars(
+            $_SESSION['oauth_request']['client_name'] ?? 'Unknown Application',
+            ENT_QUOTES,
+            'UTF-8'
+        );
         $error = $data['error'] ?? '';
 
         $socialButtons = '';
@@ -269,61 +275,25 @@ class SocialAuthHandler
             $socialButtons .= '<button type="submit" name="provider" value="github" class="btn social github">Continue with GitHub</button>';
         }
 
-        $html = "<!DOCTYPE html>
-<html>
-<head>
-    <title>Authorize {$clientName}</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 400px; margin: 80px auto; padding: 20px; background: #f9f9f9; }
-        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .error { color: #d73a49; background: #ffeef0; padding: 12px; border-radius: 4px; margin-bottom: 20px; border: 1px solid #fdbdbd; }
-        .form-group { margin-bottom: 16px; }
-        label { display: block; margin-bottom: 6px; font-weight: 500; color: #24292e; }
-        input[type=email], input[type=password] { width: 100%; padding: 12px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
-        .btn { width: 100%; padding: 12px; border: none; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; margin-bottom: 8px; }
-        .primary { background: #0366d6; color: white; }
-        .social { background: #f6f8fa; color: #24292e; border: 1px solid #d1d5da; }
-        .google { background: #4285f4; color: white; border: none; }
-        .linkedin { background: #0077b5; color: white; border: none; }
-        .github { background: #24292e; color: white; border: none; }
-        .divider { text-align: center; margin: 20px 0; color: #6a737d; position: relative; }
-        .divider::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: #e1e4e8; }
-        .divider span { background: white; padding: 0 16px; }
-        h1 { color: #24292e; margin-bottom: 24px; font-size: 20px; text-align: center; }
-    </style>
-</head>
-<body>
-    <div class='container'>
-        <h1>Authorize {$clientName}</h1>
-        " . ($error ? "<div class='error'>{$error}</div>" : "") . "
+        if ($socialButtons) {
+            $socialButtons = "<form method='POST'>{$socialButtons}</form><div class='divider'><span>or</span></div>";
+        }
 
-        " . ($socialButtons ? "
-        <form method='POST'>
-            {$socialButtons}
-        </form>
+        $body = ($error ? "<div class='error'>" . htmlspecialchars($error, ENT_QUOTES, 'UTF-8') . "</div>" : "") . "
+{$socialButtons}
+<form method='POST'>
+<div class='form-group'>
+<label for='email'>Email</label>
+<input type='email' id='email' name='email' required>
+</div>
+<div class='form-group'>
+<label for='password'>Password</label>
+<input type='password' id='password' name='password' required>
+</div>
+<button type='submit' name='provider' value='email' class='btn primary'>Sign In</button>
+</form>";
 
-        <div class='divider'><span>or</span></div>
-        " : "") . "
-
-        <form method='POST'>
-            <div class='form-group'>
-                <label>Email</label>
-                <input type='email' name='email' required>
-            </div>
-            <div class='form-group'>
-                <label>Password</label>
-                <input type='password' name='password' required>
-            </div>
-            <button type='submit' name='provider' value='email' class='btn primary'>Sign In</button>
-        </form>
-    </div>
-</body>
-</html>";
-
-        $stream = $this->streamFactory->createStream($html);
-        return $this->responseFactory->createResponse(200)
-            ->withBody($stream)
-            ->withHeader('Content-Type', 'text/html');
+        return $this->renderPage("Authorize {$clientName}", $body);
     }
 
     private function redirectToConsent(Response $response): Response

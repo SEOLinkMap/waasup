@@ -31,4 +31,14 @@ interface ResourceInterface
      * Read the resource content
      */
     public function read(array $context = []): array;
+
+    /**
+     * Get display icons (for MCP 2025-11-25+)
+     */
+    public function getIcons(): array;
+
+    /**
+     * Get the display title (for MCP 2025-06-18+)
+     */
+    public function getTitle(): string;
 }

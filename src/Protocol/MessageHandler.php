@@ -19,13 +19,14 @@ use Seolinkmap\Waasup\Tools\Registry\ToolRegistry;
 
 class MessageHandler
 {
+    public const SEEN_REQUEST_ID_LIMIT = 500;
+
     private ToolRegistry $toolRegistry;
     private PromptRegistry $promptRegistry;
     private ResourceRegistry $resourceRegistry;
     private StorageInterface $storage;
     private array $config;
     private array $sessionVersionCache = [];
-    private array $sessionRequestIds = [];
     private ProtocolManager $protocolManager;
     private ToolsHandler $toolsHandler;
     private PromptsHandler $promptsHandler;
@@ -46,9 +47,8 @@ class MessageHandler
         $this->promptRegistry = $promptRegistry;
         $this->resourceRegistry = $resourceRegistry;
         $this->storage = $storage;
-        $this->config = $config; // config array (master in MCPSaaSServer::getDefaultConfig())
+        $this->config = $config;
 
-        // Initialize delegated handlers
         $this->protocolManager = new ProtocolManager($storage, $config);
         $this->contentProcessor = new ContentProcessor($this->protocolManager);
         $this->responseManager = new ResponseManager($storage, $this->protocolManager);
@@ -58,17 +58,20 @@ class MessageHandler
             $this->promptRegistry,
             $this->protocolManager,
             $this->contentProcessor,
-            $this->responseManager
+            $this->responseManager,
+            $this->resourceRegistry
         );
 
         $this->promptsHandler = new PromptsHandler(
             $this->promptRegistry,
-            $this->responseManager
+            $this->responseManager,
+            $this->protocolManager
         );
 
         $this->resourcesHandler = new ResourcesHandler(
             $this->resourceRegistry,
-            $this->responseManager
+            $this->responseManager,
+            $this->protocolManager
         );
 
         $this->samplingHandler = new SamplingHandler(
@@ -96,10 +99,14 @@ class MessageHandler
         }
         $protocolVersion = $this->sessionVersionCache[$sessionId];
 
-        // MCP 2025-06-18 requires protocol version header validation (skip for authless)
-        if ($protocolVersion === '2025-06-18' && !($context['authless'] ?? false)) {
-            if (!isset($context['protocol_version']) || $context['protocol_version'] !== $protocolVersion) {
-                throw new ProtocolException('MCP-Protocol-Version header required and must match negotiated version for 2025-06-18', -32600);
+        if (strcmp($protocolVersion, '2025-06-18') >= 0 && !($context['authless'] ?? false)) {
+            $headerVersion = $context['protocol_version'] ?? '';
+
+            if ($headerVersion !== '' && $headerVersion !== $protocolVersion) {
+                throw new ProtocolException(
+                    "MCP-Protocol-Version header says {$headerVersion} but this session negotiated {$protocolVersion}. Send MCP-Protocol-Version: {$protocolVersion} or start a new session with initialize.",
+                    -32600
+                );
             }
         }
 
@@ -150,8 +157,21 @@ class MessageHandler
         return $this->samplingHandler->requestRootsListDirectory($sessionId, $uri, $options, $context);
     }
 
-    public function sendProgressNotification(string $sessionId, int $progress, string $message = ''): void
-    {
+    /**
+     * Send a progress notification for the request being handled
+     *
+     * @param int|float $progress work done so far
+     * @param string $message human readable step description, 2025-03-26 and later
+     * @param int|float|null $total expected total, omitted when unknown
+     * @param mixed $progressToken overrides the token of the current request
+     */
+    public function sendProgressNotification(
+        string $sessionId,
+        int|float $progress,
+        string $message = '',
+        int|float|null $total = null,
+        mixed $progressToken = null
+    ): void {
         if (!isset($this->sessionVersionCache[$sessionId])) {
             $this->sessionVersionCache[$sessionId] =
                 $this->protocolManager->getSessionVersion($sessionId);
@@ -162,30 +182,117 @@ class MessageHandler
             return;
         }
 
+        $progressToken = $progressToken ?? $this->protocolManager->getSessionValue($sessionId, 'progress_token');
+
+        if ($progressToken === null) {
+            return;
+        }
+
         $notification = [
             'jsonrpc' => '2.0',
             'method' => 'notifications/progress',
             'params' => [
-                'progress' => $progress,
-                'total' => 100
+                'progressToken' => $progressToken,
+                'progress' => $progress
             ]
         ];
 
-        // Message field only supported in 2025-03-26+
-        if ($this->protocolManager->isFeatureSupported('progress_messages', $protocolVersion)) {
+        if ($total !== null) {
+            $notification['params']['total'] = $total;
+        }
+
+        if ($message !== '' && $this->protocolManager->isFeatureSupported('progress_messages', $protocolVersion)) {
             $notification['params']['message'] = $message;
         }
 
         $this->storage->storeMessage($sessionId, $notification);
     }
 
+    /**
+     * Send a list_changed notification
+     *
+     * @param string $listType one of tools, prompts or resources
+     */
+    public function sendListChangedNotification(string $sessionId, string $listType): void
+    {
+        if (!in_array($listType, ['tools', 'prompts', 'resources'], true)) {
+            throw new ProtocolException("List type must be tools, prompts or resources, {$listType} given.", -32602);
+        }
+
+        $this->storage->storeMessage(
+            $sessionId,
+            [
+                'jsonrpc' => '2.0',
+                'method' => "notifications/{$listType}/list_changed"
+            ]
+        );
+    }
+
+    /**
+     * Send a resources/updated notification to a subscribed session
+     */
+    public function sendResourceUpdatedNotification(string $sessionId, string $uri): void
+    {
+        $subscriptions = $this->protocolManager->getSessionValue($sessionId, 'resource_subscriptions', []);
+
+        if (!in_array($uri, $subscriptions, true)) {
+            return;
+        }
+
+        $this->storage->storeMessage(
+            $sessionId,
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'notifications/resources/updated',
+                'params' => ['uri' => $uri]
+            ]
+        );
+    }
+
+    /**
+     * Send a notifications/message log record
+     *
+     * @param string $level RFC 5424 severity
+     * @param mixed $data the log payload
+     * @param string $logger optional logger name
+     */
+    public function sendLogMessage(string $sessionId, string $level, mixed $data, string $logger = ''): void
+    {
+        $levels = SystemHandler::LOG_LEVELS;
+        $minimum = $this->protocolManager->getSessionValue($sessionId, 'log_level');
+
+        if (!in_array($level, $levels, true)) {
+            throw new ProtocolException("Log level must be one of " . implode(', ', $levels) . ", {$level} given.", -32602);
+        }
+
+        if ($minimum === null || array_search($level, $levels, true) < array_search($minimum, $levels, true)) {
+            return;
+        }
+
+        $params = ['level' => $level, 'data' => $data];
+
+        if ($logger !== '') {
+            $params['logger'] = $logger;
+        }
+
+        $this->storage->storeMessage(
+            $sessionId,
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'notifications/message',
+                'params' => $params
+            ]
+        );
+    }
+
     public function requestElicitation(
         string $sessionId,
         string $message,
         ?array $requestedSchema = null,
-        array $context = []
+        array $context = [],
+        array $options = []
     ): string {
-        return $this->samplingHandler->requestElicitation($sessionId, $message, $requestedSchema, $context);
+        return $this->samplingHandler->requestElicitation($sessionId, $message, $requestedSchema, $context, $options);
     }
 
     private function isBatchRequest(array $data): bool
@@ -225,13 +332,12 @@ class MessageHandler
                     continue;
                 }
 
-                // Batching is only negotiated for Streamable HTTP versions, where each
-                // request response is written inline. Read just the slice this item added.
                 $written = (string) $body;
-                $responseData = json_decode(substr($written, $consumed), true);
+                $responseData = json_decode(substr($written, $consumed));
                 $consumed = strlen($written);
 
-                if (is_array($responseData) && (isset($responseData['result']) || isset($responseData['error']))) {
+                if ($responseData instanceof \stdClass
+                    && (property_exists($responseData, 'result') || property_exists($responseData, 'error'))) {
                     $batchResponses[] = $responseData;
                 }
             } catch (ProtocolException $e) {
@@ -246,7 +352,6 @@ class MessageHandler
             }
         }
 
-        // A batch consisting solely of notifications is acknowledged with 202 and no body.
         if (empty($batchResponses) && $hasNotifications) {
             return $response
                 ->withHeader('Content-Type', 'application/json')
@@ -254,9 +359,6 @@ class MessageHandler
                 ->withStatus(202);
         }
 
-        // Replace the inline per-item output with the aggregated array. PSR-7 streams
-        // expose no truncate, so a shorter payload is padded with trailing whitespace,
-        // which is insignificant following a JSON value.
         $encoded = json_encode($batchResponses);
         $payload = $encoded === false ? '[]' : $encoded;
         $written = strlen((string) $body);
@@ -281,11 +383,27 @@ class MessageHandler
     ): Response {
 
         if (!isset($data['jsonrpc']) || $data['jsonrpc'] !== '2.0') {
-            throw new ProtocolException('Invalid Request', -32600);
+            throw new ProtocolException("Invalid Request: every message must carry \"jsonrpc\": \"2.0\".", -32600);
+        }
+
+        if (!isset($data['method']) && array_key_exists('id', $data)
+            && (array_key_exists('result', $data) || array_key_exists('error', $data))) {
+            if ($sessionId) {
+                $this->samplingHandler->storeClientResponse(
+                    $sessionId,
+                    $data['id'],
+                    is_array($data['result'] ?? null) ? $data['result'] : ['error' => $data['error'] ?? null]
+                );
+            }
+
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withHeader('Access-Control-Allow-Origin', '*')
+                ->withStatus(202);
         }
 
         if (!isset($data['method'])) {
-            throw new ProtocolException('Invalid Request', -32600);
+            throw new ProtocolException("Invalid Request: a request needs a \"method\", a response needs \"result\" or \"error\" alongside its \"id\".", -32600);
         }
 
         $method = $data['method'];
@@ -297,12 +415,11 @@ class MessageHandler
         $isExplicitNotification = str_starts_with($method, 'notifications/') || in_array($method, ['initialized']);
 
         if (!$isExplicitNotification && (!$hasId || $data['id'] === null)) {
-            throw new ProtocolException('Request id cannot be null', -32600);
+            throw new ProtocolException("Request id cannot be null: give \"{$method}\" a unique string or number id, or send it as a notification under the notifications/ prefix.", -32600);
         }
 
         $isNotification = $isExplicitNotification || !$hasId;
 
-        // Skip version gating for initialize method
         if ($method !== 'initialize') {
             if (!$this->protocolManager->isMethodSupported($method, $protocolVersion)) {
                 if ($isNotification) {
@@ -316,15 +433,25 @@ class MessageHandler
             }
         }
 
-        // Prevent duplicate request IDs per session
-        if (!$isNotification && $sessionId !== null && $id !== null) {
-            if (!isset($this->sessionRequestIds[$sessionId])) {
-                $this->sessionRequestIds[$sessionId] = [];
+        if (!$isNotification && $sessionId !== null) {
+            $seenIds = $this->protocolManager->getSessionValue($sessionId, 'seen_request_ids', []);
+
+            if ($id !== null && in_array($id, $seenIds, true)) {
+                throw new ProtocolException("Duplicate request id {$id}: this id was already used on this session. Use a fresh id for each request.", -32600);
             }
-            if (in_array($id, $this->sessionRequestIds[$sessionId])) {
-                throw new ProtocolException('Duplicate request id', -32600);
+
+            if ($id !== null) {
+                $seenIds[] = $id;
+                $seenIds = array_slice($seenIds, -self::SEEN_REQUEST_ID_LIMIT);
             }
-            $this->sessionRequestIds[$sessionId][] = $id;
+
+            $this->protocolManager->storeSessionValues(
+                $sessionId,
+                [
+                    'progress_token' => $params['_meta']['progressToken'] ?? null,
+                    'seen_request_ids' => $seenIds
+                ]
+            );
         }
 
         if ($isNotification) {
@@ -344,26 +471,48 @@ class MessageHandler
                     return $this->systemHandler->handlePing($id, $sessionId, $context, $response);
 
                 case 'tools/list':
-                    return $this->toolsHandler->handleToolsList($id, $sessionId, $context, $response);
+                    return $this->toolsHandler->handleToolsList($params, $id, $sessionId, $context, $response);
 
                 case 'tools/call':
                     return $this->toolsHandler->handleToolsCall($params, $id, $sessionId, $context, $response);
 
                 case 'prompts/list':
-                    return $this->promptsHandler->handlePromptsList($id, $sessionId, $context, $response);
+                    return $this->promptsHandler->handlePromptsList($params, $id, $sessionId, $context, $response);
 
                 case 'prompts/get':
                     return $this->promptsHandler->handlePromptsGet($params, $id, $sessionId, $context, $response);
 
                 case 'resources/list':
-                    return $this->resourcesHandler->handleResourcesList($id, $sessionId, $context, $response);
+                    return $this->resourcesHandler->handleResourcesList($params, $id, $sessionId, $context, $response);
 
                 case 'resources/read':
                     return $this->resourcesHandler->handleResourcesRead($params, $id, $sessionId, $context, $response);
 
                 case 'resources/templates/list':
-                    return $this->resourcesHandler->handleResourceTemplatesList($id, $sessionId, $context, $response);
+                    return $this->resourcesHandler->handleResourceTemplatesList($params, $id, $sessionId, $context, $response);
 
+                case 'resources/subscribe':
+                    return $this->resourcesHandler->handleResourcesSubscribe($params, $id, $sessionId, $context, $response);
+
+                case 'resources/unsubscribe':
+                    return $this->resourcesHandler->handleResourcesUnsubscribe($params, $id, $sessionId, $context, $response);
+
+                case 'tasks/get':
+                    return $this->systemHandler->handleTasksGet($params, $id, $sessionId, $context, $response);
+
+                case 'tasks/result':
+                    return $this->systemHandler->handleTasksResult($params, $id, $sessionId, $context, $response);
+
+                case 'tasks/cancel':
+                    return $this->systemHandler->handleTasksCancel($params, $id, $sessionId, $context, $response);
+
+                case 'tasks/list':
+                    return $this->systemHandler->handleTasksList($params, $id, $sessionId, $context, $response);
+
+                case 'logging/setLevel':
+                    return $this->systemHandler->handleLoggingSetLevel($params, $id, $sessionId, $context, $response);
+
+                case 'completion/complete':
                 case 'completions/complete':
                     return $this->toolsHandler->handleCompletionsComplete($params, $id, $sessionId, $context, $response);
 
@@ -382,9 +531,9 @@ class MessageHandler
 
                 default:
                     if (!$sessionId) {
-                        throw new ProtocolException('Session required', -32001);
+                        throw new ProtocolException('Session required. Send an initialize request first and reuse the returned Mcp-Session-Id header.', -32001);
                     }
-                    return $this->responseManager->storeErrorResponse($sessionId, -32601, 'Method not found', $id, $response);
+                    return $this->responseManager->storeErrorResponse($sessionId, -32601, "Method not found: {$method}. This server serves the methods listed in the capabilities returned by initialize.", $id, $response);
             }
         } catch (ProtocolException $e) {
             throw $e;
@@ -392,7 +541,7 @@ class MessageHandler
             if (!$sessionId) {
                 throw new ProtocolException('Internal error: ' . $e->getMessage(), -32603);
             }
-            return $this->responseManager->storeErrorResponse($sessionId, -32603, 'Internal error', $id, $response);
+            return $this->responseManager->storeErrorResponse($sessionId, -32603, "Internal error handling {$method}: " . $e->getMessage(), $id, $response);
         }
     }
 
@@ -404,10 +553,12 @@ class MessageHandler
                 break;
 
             case 'notifications/cancelled':
-                if ($sessionId) {
+                if ($sessionId && isset($params['requestId'])) {
                     $messages = $this->storage->getMessages($sessionId);
                     foreach ($messages as $message) {
-                        $this->storage->deleteMessage($message['id']);
+                        if (($message['data']['id'] ?? null) === $params['requestId']) {
+                            $this->storage->deleteMessage($message['id']);
+                        }
                     }
                 }
                 break;

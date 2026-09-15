@@ -24,16 +24,21 @@ class VersionNegotiatorTest extends TestCase
 
     public function testNegotiateNewerClientVersion(): void
     {
-        // Client supports newer version than we do
+
         $result = $this->negotiator->negotiate('2026-01-01');
-        $this->assertEquals('2025-06-18', $result); // Should return our newest
+        $this->assertEquals('2025-11-25', $result);
     }
 
-    public function testNegotiateFallbackToOldest(): void
+    public function testNegotiateFallbackToNewest(): void
     {
-        // Client supports very old version we don't support
         $result = $this->negotiator->negotiate('2023-01-01');
-        $this->assertEquals('2024-11-05', $result); // Should fallback to our oldest
+        $this->assertEquals('2025-11-25', $result);
+    }
+
+    public function testNegotiateUnparseableVersion(): void
+    {
+        $this->assertEquals('2025-11-25', $this->negotiator->negotiate('not-a-version'));
+        $this->assertEquals('2025-11-25', $this->negotiator->negotiate(''));
     }
 
     public function testNegotiateWithDefaultVersions(): void
@@ -56,14 +61,14 @@ class VersionNegotiatorTest extends TestCase
     public function testGetSupportedVersions(): void
     {
         $versions = $this->negotiator->getSupportedVersions();
-        $expected = ['2025-06-18', '2025-03-26', '2024-11-05'];
+        $expected = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
         $this->assertEquals($expected, $versions);
     }
 
     public function testVersionOrdering(): void
     {
-        // Test that version comparison works correctly
+
         $result1 = $this->negotiator->negotiate('2024-12-01');
         $this->assertEquals('2024-11-05', $result1);
 
@@ -75,8 +80,6 @@ class VersionNegotiatorTest extends TestCase
     {
         $emptyNegotiator = new VersionNegotiator([]);
 
-        // Should not throw but might have undefined behavior
-        // In practice, this shouldn't happen but we test defensive coding
         $this->expectNotToPerformAssertions();
         $emptyNegotiator->negotiate('2024-11-05');
     }

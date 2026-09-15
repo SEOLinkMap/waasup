@@ -21,6 +21,12 @@ class PingTool extends AbstractTool
                         'description' => 'Optional message to echo back'
                     ]
                 ]
+            ],
+            [
+                'readOnlyHint' => true,
+                'destructiveHint' => false,
+                'idempotentHint' => true,
+                'openWorldHint' => false
             ]
         );
     }

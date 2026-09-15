@@ -25,6 +25,12 @@ class ServerInfoTool extends AbstractTool
                         'description' => 'Include context information if available'
                     ]
                 ]
+            ],
+            [
+                'readOnlyHint' => true,
+                'destructiveHint' => false,
+                'idempotentHint' => true,
+                'openWorldHint' => false
             ]
         );
     }

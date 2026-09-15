@@ -36,4 +36,14 @@ interface ToolInterface
      * Get tool annotations (readOnlyHint, destructiveHint, etc.)
      */
     public function getAnnotations(): array;
+
+    /**
+     * Get display icons (for MCP 2025-11-25+)
+     */
+    public function getIcons(): array;
+
+    /**
+     * Get the display title (for MCP 2025-06-18+)
+     */
+    public function getTitle(): string;
 }

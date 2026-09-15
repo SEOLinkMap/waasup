@@ -49,7 +49,6 @@ abstract class TestCase extends PHPUnitTestCase
     {
         $storage = new MemoryStorage();
 
-        // Add test agency
         $storage->addContext(
             '550e8400-e29b-41d4-a716-446655440000',
             'agency',
@@ -61,7 +60,6 @@ abstract class TestCase extends PHPUnitTestCase
             ]
         );
 
-        // Add test user
         $storage->addContext(
             'user123',
             'user',
@@ -75,7 +73,6 @@ abstract class TestCase extends PHPUnitTestCase
             ]
         );
 
-        // Add test token
         $storage->addToken(
             'test-valid-token',
             [
@@ -87,7 +84,6 @@ abstract class TestCase extends PHPUnitTestCase
             ]
         );
 
-        // Add expired token
         $storage->addToken(
             'test-expired-token',
             [
@@ -99,7 +95,6 @@ abstract class TestCase extends PHPUnitTestCase
             ]
         );
 
-        // Add test sessions using the ACTUAL MCP server format
         $this->setupTestSessions($storage);
 
         return $storage;
@@ -115,7 +110,7 @@ abstract class TestCase extends PHPUnitTestCase
         $baseSessionNames = ['session1', 'session2', 'session3', 'test-session', 'session123'];
 
         foreach ($protocols as $index => $protocol) {
-            // Create proper MCP session ID format
+
             $sessionId = $this->generateMcpSessionId($protocol);
 
             $sessionData = [
@@ -127,14 +122,12 @@ abstract class TestCase extends PHPUnitTestCase
 
             $storage->storeSession($sessionId, $sessionData, 3600);
 
-            // Also create sessions with predictable names for specific tests
             if ($index < count($baseSessionNames)) {
                 $predictableSessionId = $protocol . '_' . hash('sha256', $baseSessionNames[$index]);
                 $storage->storeSession($predictableSessionId, $sessionData, 3600);
             }
         }
 
-        // Create specific well-known sessions for protocol compliance tests
         $wellKnownSessions = [
             'session1' => '2024-11-05_' . hash('sha256', 'session1'),
             'session123' => '2024-11-05_' . hash('sha256', 'session123'),
@@ -157,7 +150,7 @@ abstract class TestCase extends PHPUnitTestCase
      */
     protected function createTestSession(MemoryStorage $storage, string $sessionId, string $protocolVersion = '2024-11-05'): string
     {
-        // If sessionId doesn't already include protocol version, format it properly
+
         if (!str_contains($sessionId, '_')) {
             $sessionId = $protocolVersion . '_' . hash('sha256', $sessionId);
         }
@@ -189,7 +182,6 @@ abstract class TestCase extends PHPUnitTestCase
     {
         $registry = new ToolRegistry();
 
-        // Add simple test tool
         $registry->register(
             'test_tool',
             function ($params, $context) {
@@ -210,7 +202,6 @@ abstract class TestCase extends PHPUnitTestCase
             ]
         );
 
-        // Add tool with required parameters
         $registry->register(
             'required_params_tool',
             function ($params) {
@@ -238,7 +229,6 @@ abstract class TestCase extends PHPUnitTestCase
     {
         $registry = new PromptRegistry();
 
-        // Add simple test prompt
         $registry->register(
             'test_prompt',
             function ($arguments, $context) {
@@ -277,7 +267,6 @@ abstract class TestCase extends PHPUnitTestCase
     {
         $registry = new ResourceRegistry();
 
-        // Add simple test resource
         $registry->register(
             'test://resource',
             function ($uri, $context) {
@@ -298,7 +287,6 @@ abstract class TestCase extends PHPUnitTestCase
             ]
         );
 
-        // Add test resource template
         $registry->registerTemplate(
             'test://{id}',
             function ($uri, $context) {

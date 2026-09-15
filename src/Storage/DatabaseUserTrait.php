@@ -6,8 +6,6 @@ trait DatabaseUserTrait
 {
     /**
      * Get user data by user ID
-     *
-     * Required fields in users table: id, agency_id, name, email
      */
     public function getUserData(int $userId): ?array
     {
@@ -24,8 +22,6 @@ trait DatabaseUserTrait
 
     /**
      * Verify user email/password credentials
-     *
-     * Required fields in users table: id, password, agency_id, name, email
      */
     public function verifyUserCredentials(string $email, string $password): ?array
     {

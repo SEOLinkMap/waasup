@@ -51,52 +51,70 @@ class ResourceRegistry
      */
     public function read(string $uri, array $context = []): array
     {
-        // Check resource instances first
+
         if (isset($this->resources[$uri])) {
             return $this->resources[$uri]->read($context);
         }
 
-        // Check callable resources
         if (isset($this->callables[$uri])) {
             $callable = $this->callables[$uri];
             return ($callable['handler'])($uri, $context);
         }
 
-        // Check templates for pattern match
         foreach ($this->templateCallables as $template => $callable) {
             if ($this->matchesTemplate($template, $uri)) {
                 return ($callable['handler'])($uri, $context);
             }
         }
 
-        throw new MCPException("Resource not found: {$uri}", -32601);
+        throw new MCPException("Resource not found: {$uri}. Call resources/list or resources/templates/list to see what this server exposes.", -32002);
     }
 
     /**
      * Get all registered resources for resources/list response
      */
-    public function getResourcesList(): array
+    public function getResourcesList(string $protocolVersion = '2025-11-25'): array
     {
         $resources = [];
+        $supportsIcons = strcmp($protocolVersion, '2025-11-25') >= 0;
+        $supportsTitle = strcmp($protocolVersion, '2025-06-18') >= 0;
 
-        // Add resource instances
         foreach ($this->resources as $resource) {
-            $resources[] = [
+            $resourceData = [
                 'uri' => $resource->getUri(),
                 'name' => $resource->getName(),
                 'description' => $resource->getDescription(),
                 'mimeType' => $resource->getMimeType()
             ];
+
+            if ($supportsTitle && $resource->getTitle() !== '') {
+                $resourceData['title'] = $resource->getTitle();
+            }
+
+            if ($supportsIcons && !empty($resource->getIcons())) {
+                $resourceData['icons'] = $resource->getIcons();
+            }
+
+            $resources[] = $resourceData;
         }
 
-        // Add callable resources
         foreach ($this->callables as $uri => $callable) {
-            $resources[] = [
+            $resourceData = [
                 'uri' => $uri,
                 'name' => $callable['schema']['name'] ?? basename($uri),
                 'description' => $callable['schema']['description'] ?? "Resource: {$uri}",
                 'mimeType' => $callable['schema']['mimeType'] ?? 'text/plain'
             ];
+
+            if ($supportsTitle && !empty($callable['schema']['title'])) {
+                $resourceData['title'] = $callable['schema']['title'];
+            }
+
+            if ($supportsIcons && !empty($callable['schema']['icons'])) {
+                $resourceData['icons'] = $callable['schema']['icons'];
+            }
+
+            $resources[] = $resourceData;
         }
 
         return ['resources' => $resources];
@@ -105,20 +123,48 @@ class ResourceRegistry
     /**
      * Get all registered resource templates
      */
-    public function getResourceTemplatesList(): array
+    public function getResourceTemplatesList(string $protocolVersion = '2025-11-25'): array
     {
         $templates = [];
+        $supportsIcons = strcmp($protocolVersion, '2025-11-25') >= 0;
+        $supportsTitle = strcmp($protocolVersion, '2025-06-18') >= 0;
 
         foreach ($this->templateCallables as $uriTemplate => $callable) {
-            $templates[] = [
+            $templateData = [
                 'uriTemplate' => $uriTemplate,
                 'name' => $callable['schema']['name'] ?? basename($uriTemplate),
                 'description' => $callable['schema']['description'] ?? "Resource template: {$uriTemplate}",
                 'mimeType' => $callable['schema']['mimeType'] ?? 'text/plain'
             ];
+
+            if ($supportsTitle && !empty($callable['schema']['title'])) {
+                $templateData['title'] = $callable['schema']['title'];
+            }
+
+            if ($supportsIcons && !empty($callable['schema']['icons'])) {
+                $templateData['icons'] = $callable['schema']['icons'];
+            }
+
+            $templates[] = $templateData;
         }
 
         return ['resourceTemplates' => $templates];
+    }
+
+    /**
+     * Get the declared argument schema for the template matching a URI
+     *
+     * @return array JSON schema, empty when no template matches
+     */
+    public function getTemplateSchema(string $uri): array
+    {
+        foreach ($this->templateCallables as $template => $callable) {
+            if ($template === $uri || $this->matchesTemplate($template, $uri)) {
+                return $callable['schema']['inputSchema'];
+            }
+        }
+
+        return [];
     }
 
     /**
@@ -144,7 +190,7 @@ class ResourceRegistry
      */
     public function getResourceUris(): array
     {
-        return array_replace_recursive(
+        return array_merge(
             array_keys($this->resources),
             array_keys($this->callables)
         );
@@ -166,7 +212,10 @@ class ResourceRegistry
         return [
             'name' => $schema['name'] ?? '',
             'description' => $schema['description'] ?? '',
-            'mimeType' => $schema['mimeType'] ?? 'text/plain'
+            'mimeType' => $schema['mimeType'] ?? 'text/plain',
+            'title' => $schema['title'] ?? '',
+            'icons' => $schema['icons'] ?? [],
+            'inputSchema' => $schema['inputSchema'] ?? []
         ];
     }
 
@@ -175,10 +224,9 @@ class ResourceRegistry
      */
     private function matchesTemplate(string $template, string $uri): bool
     {
-        // Convert template to regex pattern
-        // Replace {variable} with ([^/]+) for simple variable matching
-        $pattern = preg_replace('/\{[^}]+\}/', '([^/]+)', $template);
-        $pattern = str_replace('/', '\/', $pattern);
+
+        $pattern = preg_quote($template, '/');
+        $pattern = preg_replace('/\\\\\{[^}]+\\\\\}/', '([^\/]+)', $pattern);
         $pattern = '/^' . $pattern . '$/';
 
         return preg_match($pattern, $uri) === 1;

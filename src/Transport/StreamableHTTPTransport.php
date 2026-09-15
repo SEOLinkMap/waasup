@@ -18,8 +18,7 @@ class StreamableHTTPTransport implements TransportInterface
 {
     private LoggerInterface $logger;
     private StorageInterface $storage;
-    private array $config; // config array (master in MCPSaaSServer::getDefaultConfig())
-
+    private array $config;
 
     public function __construct(
         StorageInterface $storage,
@@ -44,13 +43,11 @@ class StreamableHTTPTransport implements TransportInterface
         $isTestMode = $this->config['test_mode'];
 
         if (!$isTestMode && function_exists('exec') && function_exists('getmypid')) {
-            // Make the streamed and sustained connection gentler on the server resources.
-            // This can wait a millisecond or so longer to respond if the server is busy.
+
             exec('renice 10 ' . getmypid());
         }
 
-        // Get protocol version from context if available
-        $protocolVersion = $context['protocol_version'];
+        $protocolVersion = $context['protocol_version'] ?? '';
 
         $response = $response
             ->withBody(new NonBufferedBody())
@@ -61,6 +58,8 @@ class StreamableHTTPTransport implements TransportInterface
             ->withHeader('Access-Control-Allow-Origin', '*')
             ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version')
             ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+
+        $this->resolveResumePoint($request, $sessionId);
 
         $body = $response->getBody();
 
@@ -75,39 +74,30 @@ class StreamableHTTPTransport implements TransportInterface
 
     /**
      * Handles message queue check for the sessionID
-     *
-     * Also handles timing:
-     * Fast polling for a period after a message was found.
-     *  - this assumes if one message happened, there may be a series of messages coming through
-     * Reduced polling if no messages for a period
-     * Ultimate timeout (server connection shutdown) when no messages for an extended time
-    */
+     */
     private function pollForMessages(StreamInterface $body, string $sessionId, array $context): void
     {
         $startTime = time();
         $pollInterval = $this->config['streamable_http']['keepalive_interval'];
-        $maxTime = $this->config['streamable_http']['max_connection_time']; // $maxTime after 'last active' messaging.
+        $maxTime = $this->config['streamable_http']['max_connection_time'];
         $switchTime = $this->config['streamable_http']['switch_interval_after'];
         $endTime = $startTime + $maxTime;
 
-        // Begin Streaming loop until server connection shutdown
         while (time() < $endTime && connection_status() === CONNECTION_NORMAL) {
             if (connection_aborted()) {
-                // Client (or other player) ended the connection
+
                 break;
             }
 
             if ($this->checkAndSendMessages($body, $sessionId)) {
-                // Reset 'last active' start time for more frequent messaging for a little bit
+
                 $startTime = time();
-                // Reset the server lifetime
+
                 $endTime = $startTime + $maxTime;
             } else {
                 $this->sendKeepalive($body);
             }
 
-            // Kick down the polling schedule since there has been no messaging for a little bit
-            // Stay active, but apparently there is no need for spastic polling
             $currentTime = time();
             if ($currentTime - $startTime > $switchTime) {
                 $pollInterval = max($pollInterval * 2, 5);
@@ -118,60 +108,97 @@ class StreamableHTTPTransport implements TransportInterface
         $this->logger->debug('connection ended, but they always do');
     }
 
+    /**
+     * Write an SSE comment to keep the connection open
+     */
     private function sendKeepalive(StreamInterface $body): void
     {
-        $keepaliveMessage = [
-            'jsonrpc' => '2.0',
-            'method' => 'notifications/ping',
-            'params' => [
-                'timestamp' => date('c')
-            ]
-        ];
+        $body->write(": keepalive\n\n");
 
-        $this->writeSSEMessage($body, $keepaliveMessage);
+        if (method_exists($body, 'flush')) {
+            $body->flush();
+        }
     }
 
     private function checkAndSendMessages(StreamInterface $body, string $sessionId): bool
     {
-        $messages = $this->storage->getMessages($sessionId);
+        $messages = $this->storage->getMessages($sessionId, [], $this->lastEventId);
 
         if (empty($messages)) {
             return false;
         }
 
         foreach ($messages as $message) {
-            $this->writeSSEMessage($body, $message['data']);
-            $this->storage->deleteMessage($message['id']);
+            $this->writeSSEMessage($body, $message['data'], (string)$message['id']);
+            $this->lastEventId = (string)$message['id'];
         }
+
+        $this->rememberResumePoint($sessionId);
 
         return true;
     }
 
-    private function writeSSEMessage(StreamInterface $body, array $message): void
+    private function writeSSEMessage(StreamInterface $body, array $message, string $eventId): void
     {
         $jsonData = json_encode($message);
         if ($jsonData === false) {
             return;
         }
 
-        // Format as Server-Sent Events for streaming connections
-        $sseData = "event: message\ndata: " . $jsonData . "\n\n";
+        $sseData = "id: " . $eventId . "\nevent: message\ndata: " . $jsonData . "\n\n";
         $body->write($sseData);
 
-        // Force immediate send
         if (method_exists($body, 'flush')) {
             $body->flush();
         }
     }
+    /**
+     * Position in the message stream this connection has reached
+     */
+    private ?string $lastEventId = null;
+
+    /**
+     * Resume from the id the client reconnected with, or from where the session left off
+     */
+    private function resolveResumePoint(Request $request, string $sessionId): void
+    {
+        $header = $request->getHeaderLine('Last-Event-ID');
+
+        if ($header !== '') {
+            $this->lastEventId = $header;
+            return;
+        }
+
+        $sessionData = $this->storage->getSession($sessionId) ?? [];
+        $this->lastEventId = $sessionData['last_event_id'] ?? null;
+    }
+
+    /**
+     * Record how far this session has been delivered
+     */
+    private function rememberResumePoint(string $sessionId): void
+    {
+        $sessionData = $this->storage->getSession($sessionId);
+
+        if ($sessionData === null) {
+            return;
+        }
+
+        $sessionData['last_event_id'] = $this->lastEventId;
+
+        $this->storage->storeSession($sessionId, $sessionData, $this->config['session_lifetime']);
+    }
+
 
     private function getDefaultConfig(): array
     {
         return [
-            'test_mode' => false,              // set to true in tests for instant responses
+            'test_mode' => false,
+            'session_lifetime' => 3600,
             'streamable_http' => [
-                'keepalive_interval' => 1,     // seconds
-                'max_connection_time' => 1800, // 30 minutes
-                'switch_interval_after' => 60  // switch to longer intervals after 1 minute
+                'keepalive_interval' => 1,
+                'max_connection_time' => 1800,
+                'switch_interval_after' => 60
             ]
         ];
     }

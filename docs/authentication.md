@@ -232,9 +232,88 @@ $config = [
 ];
 ```
 
+## What Clients Must Send
+
+The OAuth server enforces the parts of OAuth 2.1 that the MCP authorization
+specification requires. A client that skips any of these is refused.
+
+**PKCE is mandatory, and only `S256`.** `/oauth/authorize` returns `invalid_request`
+without a `code_challenge`, or with a `code_challenge_method` other than `S256`. The token
+endpoint rejects the `plain` method.
+
+```
+GET /oauth/authorize
+    ?response_type=code
+    &client_id=...
+    &redirect_uri=https://client.example.com/callback
+    &scope=mcp:read%20mcp:write
+    &state=...
+    &code_challenge=...
+    &code_challenge_method=S256
+    &resource=https://your-server.com/mcp/{agencyUuid}
+```
+
+**Requested scopes are checked** against `scopes_supported`. An unknown scope is refused
+with `invalid_scope` rather than quietly granted.
+
+**Authorization codes are single use.** Redeeming one marks it revoked, and a second
+exchange of the same code is refused.
+
+**The authorization response carries `iss`** (RFC 9207) alongside `code` and `state`.
+
+**`/oauth/revoke` authenticates the client.** Send `client_id`, and `client_secret` for a
+confidential client, along with the `token`.
+
+**Dynamic client registration answers `201 Created`** with `client_id`,
+`client_id_issued_at`, `client_secret`, `client_secret_expires_at` and `redirect_uris`,
+as RFC 7591 requires when a secret is issued.
+
+### Scope Challenges
+
+A request without a token is answered with `401` and a `WWW-Authenticate` challenge naming
+the scopes to request:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer realm="MCP Server",
+                         resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp/{agencyUuid}",
+                         scope="mcp:read mcp:write"
+```
+
+A valid token that lacks a required scope is answered with `403` and an
+`insufficient_scope` challenge. The `scope` parameter carries the scopes already granted
+alongside those required, so a step-up authorization keeps existing permissions:
+
+```http
+HTTP/1.1 403 Forbidden
+WWW-Authenticate: Bearer error="insufficient_scope",
+                         scope="mcp:read mcp:write",
+                         resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp/{agencyUuid}",
+                         error_description="The presented token is missing a scope this resource requires."
+```
+
+`auth.required_scopes` sets what is demanded; `auth.validate_scope` turns the check off.
+
+### Rendering Your Own Consent Screen
+
+The sign-in and consent pages carry a CSRF token. If you render these pages yourself
+instead of using the built-in ones, include the token as a hidden field and post it back:
+
+```php
+<input type='hidden' name='csrf_token' value='<?= htmlspecialchars($_SESSION['oauth_csrf'], ENT_QUOTES, 'UTF-8') ?>'>
+```
+
+`/oauth/verify` and `/oauth/consent` reject a submission whose `csrf_token` is missing or
+does not match the one issued with the authorization request.
+
 ## RFC-Compliant Discovery Endpoints
 
 WaaSuP automatically provides standards-compliant discovery endpoints for OAuth metadata.
+
+MCP clients probe both the OAuth 2.0 and the OpenID Connect discovery locations. Serve
+`WellKnownProvider::openidConfiguration()` at `/.well-known/openid-configuration` alongside
+the RFC 8414 endpoint so either probe resolves. Both documents carry
+`code_challenge_methods_supported`, which MCP clients require to confirm PKCE support.
 
 ### Authorization Server Discovery (RFC 8414)
 
@@ -307,6 +386,37 @@ $toolRegistry->register('get_customer_data', function($params, $context) {
     'description' => 'Get customer data for authenticated organization'
 ]);
 ```
+
+## Token Lifetimes
+
+Access tokens, refresh tokens and authorization codes all have configurable
+lifetimes:
+
+```php
+$config = [
+    'oauth' => [
+        'access_token_lifetime' => 3600,            // expires_in returned to the client
+        'refresh_token_lifetime' => null,           // null = refresh tokens never expire
+        'authorization_code_lifetime' => 300,
+        'sliding_expiration' => false,
+        'sliding_expiration_max_lifetime' => null,
+        'sliding_expiration_interval' => 60
+    ]
+];
+```
+
+Enable `sliding_expiration` to turn `access_token_lifetime` into an idle timeout:
+each authenticated MCP request extends the presented token to
+`now + access_token_lifetime`. Only an idle client is returned to the OAuth flow.
+`sliding_expiration_max_lifetime` caps the total session. See
+[Configuration](configuration.md#sliding-expiration-idle-timeout) for details.
+
+## OAuth Page Appearance
+
+The sign in, consent and out-of-band code pages follow the operating system
+light/dark preference. Set `oauth.ui.background_color`, `oauth.ui.text_color` and
+`oauth.ui.accent_color` to match your product - see
+[Configuration](configuration.md#oauth-page-appearance).
 
 ## Session Management
 

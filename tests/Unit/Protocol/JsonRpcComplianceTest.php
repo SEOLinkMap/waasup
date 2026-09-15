@@ -32,7 +32,6 @@ class JsonRpcComplianceTest extends TestCase
             ['server_info' => ['name' => 'Test Server', 'version' => '1.0.0']]
         );
 
-        // Create a properly formatted session that matches the MCP server format
         $this->validSessionId = '2024-11-05_' . bin2hex(random_bytes(16));
         $this->storage->storeSession(
             $this->validSessionId,
@@ -129,7 +128,6 @@ class JsonRpcComplianceTest extends TestCase
 
         $this->assertEquals(202, $response->getStatusCode());
 
-        // Verify error was queued
         $messages = $this->storage->getMessages($this->validSessionId);
         $this->assertCount(1, $messages);
         $errorMessage = $messages[0]['data'];
@@ -197,7 +195,6 @@ class JsonRpcComplianceTest extends TestCase
 
         $this->assertEquals(202, $response->getStatusCode());
 
-        // Verify error was queued
         $messages = $this->storage->getMessages($this->validSessionId);
         $this->assertCount(1, $messages);
         $errorMessage = $messages[0]['data'];

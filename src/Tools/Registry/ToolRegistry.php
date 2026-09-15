@@ -12,11 +12,15 @@ class ToolRegistry
 
     public function registerTool(ToolInterface $tool): void
     {
+        $this->assertValidName($tool->getName());
+
         $this->tools[$tool->getName()] = $tool;
     }
 
     public function register(string $name, callable $handler, array $schema = []): void
     {
+        $this->assertValidName($name);
+
         $this->callables[$name] = [
             'handler' => $handler,
             'schema' => $this->normalizeSchema($schema),
@@ -35,14 +39,17 @@ class ToolRegistry
             return ($callable['handler'])($parameters, $context);
         }
 
-        throw new MCPException("Tool not found: {$toolName}", -32601);
+        throw new MCPException("Tool not found: {$toolName}. Call tools/list to see the available tools.", -32602);
     }
 
     public function getToolsList(string $protocolVersion = '2025-06-18'): array
     {
         $tools = [];
         $supportsAnnotations = $this->supportsToolAnnotations($protocolVersion);
-        $supportsOutputSchema = ($protocolVersion === '2025-06-18');
+        $supportsOutputSchema = strcmp($protocolVersion, '2025-06-18') >= 0;
+        $supportsTitle = strcmp($protocolVersion, '2025-06-18') >= 0;
+        $supportsIcons = strcmp($protocolVersion, '2025-11-25') >= 0;
+        $supportsTasks = strcmp($protocolVersion, '2025-11-25') >= 0;
 
         foreach ($this->tools as $tool) {
             $toolData = [
@@ -51,7 +58,10 @@ class ToolRegistry
                 'inputSchema' => $tool->getInputSchema()
             ];
 
-            // Add outputSchema for 2025-06-18
+            if ($supportsTitle && $tool->getTitle() !== '') {
+                $toolData['title'] = $tool->getTitle();
+            }
+
             if ($supportsOutputSchema) {
                 $outputSchema = $tool->getOutputSchema();
                 if (!empty($outputSchema)) {
@@ -59,9 +69,18 @@ class ToolRegistry
                 }
             }
 
-            // Tool annotations only in 2025-03-26+
             if ($supportsAnnotations) {
-                $toolData['annotations'] = $tool->getAnnotations();
+                $annotations = $tool->getAnnotations();
+                if (!empty($annotations)) {
+                    $toolData['annotations'] = $annotations;
+                }
+            }
+
+            if ($supportsIcons) {
+                $icons = $tool->getIcons();
+                if (!empty($icons)) {
+                    $toolData['icons'] = $icons;
+                }
             }
 
             $tools[] = $toolData;
@@ -74,18 +93,24 @@ class ToolRegistry
                 'inputSchema' => $callable['schema']['inputSchema']
             ];
 
-            // Add outputSchema for 2025-06-18
+            if ($supportsTitle && !empty($callable['schema']['title'])) {
+                $toolData['title'] = $callable['schema']['title'];
+            }
+
             if ($supportsOutputSchema && !empty($callable['schema']['outputSchema'])) {
                 $toolData['outputSchema'] = $callable['schema']['outputSchema'];
             }
 
-            if ($supportsAnnotations) {
-                $toolData['annotations'] = $callable['schema']['annotations'] ?? [
-                    'readOnlyHint' => true,
-                    'destructiveHint' => false,
-                    'idempotentHint' => true,
-                    'openWorldHint' => false
-                ];
+            if ($supportsIcons && !empty($callable['schema']['icons'])) {
+                $toolData['icons'] = $callable['schema']['icons'];
+            }
+
+            if ($supportsTasks && !empty($callable['schema']['execution'])) {
+                $toolData['execution'] = $callable['schema']['execution'];
+            }
+
+            if ($supportsAnnotations && !empty($callable['schema']['annotations'])) {
+                $toolData['annotations'] = $callable['schema']['annotations'];
             }
 
             $tools[] = $toolData;
@@ -96,7 +121,37 @@ class ToolRegistry
 
     private function supportsToolAnnotations(string $version): bool
     {
-        return in_array($version, ['2025-03-26', '2025-06-18']);
+        return strcmp($version, '2025-03-26') >= 0;
+    }
+
+    /**
+     * Get the declared output schema for a tool
+     *
+     * @return array JSON schema, empty when the tool declares none
+     */
+    public function getOutputSchema(string $toolName): array
+    {
+        if (isset($this->tools[$toolName])) {
+            return $this->tools[$toolName]->getOutputSchema();
+        }
+
+        if (isset($this->callables[$toolName])) {
+            return $this->callables[$toolName]['schema']['outputSchema'];
+        }
+
+        return [];
+    }
+
+    /**
+     * How a tool may be invoked as a task: forbidden, optional or required
+     */
+    public function getTaskSupport(string $toolName): string
+    {
+        if (isset($this->callables[$toolName])) {
+            return $this->callables[$toolName]['schema']['execution']['taskSupport'] ?? 'forbidden';
+        }
+
+        return 'forbidden';
     }
 
     public function hasTool(string $toolName): bool
@@ -106,24 +161,42 @@ class ToolRegistry
 
     public function getToolNames(): array
     {
-        return array_replace_recursive(
+        return array_merge(
             array_keys($this->tools),
             array_keys($this->callables)
         );
     }
 
+    /**
+     * Reject a tool name clients cannot address
+     *
+     * @throws \InvalidArgumentException when the name breaks the naming rules
+     */
+    private function assertValidName(string $name): void
+    {
+        if ($name === '' || strlen($name) > 128) {
+            throw new \InvalidArgumentException(
+                "Tool name must be between 1 and 128 characters, '{$name}' is " . strlen($name) . '.'
+            );
+        }
+
+        if (preg_match('/^[A-Za-z0-9_.-]+$/', $name) !== 1) {
+            throw new \InvalidArgumentException(
+                "Tool name '{$name}' may only contain letters, digits, underscore, hyphen and dot."
+            );
+        }
+    }
+
     private function normalizeSchema(array $schema): array
     {
         return [
+            'title' => $schema['title'] ?? '',
             'description' => $schema['description'] ?? '',
             'inputSchema' => $schema['inputSchema'] ?? ['type' => 'object'],
             'outputSchema' => $schema['outputSchema'] ?? [],
-            'annotations' => $schema['annotations'] ?? [
-                'readOnlyHint' => true,
-                'destructiveHint' => false,
-                'idempotentHint' => true,
-                'openWorldHint' => false
-            ]
+            'icons' => $schema['icons'] ?? [],
+            'execution' => $schema['execution'] ?? [],
+            'annotations' => $schema['annotations'] ?? []
         ];
     }
 }

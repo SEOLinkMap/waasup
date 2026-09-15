@@ -33,6 +33,7 @@ $config = [
     ],
     'auth' => [
         'authless' => false,                             // false = OAuth required, true = public access
+        'allowed_origins' => [],                         // Origin allowlist; empty trusts any origin except loopback rebinding
         'context_types' => ['agency', 'user']
     ],
     'oauth' => [
@@ -222,6 +223,91 @@ $config = [
 ];
 ```
 
+### Token Lifetimes
+
+Every OAuth lifetime is configurable. The defaults below match previous releases.
+
+```php
+$config = [
+    'oauth' => [
+        'access_token_lifetime' => 3600,            // Seconds an access token is valid
+        'refresh_token_lifetime' => null,           // Seconds a refresh token is valid, null = never expires
+        'authorization_code_lifetime' => 300,       // Seconds an authorization code is valid
+        'sliding_expiration' => false,              // Extend access tokens while the client is active
+        'sliding_expiration_max_lifetime' => null,  // Absolute cap measured from issue time, null = uncapped
+        'sliding_expiration_interval' => 60         // Minimum seconds between extensions
+    ]
+];
+```
+
+`access_token_lifetime` is returned to the client as `expires_in` on both the
+`authorization_code` and `refresh_token` grants, and is the value written to the
+token's `expires_at`.
+
+`refresh_token_lifetime` is measured from the moment the token row was issued. A
+successful refresh issues a new row, so this value only expires refresh tokens that went
+unused.
+
+### Sliding Expiration (Idle Timeout)
+
+With `sliding_expiration` enabled, every authenticated MCP request pushes the
+presented access token's expiry out to `now + access_token_lifetime`. The token
+then dies only after `access_token_lifetime` of *inactivity* rather than a fixed
+window from login, so an active client is never forced back through the OAuth
+flow mid-session.
+
+```php
+$config = [
+    'oauth' => [
+        'access_token_lifetime' => 3600,              // One hour of idle time
+        'sliding_expiration' => true,
+        'sliding_expiration_max_lifetime' => 86400,   // Re-authenticate after a day regardless of activity
+        'sliding_expiration_interval' => 60           // At most one expiry write per minute per token
+    ]
+];
+```
+
+- **sliding_expiration_max_lifetime**: absolute ceiling measured from the token's
+  `created_at`. Once reached, the token expires even if the client is still
+  active. Leave `null` for no ceiling.
+- **sliding_expiration_interval**: throttles storage writes. The extension is
+  skipped when it would move the expiry by less than this many seconds, costing a
+  busy client one write per interval instead of one per request. The effective
+  idle window is `access_token_lifetime` minus this interval. Set it to `0` to
+  extend on every authenticated request.
+
+Custom `StorageInterface` implementations must provide `touchAccessToken()` for
+sliding expiration to work; the bundled `DatabaseStorage` and `MemoryStorage`
+already do.
+
+### OAuth Page Appearance
+
+The browser-facing pages - sign in, consent, and the out-of-band authorization
+code screen - follow the visitor's operating system light/dark preference. Three
+colors are configurable:
+
+```php
+$config = [
+    'oauth' => [
+        'ui' => [
+            'background_color' => '#101820',
+            'text_color' => '#f2f4f8',
+            'accent_color' => '#ff6b35'
+        ]
+    ]
+];
+```
+
+A single value is used by both schemes. Pass a pair to set them independently:
+
+```php
+'accent_color' => ['light' => '#ff6b35', 'dark' => '#ffa07a']
+```
+
+Anything left unset keeps the built-in palette for that scheme. Values must be a
+hex color, a CSS color keyword, or an `rgb()`/`hsl()` function; anything else is
+ignored in favor of the default.
+
 ### Required OAuth Routes
 
 You must implement these routes in your application:
@@ -345,13 +431,35 @@ $app->get('/.well-known/oauth-protected-resource[/{path:.*}]',
 
 These endpoints automatically provide OAuth metadata to compliant clients.
 
+## Pagination
+
+`tools/list`, `prompts/list`, `resources/list` and `resources/templates/list` return one
+page at a time, with an opaque `nextCursor` while more results remain:
+
+```php
+'pagination' => [
+    'page_size' => 50    // Items per page; 0 returns every item in one response
+]
+```
+
+The cursor is opaque and is sent back to fetch the next page. A cursor the server did not
+issue is refused with `-32602`.
+
+## Server Instructions
+
+Optional text returned in the `initialize` result:
+
+```php
+'instructions' => 'Call list_projects before any reporting tool so a project context is set.'
+```
+
 ## Protocol Version Support
 
 WaaSuP supports multiple MCP protocol versions with automatic feature gating.
 
 ```php
 $config = [
-    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],  // Newest first
+    'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],  // Newest first
 ];
 ```
 
@@ -395,7 +503,7 @@ $config = [
 $config = [
     // Core Settings
     'base_url' => null,                                          // Required: Your MCP endpoint
-    'supported_versions' => ['2025-06-18', '2025-03-26', '2024-11-05'],
+    'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
     'session_lifetime' => 3600,
     'session_user_id' => null,
     'test_mode' => false,
@@ -424,6 +532,12 @@ $config = [
     // OAuth Configuration
     'oauth' => [
         'base_url' => '',
+        'access_token_lifetime' => 3600,
+        'refresh_token_lifetime' => null,
+        'authorization_code_lifetime' => 300,
+        'sliding_expiration' => false,
+        'sliding_expiration_max_lifetime' => null,
+        'sliding_expiration_interval' => 60,
         'auth_server' => [
             'endpoints' => [
                 'authorize' => '/oauth/authorize',
@@ -455,6 +569,7 @@ $config = [
     'database' => [
         'table_prefix' => 'mcp_',
         'cleanup_interval' => 3600,
+        'message_lifetime' => 3600,
         'table_mapping' => [],
         'field_mapping' => []
     ]

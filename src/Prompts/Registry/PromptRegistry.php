@@ -38,43 +38,62 @@ class PromptRegistry
      */
     public function execute(string $promptName, array $arguments, array $context = []): array
     {
-        // Check prompt instances first
+
         if (isset($this->prompts[$promptName])) {
             return $this->prompts[$promptName]->execute($arguments, $context);
         }
 
-        // Check callable prompts
         if (isset($this->callables[$promptName])) {
             $callable = $this->callables[$promptName];
             return ($callable['handler'])($arguments, $context);
         }
 
-        throw new MCPException("Prompt not found: {$promptName}", -32601);
+        throw new MCPException("Prompt not found: {$promptName}. Call prompts/list to see the available prompts.", -32602);
     }
 
     /**
      * Get all registered prompts for prompts/list response
      */
-    public function getPromptsList(): array
+    public function getPromptsList(string $protocolVersion = '2025-11-25'): array
     {
         $prompts = [];
+        $supportsIcons = strcmp($protocolVersion, '2025-11-25') >= 0;
+        $supportsTitle = strcmp($protocolVersion, '2025-06-18') >= 0;
 
-        // Add prompt instances
         foreach ($this->prompts as $prompt) {
-            $prompts[] = [
+            $promptData = [
                 'name' => $prompt->getName(),
                 'description' => $prompt->getDescription(),
                 'arguments' => $this->convertSchemaToArguments($prompt->getInputSchema())
             ];
+
+            if ($supportsTitle && $prompt->getTitle() !== '') {
+                $promptData['title'] = $prompt->getTitle();
+            }
+
+            if ($supportsIcons && !empty($prompt->getIcons())) {
+                $promptData['icons'] = $prompt->getIcons();
+            }
+
+            $prompts[] = $promptData;
         }
 
-        // Add callable prompts
         foreach ($this->callables as $name => $callable) {
-            $prompts[] = [
+            $promptData = [
                 'name' => $name,
                 'description' => $callable['schema']['description'] ?? "Prompt: {$name}",
                 'arguments' => $this->convertSchemaToArguments($callable['schema']['inputSchema'] ?? ['type' => 'object'])
             ];
+
+            if ($supportsTitle && !empty($callable['schema']['title'])) {
+                $promptData['title'] = $callable['schema']['title'];
+            }
+
+            if ($supportsIcons && !empty($callable['schema']['icons'])) {
+                $promptData['icons'] = $callable['schema']['icons'];
+            }
+
+            $prompts[] = $promptData;
         }
 
         return ['prompts' => $prompts];
@@ -89,11 +108,29 @@ class PromptRegistry
     }
 
     /**
+     * Get the declared input schema for a prompt
+     *
+     * @return array JSON schema, empty when the prompt is not registered
+     */
+    public function getPromptSchema(string $promptName): array
+    {
+        if (isset($this->prompts[$promptName])) {
+            return $this->prompts[$promptName]->getInputSchema();
+        }
+
+        if (isset($this->callables[$promptName])) {
+            return $this->callables[$promptName]['schema']['inputSchema'];
+        }
+
+        return [];
+    }
+
+    /**
      * Get list of prompt names
      */
     public function getPromptNames(): array
     {
-        return array_replace_recursive(
+        return array_merge(
             array_keys($this->prompts),
             array_keys($this->callables)
         );
@@ -105,8 +142,10 @@ class PromptRegistry
     private function normalizeSchema(array $schema): array
     {
         return [
+            'title' => $schema['title'] ?? '',
             'description' => $schema['description'] ?? '',
-            'inputSchema' => $schema['inputSchema'] ?? ['type' => 'object']
+            'inputSchema' => $schema['inputSchema'] ?? ['type' => 'object'],
+            'icons' => $schema['icons'] ?? []
         ];
     }
 

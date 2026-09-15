@@ -16,7 +16,6 @@ class ResponseManager
         $this->protocolManager = $protocolManager;
     }
 
-
     public function storeSuccessResponse(string $sessionId, mixed $result, mixed $id, Response $response): Response
     {
         $responseData = [
@@ -49,10 +48,6 @@ class ResponseManager
 
     /**
      * Deliver a JSON-RPC response using the transport for the session's protocol version.
-     *
-     * Streamable HTTP (2025-03-26+) returns the response inline on the POST with a
-     * 200 status. HTTP+SSE (2024-11-05) queues the response for the GET stream and
-     * acknowledges the POST with a 202.
      */
     private function emit(string $sessionId, array $responseData, Response $response): Response
     {
@@ -74,6 +69,54 @@ class ResponseManager
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Access-Control-Allow-Origin', '*')
             ->withStatus(202);
+    }
+
+    /**
+     * Slice a list into the page identified by an opaque cursor
+     *
+     * @param array $items the full list
+     * @param string $keyField field identifying an item, used to build the cursor
+     * @param string|null $cursor cursor from the client, null for the first page
+     * @param int $pageSize items per page, 0 for no pagination
+     * @return array|null page as ['items' => array, 'nextCursor' => ?string], null when the cursor is unknown
+     */
+    public function paginate(array $items, string $keyField, ?string $cursor, int $pageSize): ?array
+    {
+        $offset = 0;
+
+        if ($cursor !== null && $cursor !== '') {
+            $after = base64_decode(strtr($cursor, '-_', '+/'), true);
+
+            if ($after === false) {
+                return null;
+            }
+
+            $offset = null;
+            foreach ($items as $index => $item) {
+                if (($item[$keyField] ?? null) === $after) {
+                    $offset = $index + 1;
+                    break;
+                }
+            }
+
+            if ($offset === null) {
+                return null;
+            }
+        }
+
+        if ($pageSize <= 0) {
+            return ['items' => array_slice($items, $offset), 'nextCursor' => null];
+        }
+
+        $page = array_slice($items, $offset, $pageSize);
+        $nextCursor = null;
+
+        if (count($items) > $offset + count($page) && $page !== []) {
+            $last = end($page);
+            $nextCursor = rtrim(strtr(base64_encode((string)($last[$keyField] ?? '')), '+/', '-_'), '=');
+        }
+
+        return ['items' => $page, 'nextCursor' => $nextCursor];
     }
 
     public function sanitizeHeaderValue(?string $value): string

@@ -29,11 +29,10 @@ class LaravelServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        // Register PSR-17 factories
+
         $this->app->singleton(ResponseFactoryInterface::class, Psr17Factory::class);
         $this->app->singleton(StreamFactoryInterface::class, Psr17Factory::class);
 
-        // Register PSR-7 bridge
         $this->app->singleton(
             PsrHttpFactory::class,
             function ($app) {
@@ -46,12 +45,10 @@ class LaravelServiceProvider extends ServiceProvider
             }
         );
 
-        // Register MCP registries
         $this->app->singleton(ToolRegistry::class);
         $this->app->singleton(PromptRegistry::class);
         $this->app->singleton(ResourceRegistry::class);
 
-        // Register storage
         $this->app->singleton(
             DatabaseStorage::class,
             function ($app) {
@@ -60,10 +57,8 @@ class LaravelServiceProvider extends ServiceProvider
             }
         );
 
-        // Register discovery provider
         $this->app->singleton(WellKnownProvider::class);
 
-        // Register main MCP server
         $this->app->singleton(
             MCPSaaSServer::class,
             function ($app) {
@@ -92,7 +87,6 @@ class LaravelServiceProvider extends ServiceProvider
             }
         );
 
-        // Register Laravel MCP provider
         $this->app->singleton(
             LaravelMCPProvider::class,
             function ($app) {
@@ -124,7 +118,6 @@ class LaravelServiceProvider extends ServiceProvider
             }
         );
 
-        // Register Laravel middleware wrapper
         $this->app->singleton(
             LaravelMCPAuthMiddleware::class,
             function ($app) {
@@ -141,7 +134,7 @@ class LaravelServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Register middleware alias
+
         $router = $this->app['router'];
         $router->aliasMiddleware('mcp.auth', LaravelMCPAuthMiddleware::class);
     }
@@ -183,11 +176,10 @@ class LaravelMCPAuthMiddleware
 
     public function handle(Request $request, Closure $next)
     {
-        // Convert Laravel request to PSR-7
+
         $psrRequest = $this->psrFactory->createRequest($request);
         $psrResponse = $this->psrFactory->createResponse(new Response());
 
-        // Create PSR-15 request handler
         $handler = new class ($next, $this->psrFactory) implements \Psr\Http\Server\RequestHandlerInterface {
             private Closure $next;
             private PsrHttpFactory $psrFactory;
@@ -200,20 +192,17 @@ class LaravelMCPAuthMiddleware
 
             public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
             {
-                // Convert PSR-7 request back to Laravel request for next middleware
+
                 $laravelRequest = $this->psrFactory->createRequest($request);
                 $laravelResponse = ($this->next)($laravelRequest);
 
-                // Convert Laravel response to PSR-7
                 return $this->psrFactory->createResponse($laravelResponse);
             }
         };
 
-        // Run PSR-15 auth middleware
         $authMiddleware = $this->mcpProvider->getAuthMiddleware();
         $psrResponse = $authMiddleware($psrRequest, $handler);
 
-        // Convert PSR-7 response back to Laravel response
         return new Response(
             $psrResponse->getBody()->getContents(),
             $psrResponse->getStatusCode(),
@@ -276,14 +265,12 @@ class LaravelMCPProvider
      */
     public function handleMCP(Request $request): Response
     {
-        // Convert Laravel request to PSR-7
+
         $psrRequest = $this->psrFactory->createRequest($request);
         $psrResponse = $this->psrFactory->createResponse(new Response());
 
-        // Handle with MCP server
         $psrResponse = $this->mcpServer->handle($psrRequest, $psrResponse);
 
-        // Convert PSR-7 response back to Laravel response
         return new Response(
             $psrResponse->getBody()->getContents(),
             $psrResponse->getStatusCode(),
