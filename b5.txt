@@ -1,0 +1,5 @@
+event: message
+data: {"jsonrpc":"2.0","method":"notifications\/subscriptions\/acknowledged","params":{"_meta":{"io.modelcontextprotocol\/subscriptionId":6},"notifications":{"toolsListChanged":true}}}
+
+: keepalive
+

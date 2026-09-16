@@ -380,7 +380,11 @@ class MCPSaaSServer
      */
     private function openEventStream(Response $response): Response
     {
-        $response = $response
+        if (!$this->config['test_mode'] && class_exists(NonBufferedBody::class)) {
+            $response = $response->withBody(new NonBufferedBody());
+        }
+
+        return $response
             ->withHeader('Content-Type', 'text/event-stream')
             ->withHeader('Cache-Control', 'no-cache')
             ->withHeader('Connection', 'keep-alive')
@@ -388,12 +392,6 @@ class MCPSaaSServer
             ->withHeader('Access-Control-Allow-Origin', '*')
             ->withHeader('Access-Control-Expose-Headers', self::EXPOSED_HEADERS)
             ->withStatus(200);
-
-        if ($this->config['test_mode'] || !class_exists(NonBufferedBody::class)) {
-            return $response;
-        }
-
-        return $response->withBody(new NonBufferedBody());
     }
 
     /**
