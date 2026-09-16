@@ -9,6 +9,8 @@ use Psr\Log\NullLogger;
 use Seolinkmap\Waasup\Exception\AuthenticationException;
 use Seolinkmap\Waasup\Exception\ProtocolException;
 use Seolinkmap\Waasup\Prompts\Registry\PromptRegistry;
+use Seolinkmap\Waasup\Protocol\Handlers\ProtocolManager;
+use Seolinkmap\Waasup\Protocol\Handlers\ResponseManager;
 use Seolinkmap\Waasup\Protocol\MessageHandler;
 use Seolinkmap\Waasup\Protocol\VersionNegotiator;
 use Seolinkmap\Waasup\Resources\Registry\ResourceRegistry;
@@ -16,6 +18,7 @@ use Seolinkmap\Waasup\Storage\StorageInterface;
 use Seolinkmap\Waasup\Tools\Registry\ToolRegistry;
 use Seolinkmap\Waasup\Transport\SSETransport;
 use Seolinkmap\Waasup\Transport\StreamableHTTPTransport;
+use Slim\Psr7\NonBufferedBody;
 
 class MCPSaaSServer
 {
@@ -28,6 +31,16 @@ class MCPSaaSServer
     private SSETransport $sseTransport;
     private StreamableHTTPTransport $streamableTransport;
     private LoggerInterface $logger;
+    public const ERROR_HEADER_MISMATCH = -32020;
+
+    public const ERROR_UNSUPPORTED_PROTOCOL_VERSION = -32022;
+
+    public const ALLOWED_HEADERS = 'Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-ID';
+
+    public const EXPOSED_HEADERS = 'Mcp-Session-Id';
+
+    public const STREAMING_METHODS = ['tools/call', 'prompts/get', 'resources/read'];
+
     private array $config;
     private ?array $contextData = null;
     private ?string $sessionId = null;
@@ -55,10 +68,21 @@ class MCPSaaSServer
         $this->toolRegistry = $toolRegistry;
         $this->promptRegistry = $promptRegistry;
         $this->resourceRegistry = $resourceRegistry;
-        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
+        $this->config = Config::merge($this->getDefaultConfig(), $config);
         $this->logger = $logger ?? new NullLogger();
 
-        $this->versionNegotiator = new VersionNegotiator($this->config);
+        ProtocolManager::assertKnownVersions($this->config['supported_versions']);
+
+        $this->versionNegotiator = new VersionNegotiator(
+            [
+                'supported_versions' => array_values(
+                    array_filter(
+                        $this->config['supported_versions'],
+                        fn (string $version) => !ProtocolManager::isStatelessVersion($version)
+                    )
+                )
+            ]
+        );
         $this->messageHandler = new MessageHandler($this->toolRegistry, $this->promptRegistry, $this->resourceRegistry, $this->storage, $this->config);
         $this->sseTransport = new SSETransport($this->storage, $this->config);
         $this->streamableTransport = new StreamableHTTPTransport($this->storage, $this->config, $this->logger);
@@ -79,18 +103,18 @@ class MCPSaaSServer
             $this->contextData = $request->getAttribute('mcp_context') ?? [];
             $isAuthless = $this->config['auth']['authless'];
 
-            if ($request->getMethod() === 'OPTIONS') {
-                return $this->handleCorsPreflightRequest($response);
-            }
-
             if (!$this->isOriginAllowed($request)) {
                 return $this->createErrorResponse(
                     $response,
                     -32600,
-                    'Origin not allowed. This server refuses cross-origin browser requests to a loopback address.',
+                    'Origin not allowed. Name this origin in auth.allowed_origins to let it reach this server from a browser.',
                     null,
                     403
                 );
+            }
+
+            if ($request->getMethod() === 'OPTIONS') {
+                return $this->handleCorsPreflightRequest($request, $response);
             }
 
             if (!$this->acceptsContentType($request, $request->getMethod() === 'GET' ? 'text/event-stream' : 'application/json')) {
@@ -129,6 +153,12 @@ class MCPSaaSServer
 
                 $this->requestId = $data['id'] ?? null;
 
+                $statelessVersion = $data['params']['_meta']['io.modelcontextprotocol/protocolVersion'] ?? null;
+
+                if (is_string($statelessVersion)) {
+                    return $this->handleStatelessRequest($request, $response, $data, $statelessVersion);
+                }
+
                 $isInitialize = ($data['method'] ?? '') === 'initialize';
 
                 if (!$isInitialize && empty($this->contextData) && !$isAuthless) {
@@ -147,14 +177,17 @@ class MCPSaaSServer
                     $protocolVersion = $this->versionNegotiator->negotiate($clientProtocolVersion);
 
                     $openedSessionId = $this->extractSessionIdFromRequest($request);
+                    $openedSession = $openedSessionId ? $this->storage->getSession($openedSessionId) : null;
 
-                    if ($openedSessionId
-                        && str_starts_with($openedSessionId, $protocolVersion . '_')
-                        && $this->storage->getSession($openedSessionId)) {
-                        $this->sessionId = $openedSessionId;
+                    if ($openedSession !== null
+                        && str_starts_with((string)$openedSessionId, $protocolVersion . '_')
+                        && $this->ownsSession($openedSession)) {
+                        $this->sessionId = (string)$openedSessionId;
                     } else {
                         $this->sessionId = $protocolVersion . '_' . $this->sessionId;
                     }
+
+                    $this->bindSession($this->sessionId);
 
                     return $this->messageHandler->handleInitialize($data['params'] ?? [], $data['id'] ?? null, $this->sessionId, $protocolVersion, $response);
                 }
@@ -179,9 +212,10 @@ class MCPSaaSServer
 
             if ($request->getMethod() === 'DELETE') {
                 $sessionId = $this->extractSessionIdFromRequest($request);
+                $sessionData = $sessionId ? $this->storage->getSession($sessionId) : null;
 
-                if ($sessionId) {
-                    $this->storage->storeSession($sessionId, [], 0);
+                if ($sessionData !== null && $this->ownsSession($sessionData)) {
+                    $this->storage->storeSession((string)$sessionId, [], 0);
                 }
 
                 return $response
@@ -217,7 +251,7 @@ class MCPSaaSServer
 
             $httpStatus = $e->getCode() === -32001 ? 404 : 400;
 
-            return $this->createErrorResponse($response, $e->getCode(), $e->getMessage(), $this->requestId, $httpStatus);
+            return $this->createErrorResponse($response, $e->getCode(), $e->getMessage(), $this->requestId, $httpStatus, $e->getData());
         } catch (\Throwable $e) {
             $this->logger->critical(
                 'Unexpected error in MCP handler',
@@ -227,6 +261,324 @@ class MCPSaaSServer
             );
             return $this->createErrorResponse($response, -32603, 'Internal error', $this->requestId, 500);
         }
+    }
+
+    /**
+     * Serve a request that carries its protocol version in its own metadata
+     *
+     * @param array $data the decoded JSON-RPC request
+     * @param string $version the version named in the request metadata
+     */
+    private function handleStatelessRequest(Request $request, Response $response, array $data, string $version): Response
+    {
+        if (!ProtocolManager::isStatelessVersion($version)) {
+            return $this->createErrorResponse(
+                $response,
+                self::ERROR_UNSUPPORTED_PROTOCOL_VERSION,
+                'Unsupported protocol version',
+                $this->requestId,
+                400,
+                [
+                    'supported' => array_values($this->config['supported_versions']),
+                    'requested' => $version
+                ]
+            );
+        }
+
+        if (($data['method'] ?? '') === 'initialize') {
+            return $this->createErrorResponse(
+                $response,
+                -32601,
+                "Method not found: initialize is not part of protocol version {$version}. Send initialize without per-request metadata to open a session at one of the handshake versions, or drop it and carry io.modelcontextprotocol/protocolVersion on every request.",
+                $this->requestId,
+                404,
+                ['supported' => $this->handshakeVersions()]
+            );
+        }
+
+        if (($data['method'] ?? '') === 'subscriptions/listen') {
+            return $this->handleSubscriptionStream($request, $response, $data, $version);
+        }
+
+        $mismatch = $this->findHeaderMismatch($request, $data, $version);
+
+        if ($mismatch !== null) {
+            return $this->createErrorResponse($response, self::ERROR_HEADER_MISMATCH, $mismatch, $this->requestId, 400);
+        }
+
+        if (empty($this->contextData) && !$this->config['auth']['authless']) {
+            throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
+        }
+
+        $stream = null;
+
+        if ($this->wantsEventStream($request, $data)) {
+            $response = $this->openEventStream($response);
+            $stream = $response->getBody();
+        }
+
+        try {
+            return $this->messageHandler->processStatelessMessage($data, $this->contextData, $response, $version, $stream);
+        } catch (ProtocolException $e) {
+            if ($stream !== null) {
+                ResponseManager::writeEvent($stream, $this->errorBody($e));
+
+                return $response;
+            }
+
+            $status = $e->getCode() === -32601 ? 404 : 400;
+
+            return $this->createErrorResponse($response, $e->getCode(), $e->getMessage(), $this->requestId, $status, $e->getData());
+        }
+    }
+
+    /**
+     * Shape a protocol error as a JSON-RPC error response
+     *
+     * @return array the response body
+     */
+    private function errorBody(ProtocolException $e): array
+    {
+        $error = ['code' => $e->getCode(), 'message' => $e->getMessage()];
+        $data = $e->getData();
+
+        if ($data !== null) {
+            $error['data'] = $data;
+        }
+
+        return ['jsonrpc' => '2.0', 'error' => $error, 'id' => $this->requestId];
+    }
+
+    /**
+     * Whether this request asked for the notifications that travel on a response stream
+     *
+     * A request carrying no progress token and setting no log level can raise
+     * neither, and is answered with a single JSON object.
+     *
+     * @param array $data the decoded JSON-RPC request
+     */
+    private function wantsEventStream(Request $request, array $data): bool
+    {
+        if (!in_array($data['method'] ?? '', self::STREAMING_METHODS, true)) {
+            return false;
+        }
+
+        if (!$this->acceptsContentType($request, 'text/event-stream')) {
+            return false;
+        }
+
+        $meta = $data['params']['_meta'] ?? [];
+
+        return isset($meta['progressToken']) || isset($meta['io.modelcontextprotocol/logLevel']);
+    }
+
+    /**
+     * Answer this request with an event stream rather than a single JSON object
+     *
+     * The body is replaced with an unbuffered one where the framework provides it,
+     * so notifications reach the client while the request is still being served.
+     */
+    private function openEventStream(Response $response): Response
+    {
+        $response = $response
+            ->withHeader('Content-Type', 'text/event-stream')
+            ->withHeader('Cache-Control', 'no-cache')
+            ->withHeader('Connection', 'keep-alive')
+            ->withHeader('X-Accel-Buffering', 'no')
+            ->withHeader('Access-Control-Allow-Origin', '*')
+            ->withHeader('Access-Control-Expose-Headers', self::EXPOSED_HEADERS)
+            ->withStatus(200);
+
+        if ($this->config['test_mode'] || !class_exists(NonBufferedBody::class)) {
+            return $response;
+        }
+
+        return $response->withBody(new NonBufferedBody());
+    }
+
+    /**
+     * The protocol versions that open a session with an initialize handshake
+     *
+     * @return array versions in configured order
+     */
+    private function handshakeVersions(): array
+    {
+        return array_values(
+            array_filter(
+                $this->config['supported_versions'],
+                fn (string $version) => !ProtocolManager::isStatelessVersion($version)
+            )
+        );
+    }
+
+    /**
+     * Open the long lived notification stream a subscriptions/listen request asks for
+     *
+     * @param array $data the decoded JSON-RPC request
+     * @param string $version the version named in the request metadata
+     */
+    private function handleSubscriptionStream(Request $request, Response $response, array $data, string $version): Response
+    {
+        $mismatch = $this->findHeaderMismatch($request, $data, $version);
+
+        if ($mismatch !== null) {
+            return $this->createErrorResponse($response, self::ERROR_HEADER_MISMATCH, $mismatch, $this->requestId, 400);
+        }
+
+        if (empty($this->contextData) && !$this->config['auth']['authless']) {
+            throw new AuthenticationException('Try putting this URL into an MCP enabled LLM, Like Claude.ai or GPT. Authentication required');
+        }
+
+        $streamKey = 'subscription_' . $this->generateSessionId();
+        $filter = $this->messageHandler->registerSubscription($data['params'] ?? [], $data['id'] ?? null, $streamKey);
+
+        if (isset($filter['error'])) {
+            return $this->createErrorResponse($response, -32602, $filter['error'], $this->requestId, 400);
+        }
+
+        $this->storage->storeMessage(
+            $streamKey,
+            [
+                'jsonrpc' => '2.0',
+                'method' => 'notifications/subscriptions/acknowledged',
+                'params' => [
+                    '_meta' => ['io.modelcontextprotocol/subscriptionId' => $data['id'] ?? null],
+                    'notifications' => $filter
+                ]
+            ]
+        );
+
+        return $this->streamableTransport->handleConnection(
+            $request,
+            $response,
+            $streamKey,
+            array_replace_recursive($this->contextData ?? [], ['protocol_version' => $version])
+        );
+    }
+
+    /**
+     * Compare the mirrored request headers against the request body
+     *
+     * @param array $data the decoded JSON-RPC request
+     * @param string $version the version named in the request metadata
+     * @return string|null description of the first mismatch, null when the headers agree
+     */
+    private function findHeaderMismatch(Request $request, array $data, string $version): ?string
+    {
+        $headerVersion = $request->getHeaderLine('MCP-Protocol-Version');
+
+        if ($headerVersion === '') {
+            return 'Header mismatch: MCP-Protocol-Version header is required.';
+        }
+
+        if ($headerVersion !== $version) {
+            return "Header mismatch: MCP-Protocol-Version header value '{$headerVersion}' does not match body value '{$version}'.";
+        }
+
+        $method = $data['method'] ?? '';
+        $headerMethod = $request->getHeaderLine('Mcp-Method');
+
+        if ($headerMethod === '') {
+            return 'Header mismatch: Mcp-Method header is required.';
+        }
+
+        if ($headerMethod !== $method) {
+            return "Header mismatch: Mcp-Method header value '{$headerMethod}' does not match body value '{$method}'.";
+        }
+
+        $named = ['tools/call' => 'name', 'prompts/get' => 'name', 'resources/read' => 'uri'];
+
+        if (!isset($named[$method])) {
+            return null;
+        }
+
+        $bodyName = $data['params'][$named[$method]] ?? '';
+        $headerName = $this->decodeHeaderValue($request->getHeaderLine('Mcp-Name'));
+
+        if ($headerName === '') {
+            return 'Header mismatch: Mcp-Name header is required for ' . $method . ' requests.';
+        }
+
+        if ($headerName !== $bodyName) {
+            return "Header mismatch: Mcp-Name header value '{$headerName}' does not match body value '{$bodyName}'.";
+        }
+
+        if ($method !== 'tools/call') {
+            return null;
+        }
+
+        return $this->findParameterHeaderMismatch($request, (string)$bodyName, $data['params']['arguments'] ?? []);
+    }
+
+    /**
+     * Compare the Mcp-Param headers a tool designates against the call arguments
+     *
+     * @param string $toolName the tool being called
+     * @param array $arguments the call arguments
+     * @return string|null description of the first mismatch, null when they agree
+     */
+    private function findParameterHeaderMismatch(Request $request, string $toolName, array $arguments): ?string
+    {
+        foreach ($this->toolRegistry->getHeaderParameters($toolName) as $headerName => $path) {
+            $value = $arguments;
+
+            foreach ($path as $segment) {
+                if (!is_array($value) || !array_key_exists($segment, $value)) {
+                    $value = null;
+                    break;
+                }
+
+                $value = $value[$segment];
+            }
+
+            $header = 'Mcp-Param-' . $headerName;
+            $sent = $this->decodeHeaderValue($request->getHeaderLine($header));
+
+            if (!is_scalar($value)) {
+                if ($sent !== '') {
+                    return "Header mismatch: {$header} was sent but '{$headerName}' holds nothing this server mirrors into a header.";
+                }
+
+                continue;
+            }
+
+            $expected = is_bool($value) ? ($value ? 'true' : 'false') : (string)$value;
+
+            if ($sent === '') {
+                return "Header mismatch: {$header} is required because the call carries '{$headerName}'.";
+            }
+
+            if (is_int($value) || is_float($value)) {
+                if (!is_numeric($sent) || (float)$sent !== (float)$value) {
+                    return "Header mismatch: {$header} value '{$sent}' does not match body value '{$expected}'.";
+                }
+
+                continue;
+            }
+
+            if ($sent !== $expected) {
+                return "Header mismatch: {$header} value '{$sent}' does not match body value '{$expected}'.";
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Decode a header value carried in the Base64 sentinel format
+     *
+     * @param string $value the raw header value
+     * @return string the decoded value, or the value as sent
+     */
+    private function decodeHeaderValue(string $value): string
+    {
+        if (!str_starts_with($value, '=?base64?') || !str_ends_with($value, '?=')) {
+            return $value;
+        }
+
+        $decoded = base64_decode(substr($value, 9, -2), true);
+
+        return $decoded === false ? $value : $decoded;
     }
 
     /**
@@ -255,6 +607,48 @@ class MCPSaaSServer
     }
 
     /**
+     * Fingerprint of the authorization this request carries
+     *
+     * @return string|null the fingerprint, null when the request identifies no caller
+     */
+    private function sessionOwner(): ?string
+    {
+        return ProtocolManager::contextOwner($this->contextData ?? []);
+    }
+
+    /**
+     * Record the authorization a session belongs to
+     */
+    private function bindSession(string $sessionId): void
+    {
+        $owner = $this->sessionOwner();
+
+        if ($owner === null) {
+            return;
+        }
+
+        $sessionData = $this->storage->getSession($sessionId) ?? [];
+        $sessionData['owner'] = $owner;
+
+        $this->storage->storeSession($sessionId, $sessionData, (int)$this->config['session_lifetime']);
+    }
+
+    /**
+     * Whether the caller holds the authorization a session was opened with
+     *
+     * A session opened by a caller the server could not identify, as on an authless
+     * server, is bound to nobody and stays open to everyone.
+     *
+     * @param array $sessionData the stored session record
+     */
+    private function ownsSession(array $sessionData): bool
+    {
+        $owner = $sessionData['owner'] ?? null;
+
+        return $owner === null || $owner === $this->sessionOwner();
+    }
+
+    /**
      * Session ID negotiation for MCP protocol
      */
     private function negotiateSessionId(Request $request, ?array $data = null): ?string
@@ -269,7 +663,11 @@ class MCPSaaSServer
 
                 $this->storage->storeSession(
                     $newSessionId,
-                    ['protocol_version' => '2024-11-05', 'created_at' => time()],
+                    [
+                        'protocol_version' => '2024-11-05',
+                        'created_at' => time(),
+                        'owner' => $this->sessionOwner()
+                    ],
                     (int)$this->config['session_lifetime']
                 );
 
@@ -277,7 +675,7 @@ class MCPSaaSServer
             }
 
             $sessionData = $this->storage->getSession($existingSessionId);
-            if (!$sessionData) {
+            if (!$sessionData || !$this->ownsSession($sessionData)) {
                 throw new ProtocolException('Invalid or expired session ID. Send a new initialize request to start a session.', -32001);
             }
 
@@ -301,7 +699,7 @@ class MCPSaaSServer
             }
 
             $sessionData = $this->storage->getSession($existingSessionId);
-            if (!$sessionData) {
+            if (!$sessionData || !$this->ownsSession($sessionData)) {
                 $this->logger->warning('Session not found in storage', [
                     'session_id' => $existingSessionId,
                     'method' => $data['method'] ?? 'unknown'
@@ -367,12 +765,14 @@ class MCPSaaSServer
         }
 
         $uri = $request->getUri();
-        $scheme = 'https';
+        $scheme = $uri->getScheme() ?: 'https';
         $host = $uri->getHost() ?: 'localhost';
         $port = $uri->getPort();
+        $defaultPort = $scheme === 'https' ? 443 : 80;
 
         $baseUrl = $scheme . '://' . $host;
-        if (is_numeric($port) && $scheme === 'https' && $port !== 443) {
+
+        if (is_int($port) && $port !== $defaultPort) {
             $baseUrl .= ':' . $port;
         }
 
@@ -492,11 +892,25 @@ class MCPSaaSServer
         }
 
         [$group] = explode('/', $contentType);
+        $candidates = [$contentType, $group . '/*', '*/*'];
 
-        foreach ([$contentType, $group . '/*', '*/*'] as $candidate) {
-            if (stripos($accept, $candidate) !== false) {
-                return true;
+        foreach (explode(',', $accept) as $range) {
+            $parameters = explode(';', $range);
+            $media = strtolower(trim((string)array_shift($parameters)));
+
+            if (!in_array($media, $candidates, true)) {
+                continue;
             }
+
+            foreach ($parameters as $parameter) {
+                [$name, $value] = array_pad(explode('=', $parameter, 2), 2, '');
+
+                if (strtolower(trim($name)) === 'q' && (float)trim($value) === 0.0) {
+                    continue 2;
+                }
+            }
+
+            return true;
         }
 
         return false;
@@ -505,13 +919,18 @@ class MCPSaaSServer
     /**
      * Check the Origin header
      *
+     * A request without one is not from a browser and is left alone. With an
+     * allowlist configured the origin must be on it. Without one the request must
+     * come from the server's own origin, so a page on another origin cannot reach
+     * this server through a visitor's browser.
+     *
      * @return bool false when the request must be refused with 403
      */
     private function isOriginAllowed(Request $request): bool
     {
         $origin = $request->getHeaderLine('Origin');
 
-        if (empty($origin)) {
+        if ($origin === '') {
             return true;
         }
 
@@ -521,25 +940,67 @@ class MCPSaaSServer
             return in_array($origin, $allowedOrigins, true);
         }
 
-        $hostOnly = explode(':', $request->getHeaderLine('Host'))[0];
-        $originHost = parse_url($origin, PHP_URL_HOST) ?? '';
+        $originHost = parse_url($origin, PHP_URL_HOST);
 
-        $localhostHosts = ['localhost', '127.0.0.1', '::1'];
+        if (!is_string($originHost) || $originHost === '') {
+            return false;
+        }
 
-        return !in_array($hostOnly, $localhostHosts) || in_array($originHost, $localhostHosts);
+        return strcasecmp($originHost, $this->serverHost($request)) === 0;
+    }
+
+    /**
+     * The host this server answers as
+     *
+     * Taken from the configured base_url, which a deployment behind a proxy needs
+     * to set for the Origin check to know the name clients reach it by.
+     */
+    private function serverHost(Request $request): string
+    {
+        $configured = $this->config['base_url'];
+
+        if (is_string($configured) && $configured !== '') {
+            $host = parse_url($configured, PHP_URL_HOST);
+
+            if (is_string($host) && $host !== '') {
+                return $host;
+            }
+        }
+
+        return explode(':', $request->getHeaderLine('Host'))[0];
     }
 
     /**
      * Handle CORS preflight requests
      */
-    private function handleCorsPreflightRequest(Response $response): Response
+    private function handleCorsPreflightRequest(Request $request, Response $response): Response
     {
         return $response
             ->withHeader('Access-Control-Allow-Origin', '*')
-            ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version')
+            ->withHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+            ->withHeader('Access-Control-Allow-Headers', $this->allowedRequestHeaders($request))
+            ->withHeader('Access-Control-Expose-Headers', self::EXPOSED_HEADERS)
             ->withHeader('Access-Control-Max-Age', '3600')
             ->withStatus(200);
+    }
+
+    /**
+     * Header names a cross origin request may carry
+     *
+     * The Mcp-Param-* names a tool designates are not known ahead of the call,
+     * so a preflight naming the headers it wants is answered with that set.
+     *
+     * @return string the Access-Control-Allow-Headers value
+     */
+    private function allowedRequestHeaders(Request $request): string
+    {
+        $requested = preg_replace(
+            '/[^A-Za-z0-9\-_, ]/',
+            '',
+            $request->getHeaderLine('Access-Control-Request-Headers')
+        );
+
+        return $requested === '' ? self::ALLOWED_HEADERS : self::ALLOWED_HEADERS . ', ' . $requested;
     }
 
     /**
@@ -558,11 +1019,18 @@ class MCPSaaSServer
         int $code,
         string $message,
         mixed $id = null,
-        int $httpStatus = 400
+        int $httpStatus = 400,
+        ?array $data = null
     ): Response {
+        $error = ['code' => $code, 'message' => $message];
+
+        if ($data !== null) {
+            $error['data'] = $data;
+        }
+
         $errorResponse = [
             'jsonrpc' => '2.0',
-            'error' => ['code' => $code, 'message' => $message],
+            'error' => $error,
             'id' => $id
         ];
 
@@ -571,8 +1039,9 @@ class MCPSaaSServer
         return $response
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Access-Control-Allow-Origin', '*')
-            ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version')
-            ->withHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+            ->withHeader('Access-Control-Allow-Headers', self::ALLOWED_HEADERS)
+            ->withHeader('Access-Control-Expose-Headers', self::EXPOSED_HEADERS)
+            ->withHeader('Access-Control-Allow-Methods', 'POST, GET, DELETE, OPTIONS')
             ->withStatus($httpStatus);
     }
 
@@ -739,13 +1208,17 @@ class MCPSaaSServer
     {
         return [
 
-            'supported_versions' => ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
+            'supported_versions' => ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
             'base_url' => null,
             'session_user_id' => null,
             'scopes_supported' => ['mcp:read', 'mcp:write'],
             'session_lifetime' => 3600,
             'pagination' => [
                 'page_size' => 50
+            ],
+            'cache' => [
+                'ttl_ms' => 60000,
+                'scope' => 'private'
             ],
             'tasks' => [
                 'default_ttl' => 300000,

@@ -37,43 +37,9 @@ class SystemHandler
             $this->protocolManager->storeSessionVersion($sessionId, $selectedVersion);
         }
 
-        $serverInfo = $this->config['server_info'];
+        $serverInfo = $this->protocolManager->getServerInfo($selectedVersion);
 
-        if (strcmp($selectedVersion, '2025-06-18') < 0) {
-            unset($serverInfo['title']);
-        }
-
-        if (!$this->protocolManager->isFeatureSupported('icons', $selectedVersion)) {
-            unset($serverInfo['icons'], $serverInfo['description'], $serverInfo['websiteUrl']);
-        }
-
-        $capabilities = [
-            'logging' => new \stdClass()
-        ];
-
-        if ($this->protocolManager->isFeatureSupported('tools', $selectedVersion)) {
-            $capabilities['tools'] = ['listChanged' => true];
-        }
-
-        if ($this->protocolManager->isFeatureSupported('prompts', $selectedVersion)) {
-            $capabilities['prompts'] = ['listChanged' => true];
-        }
-
-        if ($this->protocolManager->isFeatureSupported('resources', $selectedVersion)) {
-            $capabilities['resources'] = ['subscribe' => true, 'listChanged' => true];
-        }
-
-        if ($this->protocolManager->isFeatureSupported('completions', $selectedVersion)) {
-            $capabilities['completions'] = new \stdClass();
-        }
-
-        if ($this->protocolManager->isFeatureSupported('tasks', $selectedVersion)) {
-            $capabilities['tasks'] = [
-                'list' => new \stdClass(),
-                'cancel' => new \stdClass(),
-                'requests' => ['tools' => ['call' => new \stdClass()]]
-            ];
-        }
+        $capabilities = $this->buildCapabilities($selectedVersion);
 
         if ($sessionId) {
             $this->protocolManager->storeSessionValue(
@@ -107,9 +73,133 @@ class SystemHandler
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Mcp-Session-Id', $sessionId)
             ->withHeader('Access-Control-Allow-Origin', '*')
-            ->withHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Mcp-Session-Id, MCP-Protocol-Version')
-            ->withHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+            ->withHeader('Access-Control-Allow-Headers', \Seolinkmap\Waasup\MCPSaaSServer::ALLOWED_HEADERS)
+            ->withHeader('Access-Control-Expose-Headers', \Seolinkmap\Waasup\MCPSaaSServer::EXPOSED_HEADERS)
+            ->withHeader('Access-Control-Allow-Methods', 'POST, GET, DELETE, OPTIONS')
             ->withStatus(200);
+    }
+
+    public const SUBSCRIPTION_TYPES = [
+        'toolsListChanged',
+        'promptsListChanged',
+        'resourcesListChanged',
+        'resourceSubscriptions'
+    ];
+
+    /**
+     * Register the change notifications a client opted in to
+     *
+     * @param array $params requires the filter in 'notifications'
+     * @param mixed $id the request id, which becomes the subscription id
+     * @return array the honoured filter, or an error message under 'error'
+     */
+    public function registerSubscription(array $params, mixed $id, string $streamKey): array
+    {
+        $requested = $params['notifications'] ?? [];
+
+        if (!is_array($requested) || $requested === []) {
+            return ['error' => "Invalid params: 'notifications' is required and must name at least one of " . implode(', ', self::SUBSCRIPTION_TYPES) . '.'];
+        }
+
+        $unknown = array_diff(array_keys($requested), self::SUBSCRIPTION_TYPES);
+
+        if ($unknown !== []) {
+            return ['error' => 'Invalid params: unknown notification type ' . implode(', ', $unknown) . '.'];
+        }
+
+        $honoured = [];
+
+        foreach (['toolsListChanged', 'promptsListChanged', 'resourcesListChanged'] as $type) {
+            if (($requested[$type] ?? false) === true) {
+                $honoured[$type] = true;
+            }
+        }
+
+        $uris = $requested['resourceSubscriptions'] ?? [];
+
+        if (is_array($uris) && $uris !== []) {
+            $honoured['resourceSubscriptions'] = array_values($uris);
+        }
+
+        $this->protocolManager->storeSubscription(
+            $streamKey,
+            [
+                'subscriptionId' => $id,
+                'notifications' => $honoured,
+                'subscriptions' => array_keys($honoured),
+                'resource_subscriptions' => $honoured['resourceSubscriptions'] ?? []
+            ]
+        );
+
+        return $honoured;
+    }
+
+    /**
+     * Report supported versions, capabilities and identity without a handshake
+     */
+    public function handleServerDiscover(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
+    {
+        $version = $this->protocolManager->getSessionVersion($sessionId);
+
+        $result = [
+            'supportedVersions' => array_values($this->config['supported_versions']),
+            'capabilities' => $this->buildCapabilities($version)
+        ];
+
+        if (!empty($this->config['instructions'])) {
+            $result['instructions'] = $this->config['instructions'];
+        }
+
+        return $this->responseManager->storeSuccessResponse(
+            $sessionId,
+            $this->responseManager->cacheable($result, $sessionId),
+            $id,
+            $response
+        );
+    }
+
+    /**
+     * Capabilities this server advertises at a given protocol version
+     *
+     * @return array capability map
+     */
+    private function buildCapabilities(string $version): array
+    {
+        $capabilities = ['logging' => new \stdClass()];
+
+        if ($this->protocolManager->isFeatureSupported('tools', $version)) {
+            $capabilities['tools'] = ['listChanged' => true];
+        }
+
+        if ($this->protocolManager->isFeatureSupported('prompts', $version)) {
+            $capabilities['prompts'] = ['listChanged' => true];
+        }
+
+        if ($this->protocolManager->isFeatureSupported('resources', $version)) {
+            $capabilities['resources'] = $this->protocolManager->isFeatureSupported('resource_subscriptions', $version)
+                ? ['subscribe' => true, 'listChanged' => true]
+                : ['listChanged' => true];
+        }
+
+        if ($this->protocolManager->isFeatureSupported('completions', $version)) {
+            $capabilities['completions'] = new \stdClass();
+        }
+
+        if ($this->protocolManager->isFeatureSupported('tasks', $version)) {
+            $capabilities['tasks'] = [
+                'list' => new \stdClass(),
+                'cancel' => new \stdClass(),
+                'requests' => ['tools' => ['call' => new \stdClass()]]
+            ];
+        }
+
+        if ($this->protocolManager->isFeatureSupported('tasks_extension', $version)) {
+            $capabilities['extensions'] = ['io.modelcontextprotocol/tasks' => new \stdClass()];
+        } elseif ($this->protocolManager->isFeatureSupported('stateless', $version)) {
+            $capabilities['extensions'] = new \stdClass();
+        }
+
+        return $capabilities;
     }
 
     public function handlePing(mixed $id, ?string $sessionId, array $context, Response $response): Response
@@ -132,9 +222,45 @@ class SystemHandler
             return $this->responseManager->storeErrorResponse($sessionId, -32602, $this->missingTaskMessage($params), $id, $response);
         }
 
-        unset($task['result']);
+        if (!$this->protocolManager->isFeatureSupported('tasks_extension', $this->protocolManager->getSessionVersion($sessionId))) {
+            unset($task['result'], $task['error'], $task['inputRequests'], $task['inputResponses']);
+        } else {
+            unset($task['inputResponses']);
+        }
 
         return $this->responseManager->storeSuccessResponse($sessionId, $task, $id, $response);
+    }
+
+    /**
+     * Accept the input an outstanding task is waiting on
+     *
+     * @param array $params requires 'taskId' and 'inputResponses'
+     */
+    public function handleTasksUpdate(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
+    {
+        $task = $this->requireTask($params, $sessionId);
+
+        if ($task === null) {
+            return $this->responseManager->storeErrorResponse($sessionId, -32602, $this->missingTaskMessage($params), $id, $response);
+        }
+
+        $supplied = $params['inputResponses'] ?? [];
+        $outstanding = $task['inputRequests'] ?? [];
+
+        foreach (array_keys($outstanding) as $inputId) {
+            if (isset($supplied[$inputId])) {
+                unset($outstanding[$inputId]);
+            }
+        }
+
+        $task['inputRequests'] = $outstanding;
+        $task['inputResponses'] = array_merge($task['inputResponses'] ?? [], (array)$supplied);
+        $task['status'] = $task['inputRequests'] === [] ? 'working' : 'input_required';
+        $task['lastUpdatedAt'] = gmdate('Y-m-d\TH:i:s\Z');
+
+        $this->protocolManager->storeTask($sessionId, $task);
+
+        return $this->responseManager->storeSuccessResponse($sessionId, new \stdClass(), $id, $response);
     }
 
     /**

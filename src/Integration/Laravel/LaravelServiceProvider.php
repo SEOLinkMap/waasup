@@ -11,6 +11,7 @@ use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Psr\Log\LoggerInterface;
 use Seolinkmap\Waasup\Auth\Middleware\AuthMiddleware;
+use Seolinkmap\Waasup\Config;
 use Seolinkmap\Waasup\Discovery\WellKnownProvider;
 use Seolinkmap\Waasup\MCPSaaSServer;
 use Seolinkmap\Waasup\Prompts\Registry\PromptRegistry;
@@ -62,7 +63,7 @@ class LaravelServiceProvider extends ServiceProvider
         $this->app->singleton(
             MCPSaaSServer::class,
             function ($app) {
-                $config = array_replace_recursive([
+                $config = Config::merge([
                     'server_info' => [
                         'name' => config('app.name') . ' MCP Server',
                         'version' => '1.0.0'
@@ -90,7 +91,7 @@ class LaravelServiceProvider extends ServiceProvider
         $this->app->singleton(
             LaravelMCPProvider::class,
             function ($app) {
-                $config = array_replace_recursive([
+                $config = Config::merge([
                     'server_info' => [
                         'name' => config('app.name') . ' MCP Server',
                         'version' => '1.0.0'

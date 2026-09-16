@@ -4,6 +4,7 @@ namespace Seolinkmap\Waasup\Storage;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Seolinkmap\Waasup\Config;
 
 /**
  * Database storage implementation for MCP server data persistence
@@ -37,7 +38,7 @@ class DatabaseStorage implements StorageInterface
     {
         $this->logger = $logger ?? new NullLogger();
         $this->pdo = $pdo;
-        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
+        $this->config = Config::merge($this->getDefaultConfig(), $config);
         $this->tablePrefix = $this->config['database']['table_prefix'];
         $this->databaseType = $this->detectDatabaseType();
     }

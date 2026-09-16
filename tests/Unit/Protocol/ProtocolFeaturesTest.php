@@ -10,7 +10,7 @@ class ProtocolFeaturesTest extends TestCase
 {
     private MessageHandler $messageHandler;
     private MemoryStorage $storage;
-    private array $supportedVersions = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
+    private array $supportedVersions = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
     protected function setUp(): void
     {
@@ -2159,4 +2159,826 @@ class ProtocolFeaturesTest extends TestCase
         }
     }
 
+
+    private function modern(array $body, array $headers = []): array
+    {
+        $body['params']['_meta'] = array_merge(
+            [
+                'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities' => ['sampling' => []]
+            ],
+            $body['params']['_meta'] ?? []
+        );
+
+        $headers = array_merge(
+            [
+                'MCP-Protocol-Version' => '2026-07-28',
+                'Mcp-Method' => $body['method'],
+                'Content-Type' => 'application/json'
+            ],
+            $headers
+        );
+
+        if (isset($body['params']['name'])) {
+            $headers['Mcp-Name'] = $headers['Mcp-Name'] ?? $body['params']['name'];
+        }
+
+        $request = $this->createRequest('POST', '/mcp/550e8400-e29b-41d4-a716-446655440000', $headers, json_encode($body))
+            ->withAttribute('mcp_context', $this->createTestContext());
+
+        $response = $this->createServer()->handle($request, $this->createResponse());
+
+        return ['status' => $response->getStatusCode(), 'body' => json_decode((string) $response->getBody(), true)];
+    }
+
+    private function createServer(array $config = []): \Seolinkmap\Waasup\MCPSaaSServer
+    {
+        $tools = $this->createTestToolRegistry();
+
+        return new \Seolinkmap\Waasup\MCPSaaSServer(
+            $this->storage,
+            $tools,
+            $this->createTestPromptRegistry(),
+            $this->createTestResourceRegistry(),
+            \Seolinkmap\Waasup\Config::merge(['test_mode' => true, 'base_url' => 'https://localhost:8080'], $config)
+        );
+    }
+
+    public function testModernRequestsAreServedWithoutASession(): void
+    {
+        $result = $this->modern(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => []]);
+
+        $this->assertEquals(200, $result['status']);
+        $this->assertEquals('complete', $result['body']['result']['resultType']);
+        $this->assertArrayHasKey('ttlMs', $result['body']['result']);
+        $this->assertArrayHasKey('cacheScope', $result['body']['result']);
+        $this->assertArrayHasKey('tools', $result['body']['result']);
+    }
+
+    public function testServerDiscoverReportsVersionsAndCapabilities(): void
+    {
+        $result = $this->modern(['jsonrpc' => '2.0', 'id' => 2, 'method' => 'server/discover', 'params' => []]);
+
+        $this->assertEquals(200, $result['status']);
+        $this->assertContains('2026-07-28', $result['body']['result']['supportedVersions']);
+        $this->assertContains('2024-11-05', $result['body']['result']['supportedVersions']);
+        $this->assertArrayHasKey('tools', $result['body']['result']['capabilities']);
+        $this->assertArrayHasKey(
+            'io.modelcontextprotocol/serverInfo',
+            $result['body']['result']['_meta']
+        );
+    }
+
+    public function testMirroredHeadersMustMatchTheBody(): void
+    {
+        $result = $this->modern(
+            ['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/call', 'params' => ['name' => 'test_tool', 'arguments' => []]],
+            ['Mcp-Name' => 'a_different_tool']
+        );
+
+        $this->assertEquals(400, $result['status']);
+        $this->assertEquals(-32020, $result['body']['error']['code']);
+    }
+
+    public function testUnsupportedVersionListsWhatIsSupported(): void
+    {
+        $result = $this->modern(
+            [
+                'jsonrpc' => '2.0',
+                'id' => 4,
+                'method' => 'tools/list',
+                'params' => ['_meta' => ['io.modelcontextprotocol/protocolVersion' => '1900-01-01']]
+            ],
+            ['MCP-Protocol-Version' => '1900-01-01']
+        );
+
+        $this->assertEquals(400, $result['status']);
+        $this->assertEquals(-32022, $result['body']['error']['code']);
+        $this->assertEquals('1900-01-01', $result['body']['error']['data']['requested']);
+        $this->assertContains('2026-07-28', $result['body']['error']['data']['supported']);
+    }
+
+    public function testMethodsRemovedIn20260728AnswerNotFound(): void
+    {
+        foreach (['ping', 'logging/setLevel', 'resources/subscribe'] as $method) {
+            $result = $this->modern(['jsonrpc' => '2.0', 'id' => 5, 'method' => $method, 'params' => []]);
+
+            $this->assertEquals(404, $result['status'], $method);
+            $this->assertEquals(-32601, $result['body']['error']['code'], $method);
+        }
+    }
+
+    public function testInitializeCannotNegotiateAStatelessVersion(): void
+    {
+        $negotiator = new \Seolinkmap\Waasup\Protocol\VersionNegotiator();
+
+        $this->assertEquals('2025-11-25', $negotiator->negotiate('2026-07-28'));
+    }
+
+    public function testSubscriptionStreamOpensAndHonoursTheFilter(): void
+    {
+        $request = $this->createRequest(
+            'POST',
+            '/mcp/550e8400-e29b-41d4-a716-446655440000',
+            ['MCP-Protocol-Version' => '2026-07-28', 'Mcp-Method' => 'subscriptions/listen'],
+            json_encode(
+                [
+                    'jsonrpc' => '2.0',
+                    'id' => 7,
+                    'method' => 'subscriptions/listen',
+                    'params' => [
+                        '_meta' => ['io.modelcontextprotocol/protocolVersion' => '2026-07-28'],
+                        'notifications' => ['toolsListChanged' => true, 'resourceSubscriptions' => ['file:///a.json']]
+                    ]
+                ]
+            )
+        )->withAttribute('mcp_context', $this->createTestContext());
+
+        $response = $this->createServer()->handle($request, $this->createResponse());
+
+        $this->assertEquals('text/event-stream', $response->getHeaderLine('Content-Type'));
+
+        $honoured = $this->messageHandler->registerSubscription(
+            ['notifications' => ['toolsListChanged' => true, 'promptsListChanged' => false, 'resourceSubscriptions' => ['file:///a.json']]],
+            7,
+            'subscription_test'
+        );
+
+        $this->assertEquals(['toolsListChanged' => true, 'resourceSubscriptions' => ['file:///a.json']], $honoured);
+
+        $this->messageHandler->sendListChangedNotification('subscription_test', 'prompts');
+        $this->assertCount(0, $this->storage->getMessages('subscription_test'));
+
+        $this->messageHandler->sendListChangedNotification('subscription_test', 'tools');
+        $messages = $this->storage->getMessages('subscription_test');
+
+        $this->assertCount(1, $messages);
+        $this->assertEquals('notifications/tools/list_changed', $messages[0]['data']['method']);
+        $this->assertEquals(7, $messages[0]['data']['params']['_meta']['io.modelcontextprotocol/subscriptionId']);
+    }
+
+    public function testSubscriptionStreamIgnoresLastEventId(): void
+    {
+        $this->storage->storeMessage('unrelated', ['jsonrpc' => '2.0', 'method' => 'notifications/ignored']);
+        $stale = (string) $this->storage->getMessages('unrelated')[0]['id'];
+
+        $request = $this->createRequest(
+            'POST',
+            '/mcp/550e8400-e29b-41d4-a716-446655440000',
+            [
+                'MCP-Protocol-Version' => '2026-07-28',
+                'Mcp-Method' => 'subscriptions/listen',
+                'Last-Event-ID' => $stale
+            ],
+            json_encode(
+                [
+                    'jsonrpc' => '2.0',
+                    'id' => 9,
+                    'method' => 'subscriptions/listen',
+                    'params' => [
+                        '_meta' => ['io.modelcontextprotocol/protocolVersion' => '2026-07-28'],
+                        'notifications' => ['toolsListChanged' => true]
+                    ]
+                ]
+            )
+        )->withAttribute('mcp_context', $this->createTestContext());
+
+        $response = $this->createServer()->handle($request, $this->createResponse());
+        $response->getBody()->rewind();
+        $body = (string) $response->getBody();
+
+        $this->assertEquals('text/event-stream', $response->getHeaderLine('Content-Type'));
+        $this->assertStringNotContainsString('id: ', $body);
+
+        $event = json_decode(substr(trim($body), strpos($body, 'data: ') + 6), true);
+
+        $this->assertEquals('notifications/subscriptions/acknowledged', $event['method']);
+        $this->assertEquals(9, $event['params']['_meta']['io.modelcontextprotocol/subscriptionId']);
+    }
+    public function testSubscriptionFilterRejectsUnknownTypes(): void
+    {
+        $result = $this->messageHandler->registerSubscription(
+            ['notifications' => ['somethingElse' => true]],
+            1,
+            'subscription_bad'
+        );
+
+        $this->assertStringContainsString('unknown notification type', $result['error']);
+    }
+
+    public function testMcpParamHeadersAreValidatedAgainstArguments(): void
+    {
+        $tools = new \Seolinkmap\Waasup\Tools\Registry\ToolRegistry();
+        $tools->register(
+            'execute_sql',
+            fn ($p, $c) => ['content' => [['type' => 'text', 'text' => 'ok']]],
+            [
+                'description' => 'd',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'region' => ['type' => 'string', 'x-mcp-header' => 'Region'],
+                        'query' => ['type' => 'string']
+                    ]
+                ]
+            ]
+        );
+
+        $this->assertEquals(['Region' => ['region']], $tools->getHeaderParameters('execute_sql'));
+
+        $server = new \Seolinkmap\Waasup\MCPSaaSServer(
+            $this->storage,
+            $tools,
+            $this->createTestPromptRegistry(),
+            $this->createTestResourceRegistry(),
+            ['test_mode' => true, 'base_url' => 'https://localhost:8080']
+        );
+
+        $body = [
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'execute_sql',
+                'arguments' => ['region' => 'us-west1', 'query' => 'SELECT 1'],
+                '_meta' => ['io.modelcontextprotocol/protocolVersion' => '2026-07-28']
+            ]
+        ];
+
+        $headers = [
+            'MCP-Protocol-Version' => '2026-07-28',
+            'Mcp-Method' => 'tools/call',
+            'Mcp-Name' => 'execute_sql'
+        ];
+
+        $good = $server->handle(
+            $this->createRequest('POST', '/mcp', $headers + ['Mcp-Param-Region' => 'us-west1'], json_encode($body))
+                ->withAttribute('mcp_context', $this->createTestContext()),
+            $this->createResponse()
+        );
+        $this->assertEquals(200, $good->getStatusCode());
+
+        $bad = $server->handle(
+            $this->createRequest('POST', '/mcp', $headers + ['Mcp-Param-Region' => 'eu-west1'], json_encode($body))
+                ->withAttribute('mcp_context', $this->createTestContext()),
+            $this->createResponse()
+        );
+        $this->assertEquals(400, $bad->getStatusCode());
+        $this->assertEquals(-32020, json_decode((string) $bad->getBody(), true)['error']['code']);
+
+        $missing = $server->handle(
+            $this->createRequest('POST', '/mcp', $headers, json_encode($body))
+                ->withAttribute('mcp_context', $this->createTestContext()),
+            $this->createResponse()
+        );
+        $this->assertEquals(400, $missing->getStatusCode());
+    }
+
+    public function testAForeignOriginIsRefusedUntilItIsAllowed(): void
+    {
+        $foreign = ['Origin' => 'https://evil.example.com'];
+
+        $refused = $this->createServer()->handle(
+            $this->createRequest('OPTIONS', '/mcp', $foreign),
+            $this->createResponse()
+        );
+
+        $this->assertEquals(403, $refused->getStatusCode());
+
+        $allowed = $this->createServer(['auth' => ['allowed_origins' => ['https://evil.example.com']]])
+            ->handle($this->createRequest('OPTIONS', '/mcp', $foreign), $this->createResponse());
+
+        $this->assertEquals(200, $allowed->getStatusCode());
+    }
+
+    public function testConfiguredListsReplaceTheDefaultsRatherThanMerging(): void
+    {
+        $merged = \Seolinkmap\Waasup\Config::merge(
+            [
+                'supported_versions' => ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
+                'auth' => ['context_types' => ['agency', 'user'], 'authless' => false],
+                'oauth' => ['access_token_lifetime' => 3600]
+            ],
+            [
+                'supported_versions' => ['2025-11-25', '2025-06-18'],
+                'auth' => ['context_types' => ['tenant']],
+                'oauth' => []
+            ]
+        );
+
+        $this->assertEquals(['2025-11-25', '2025-06-18'], $merged['supported_versions']);
+        $this->assertEquals(['tenant'], $merged['auth']['context_types']);
+        $this->assertFalse($merged['auth']['authless']);
+        $this->assertEquals(3600, $merged['oauth']['access_token_lifetime']);
+    }
+    public function testRequestScopedNotificationsTravelOnTheResponseStream(): void
+    {
+        $server = $this->createServer();
+
+        $server->addTool(
+            'reindex',
+            function ($arguments, $context) use ($server) {
+                $server->sendLogMessage(MessageHandler::STATELESS_SESSION, 'info', 'opening the index');
+                $server->sendProgressNotification(MessageHandler::STATELESS_SESSION, 1, 'scanning', 3);
+                $server->sendProgressNotification(MessageHandler::STATELESS_SESSION, 3, 'writing', 3);
+
+                return ['content' => [['type' => 'text', 'text' => 'reindexed 3 documents']]];
+            },
+            ['description' => 'Reports progress while it runs']
+        );
+
+        $call = function (array $meta) use ($server) {
+            $body = [
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'method' => 'tools/call',
+                'params' => [
+                    'name' => 'reindex',
+                    'arguments' => [],
+                    '_meta' => $meta + ['io.modelcontextprotocol/protocolVersion' => '2026-07-28']
+                ]
+            ];
+
+            $request = $this->createRequest(
+                'POST',
+                '/mcp/550e8400-e29b-41d4-a716-446655440000',
+                [
+                    'Accept' => 'application/json, text/event-stream',
+                    'MCP-Protocol-Version' => '2026-07-28',
+                    'Mcp-Method' => 'tools/call',
+                    'Mcp-Name' => 'reindex',
+                    'Content-Type' => 'application/json'
+                ],
+                json_encode($body)
+            )->withAttribute('mcp_context', $this->createTestContext());
+
+            $response = $server->handle($request, $this->createResponse());
+            $response->getBody()->rewind();
+
+            return $response;
+        };
+
+        $streamed = $call(['progressToken' => 'p1', 'io.modelcontextprotocol/logLevel' => 'info']);
+        $body = (string) $streamed->getBody();
+
+        $this->assertEquals('text/event-stream', $streamed->getHeaderLine('Content-Type'));
+        $this->assertEquals(200, $streamed->getStatusCode());
+
+        $events = array_values(array_filter(explode("\n\n", trim($body))));
+        $this->assertCount(4, $events);
+
+        $decoded = array_map(
+            fn (string $event) => json_decode(substr($event, strpos($event, 'data: ') + 6), true),
+            $events
+        );
+
+        $this->assertEquals('notifications/message', $decoded[0]['method']);
+        $this->assertEquals('notifications/progress', $decoded[1]['method']);
+        $this->assertEquals('p1', $decoded[1]['params']['progressToken']);
+        $this->assertEquals('notifications/progress', $decoded[2]['method']);
+        $this->assertEquals(1, $decoded[3]['id']);
+        $this->assertEquals('reindexed 3 documents', $decoded[3]['result']['content'][0]['text']);
+
+        $this->assertStringNotContainsString('id: ', $body);
+        $this->assertEquals([], $this->storage->getMessages(MessageHandler::STATELESS_SESSION));
+
+        $plain = $call([]);
+
+        $this->assertEquals('application/json', $plain->getHeaderLine('Content-Type'));
+        $this->assertEquals(
+            'reindexed 3 documents',
+            json_decode((string) $plain->getBody(), true)['result']['content'][0]['text']
+        );
+    }
+    public function testAMissingClientCapabilityNamesWhatToDeclare(): void
+    {
+        $server = $this->createServer();
+
+        $server->addTool(
+            'ask',
+            function ($arguments, $context) use ($server) {
+                $server->requestElicitation(MessageHandler::STATELESS_SESSION, 'Which account?');
+
+                return ['content' => []];
+            },
+            ['description' => 'Needs the client to ask its user something']
+        );
+
+        $request = $this->createRequest(
+            'POST',
+            '/mcp/550e8400-e29b-41d4-a716-446655440000',
+            [
+                'Accept' => 'application/json, text/event-stream',
+                'MCP-Protocol-Version' => '2026-07-28',
+                'Mcp-Method' => 'tools/call',
+                'Mcp-Name' => 'ask',
+                'Content-Type' => 'application/json'
+            ],
+            json_encode([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'method' => 'tools/call',
+                'params' => [
+                    'name' => 'ask',
+                    'arguments' => [],
+                    '_meta' => [
+                        'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+                        'io.modelcontextprotocol/clientCapabilities' => []
+                    ]
+                ]
+            ])
+        )->withAttribute('mcp_context', $this->createTestContext());
+
+        $response = $server->handle($request, $this->createResponse());
+        $raw = (string) $response->getBody();
+        $body = json_decode($raw, true);
+
+        $this->assertEquals(400, $response->getStatusCode());
+        $this->assertEquals(-32021, $body['error']['code']);
+        $this->assertEquals(['elicitation'], array_keys($body['error']['data']['requiredCapabilities']));
+        $this->assertStringContainsString('"elicitation":{}', $raw);
+        $this->assertArrayNotHasKey('result', $body);
+    }
+    public function testAnEmptyArraySatisfiesAnArrayOutputSchema(): void
+    {
+        $server = $this->createServer();
+
+        $server->addTool(
+            'search',
+            fn ($arguments, $context) => [
+                'content' => [['type' => 'text', 'text' => 'no matches']],
+                'structuredContent' => ['matches' => []]
+            ],
+            [
+                'description' => 'Returns whatever matched',
+                'outputSchema' => [
+                    'type' => 'object',
+                    'properties' => ['matches' => ['type' => 'array']],
+                    'required' => ['matches']
+                ]
+            ]
+        );
+
+        $request = $this->createRequest(
+            'POST',
+            '/mcp/550e8400-e29b-41d4-a716-446655440000',
+            [
+                'MCP-Protocol-Version' => '2026-07-28',
+                'Mcp-Method' => 'tools/call',
+                'Mcp-Name' => 'search',
+                'Content-Type' => 'application/json'
+            ],
+            json_encode([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'method' => 'tools/call',
+                'params' => [
+                    'name' => 'search',
+                    'arguments' => [],
+                    '_meta' => ['io.modelcontextprotocol/protocolVersion' => '2026-07-28']
+                ]
+            ])
+        )->withAttribute('mcp_context', $this->createTestContext());
+
+        $body = json_decode((string) $server->handle($request, $this->createResponse())->getBody(), true);
+
+        $this->assertArrayNotHasKey('error', $body);
+        $this->assertEquals([], $body['result']['structuredContent']['matches']);
+    }
+
+    public function testHandshakeOnlyMethodsAreGoneFrom20260728(): void
+    {
+        foreach (['roots/read', 'roots/listDirectory'] as $method) {
+            $result = $this->modern(['jsonrpc' => '2.0', 'id' => 1, 'method' => $method, 'params' => []]);
+
+            $this->assertEquals(404, $result['status'], $method);
+            $this->assertEquals(-32601, $result['body']['error']['code'], $method);
+        }
+
+        $removed = $this->modern(['jsonrpc' => '2.0', 'method' => 'notifications/roots/list_changed', 'params' => []]);
+
+        $this->assertEquals(202, $removed['status']);
+
+        $manager = new \Seolinkmap\Waasup\Protocol\Handlers\ProtocolManager($this->storage);
+
+        foreach (['notifications/roots/list_changed', 'notifications/initialized', 'roots/read'] as $method) {
+            $this->assertFalse($manager->isMethodSupported($method, '2026-07-28'), $method);
+            $this->assertTrue($manager->isMethodSupported($method, '2025-11-25'), $method);
+        }
+    }
+
+    public function testAcceptIsReadAsMediaRangesNotSubstrings(): void
+    {
+        $send = function (string $accept) {
+            $request = $this->createRequest(
+                'POST',
+                '/mcp/550e8400-e29b-41d4-a716-446655440000',
+                ['Accept' => $accept, 'Content-Type' => 'application/json'],
+                json_encode([
+                    'jsonrpc' => '2.0',
+                    'id' => 1,
+                    'method' => 'initialize',
+                    'params' => ['protocolVersion' => '2025-11-25', 'capabilities' => []]
+                ])
+            )->withAttribute('mcp_context', $this->createTestContext());
+
+            return $this->createServer()->handle($request, $this->createResponse())->getStatusCode();
+        };
+
+        $this->assertEquals(200, $send('application/json, text/event-stream'));
+        $this->assertEquals(200, $send('*/*'));
+        $this->assertEquals(406, $send('application/json;q=0'));
+        $this->assertEquals(406, $send('application/json-seq'));
+        $this->assertEquals(406, $send('text/plain'));
+    }
+    public function testStatelessTasksAreBoundToTheirCaller(): void
+    {
+        $server = $this->createServer();
+        $owner = $this->createTestContext();
+        $stranger = $this->createTestContext(['context_id' => '550e8400-e29b-41d4-a716-446655440999']);
+
+        $meta = [
+            'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities' => [
+                'extensions' => ['io.modelcontextprotocol/tasks' => []]
+            ]
+        ];
+
+        $send = function (array $params, string $method, array $context, string $name = '') use ($server): array {
+            $headers = [
+                'MCP-Protocol-Version' => '2026-07-28',
+                'Mcp-Method' => $method,
+                'Content-Type' => 'application/json'
+            ];
+
+            if ($name !== '') {
+                $headers['Mcp-Name'] = $name;
+            }
+
+            $request = $this->createRequest(
+                'POST',
+                '/mcp/550e8400-e29b-41d4-a716-446655440000',
+                $headers,
+                json_encode(['jsonrpc' => '2.0', 'id' => 1, 'method' => $method, 'params' => $params])
+            )->withAttribute('mcp_context', $context);
+
+            return json_decode((string) $server->handle($request, $this->createResponse())->getBody(), true);
+        };
+
+        $created = $send(
+            ['name' => 'test_tool', 'arguments' => [], '_meta' => $meta],
+            'tools/call',
+            $owner,
+            'test_tool'
+        );
+
+        $taskId = $created['result']['taskId'];
+        $this->assertNotEmpty($taskId);
+
+        $mine = $send(['taskId' => $taskId, '_meta' => $meta], 'tasks/get', $owner);
+        $this->assertEquals($taskId, $mine['result']['taskId']);
+
+        $theirs = $send(['taskId' => $taskId, '_meta' => $meta], 'tasks/get', $stranger);
+        $this->assertArrayNotHasKey('result', $theirs);
+        $this->assertEquals(-32602, $theirs['error']['code']);
+    }
+
+    public function testPreflightAllowsTheHeadersTheRevisionRequires(): void
+    {
+        $preflight = $this->createServer()->handle(
+            $this->createRequest(
+                'OPTIONS',
+                '/mcp',
+                [
+                    'Origin' => 'https://localhost:8080',
+                    'Access-Control-Request-Method' => 'POST',
+                    'Access-Control-Request-Headers' => 'mcp-method,mcp-name,mcp-param-region'
+                ]
+            ),
+            $this->createResponse()
+        );
+
+        $allowed = $preflight->getHeaderLine('Access-Control-Allow-Headers');
+
+        $this->assertEquals(200, $preflight->getStatusCode());
+
+        foreach (['Mcp-Method', 'Mcp-Name', 'MCP-Protocol-Version', 'Authorization'] as $header) {
+            $this->assertStringContainsString($header, $allowed);
+        }
+
+        $this->assertStringContainsString('mcp-param-region', $allowed);
+        $this->assertStringContainsString('Mcp-Session-Id', $preflight->getHeaderLine('Access-Control-Expose-Headers'));
+    }
+    public function testASessionIsBoundToTheAuthorizationThatOpenedIt(): void
+    {
+        $server = $this->createServer();
+        $owner = $this->createTestContext();
+        $stranger = $this->createTestContext(['context_id' => '550e8400-e29b-41d4-a716-446655440999']);
+
+        $opened = $server->handle(
+            $this->createRequest(
+                'POST',
+                '/mcp',
+                ['Content-Type' => 'application/json'],
+                json_encode([
+                    'jsonrpc' => '2.0',
+                    'id' => 1,
+                    'method' => 'initialize',
+                    'params' => ['protocolVersion' => '2025-11-25', 'capabilities' => []]
+                ])
+            )->withAttribute('mcp_context', $owner),
+            $this->createResponse()
+        );
+
+        $sessionId = $opened->getHeaderLine('Mcp-Session-Id');
+        $this->assertNotEmpty($sessionId);
+
+        $listAs = function (array $context, int $requestId) use ($server, $sessionId) {
+            return $server->handle(
+                $this->createRequest(
+                    'POST',
+                    '/mcp',
+                    ['Content-Type' => 'application/json', 'Mcp-Session-Id' => $sessionId],
+                    json_encode(['jsonrpc' => '2.0', 'id' => $requestId, 'method' => 'tools/list', 'params' => []])
+                )->withAttribute('mcp_context', $context),
+                $this->createResponse()
+            );
+        };
+
+        $this->assertEquals(200, $listAs($owner, 2)->getStatusCode());
+
+        $refused = $listAs($stranger, 3);
+        $this->assertEquals(404, $refused->getStatusCode());
+        $this->assertEquals(-32001, json_decode((string) $refused->getBody(), true)['error']['code']);
+
+        $deleted = $server->handle(
+            $this->createRequest('DELETE', '/mcp', ['Mcp-Session-Id' => $sessionId])
+                ->withAttribute('mcp_context', $stranger),
+            $this->createResponse()
+        );
+
+        $this->assertEquals(204, $deleted->getStatusCode());
+        $this->assertEquals(200, $listAs($owner, 4)->getStatusCode());
+    }
+
+    public function testPromptsAndResourcesCanAskForInput(): void
+    {
+        $server = $this->createServer();
+
+        $server->addPrompt(
+            'needs_input',
+            function ($arguments, $context) use ($server) {
+                $server->requestElicitation(MessageHandler::STATELESS_SESSION, 'Which tone?');
+
+                return ['description' => 'a greeting', 'messages' => []];
+            },
+            ['description' => 'Asks before it renders']
+        );
+
+        $server->addResource(
+            'test://needs-input',
+            function ($uri, $context) use ($server) {
+                $server->requestElicitation(MessageHandler::STATELESS_SESSION, 'Which revision?');
+
+                return ['contents' => []];
+            },
+            ['description' => 'Asks before it reads']
+        );
+
+        $meta = [
+            'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities' => ['elicitation' => []]
+        ];
+
+        $send = function (string $method, string $nameKey, string $name) use ($server, $meta): array {
+            $body = [
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'method' => $method,
+                'params' => [$nameKey => $name, '_meta' => $meta]
+            ];
+
+            $request = $this->createRequest(
+                'POST',
+                '/mcp/550e8400-e29b-41d4-a716-446655440000',
+                [
+                    'MCP-Protocol-Version' => '2026-07-28',
+                    'Mcp-Method' => $method,
+                    'Mcp-Name' => $name,
+                    'Content-Type' => 'application/json'
+                ],
+                json_encode($body)
+            )->withAttribute('mcp_context', $this->createTestContext());
+
+            return json_decode((string) $server->handle($request, $this->createResponse())->getBody(), true);
+        };
+
+        $prompt = $send('prompts/get', 'name', 'needs_input');
+
+        $this->assertEquals('input_required', $prompt['result']['resultType']);
+        $this->assertEquals('elicitation/create', $prompt['result']['inputRequests']['input-0']['method']);
+        $this->assertArrayNotHasKey('messages', $prompt['result']);
+
+        $resource = $send('resources/read', 'uri', 'test://needs-input');
+
+        $this->assertEquals('input_required', $resource['result']['resultType']);
+        $this->assertEquals('elicitation/create', $resource['result']['inputRequests']['input-0']['method']);
+        $this->assertArrayNotHasKey('contents', $resource['result']);
+    }
+    public function testInputRequiredResultCarriesInputRequestsAsAMap(): void
+    {
+        $server = $this->createServer();
+
+        $server->addTool(
+            'needs_input',
+            function ($arguments, $context) use ($server) {
+                $server->requestElicitation(
+                    MessageHandler::STATELESS_SESSION,
+                    'Which account should this run against?',
+                    [
+                        'type' => 'object',
+                        'properties' => ['account' => ['type' => 'string']],
+                        'required' => ['account']
+                    ]
+                );
+
+                return ['content' => [['type' => 'text', 'text' => 'ran against the chosen account']]];
+            },
+            ['description' => 'Asks the client for an account before it runs']
+        );
+
+        $meta = [
+            'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities' => ['elicitation' => []]
+        ];
+
+        $call = function (array $params) use ($server): array {
+            $body = ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => $params];
+
+            $request = $this->createRequest(
+                'POST',
+                '/mcp/550e8400-e29b-41d4-a716-446655440000',
+                [
+                    'MCP-Protocol-Version' => '2026-07-28',
+                    'Mcp-Method' => 'tools/call',
+                    'Mcp-Name' => 'needs_input',
+                    'Content-Type' => 'application/json'
+                ],
+                json_encode($body)
+            )->withAttribute('mcp_context', $this->createTestContext());
+
+            return json_decode((string) $server->handle($request, $this->createResponse())->getBody(), true);
+        };
+
+        $first = $call(['name' => 'needs_input', 'arguments' => [], '_meta' => $meta]);
+
+        $this->assertEquals('input_required', $first['result']['resultType']);
+        $this->assertEquals(['input-0'], array_keys($first['result']['inputRequests']));
+        $this->assertEquals('elicitation/create', $first['result']['inputRequests']['input-0']['method']);
+        $this->assertArrayHasKey('requestedSchema', $first['result']['inputRequests']['input-0']['params']);
+        $this->assertArrayNotHasKey('id', $first['result']['inputRequests']['input-0']);
+
+        $retry = $call(
+            [
+                'name' => 'needs_input',
+                'arguments' => [],
+                'inputResponses' => ['input-0' => ['action' => 'accept', 'content' => ['account' => 'acme']]],
+                '_meta' => $meta
+            ]
+        );
+
+        $this->assertEquals('complete', $retry['result']['resultType']);
+        $this->assertEquals('ran against the chosen account', $retry['result']['content'][0]['text']);
+        $this->assertArrayNotHasKey('inputRequests', $retry['result']);
+    }
+    public function testTasksExtensionIsOfferedOnlyToClientsThatDeclareIt(): void
+    {
+        $extension = [
+            'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities' => [
+                'extensions' => ['io.modelcontextprotocol/tasks' => []]
+            ]
+        ];
+
+        $asTask = $this->modern(
+            [
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'method' => 'tools/call',
+                'params' => ['name' => 'test_tool', 'arguments' => [], '_meta' => $extension]
+            ]
+        );
+
+        $this->assertEquals('task', $asTask['body']['result']['resultType']);
+        $this->assertArrayHasKey('ttlMs', $asTask['body']['result']);
+        $this->assertArrayHasKey('pollIntervalMs', $asTask['body']['result']);
+        $this->assertArrayNotHasKey('content', $asTask['body']['result']);
+
+        $plain = $this->modern(
+            ['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/call', 'params' => ['name' => 'test_tool', 'arguments' => []]]
+        );
+
+        $this->assertEquals('complete', $plain['body']['result']['resultType']);
+        $this->assertArrayHasKey('content', $plain['body']['result']);
+    }
 }

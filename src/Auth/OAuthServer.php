@@ -5,6 +5,7 @@ namespace Seolinkmap\Waasup\Auth;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Seolinkmap\Waasup\Auth\Providers\{GithubProvider, GoogleProvider, LinkedinProvider};
+use Seolinkmap\Waasup\Config;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 
 class OAuthServer
@@ -38,7 +39,7 @@ class OAuthServer
         $this->storage = $storage;
         $this->responseFactory = $responseFactory;
         $this->streamFactory = $streamFactory;
-        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
+        $this->config = Config::merge($this->getDefaultConfig(), $config);
 
         $this->initializeSocialProviders();
     }

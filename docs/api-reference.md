@@ -506,6 +506,8 @@ WaaSuP automatically gates features based on the negotiated MCP protocol version
 | Tool Calling in Sampling | ❌ | ❌ | ❌ | ✅ |
 | Tasks (experimental) | ❌ | ❌ | ❌ | ✅ |
 
+`2026-07-28` is served alongside these. It replaces the `initialize` handshake and sessions with per-request metadata, so it is selected per request rather than negotiated, and is not shown in the matrix above.
+
 ## Server Notifications
 
 The server object sends the notifications a client subscribed to. Each takes the

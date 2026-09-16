@@ -4,6 +4,7 @@ namespace Seolinkmap\Waasup\Discovery;
 
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Seolinkmap\Waasup\Config;
 
 class WellKnownProvider
 {
@@ -14,7 +15,7 @@ class WellKnownProvider
      */
     public function __construct(array $config = [])
     {
-        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
+        $this->config = Config::merge($this->getDefaultConfig(), $config);
     }
 
     /**

@@ -59,6 +59,10 @@ class SamplingHandler
         'params' => $params
         ];
 
+        if ($this->protocolManager->isStateless()) {
+            return $this->recordInputRequest($sessionId, 'sampling/createMessage', $params);
+        }
+
         $this->storage->storeMessage($sessionId, $samplingRequest, $context);
         $this->rememberRequest($sessionId, $requestId, 'sampling/createMessage');
 
@@ -103,6 +107,10 @@ class SamplingHandler
         'params' => []
         ];
 
+        if ($this->protocolManager->isStateless()) {
+            return $this->recordInputRequest($sessionId, 'roots/list', []);
+        }
+
         $this->storage->storeMessage($sessionId, $rootsRequest, $context);
         $this->rememberRequest($sessionId, $requestId, 'roots/list');
 
@@ -116,6 +124,7 @@ class SamplingHandler
         array $context = []
     ): string {
         $this->requireClientCapability($sessionId, 'roots');
+        $this->requireHandshakeEra('roots/read', $sessionId);
 
         $requestId = bin2hex(random_bytes(16));
 
@@ -139,6 +148,7 @@ class SamplingHandler
         array $context = []
     ): string {
         $this->requireClientCapability($sessionId, 'roots');
+        $this->requireHandshakeEra('roots/listDirectory', $sessionId);
 
         $requestId = bin2hex(random_bytes(16));
 
@@ -200,7 +210,64 @@ class SamplingHandler
     }
 
     /**
-     * Assert the client declared a capability at initialize
+     * Record a server to client request as input the client must supply on retry
+     *
+     * Requests are held as a map keyed by the id the answer will carry. When the
+     * client already supplied an answer for this position, it is stored and made
+     * available immediately.
+     *
+     * @param string $method the request the client is being asked to answer
+     * @param array $params the request parameters
+     * @return string the input request id
+     */
+    private function recordInputRequest(string $sessionId, string $method, array $params): string
+    {
+        $pending = $this->protocolManager->getSessionValue($sessionId, 'input_requests', []);
+        $requestId = 'input-' . count($pending);
+        $supplied = $this->protocolManager->getSessionValue($sessionId, 'input_responses', []);
+
+        if (isset($supplied[$requestId])) {
+            $this->protocolManager->storeSessionValues(
+                $sessionId,
+                ['pending_requests' => [$requestId => $method]]
+            );
+
+            $this->storeClientResponse($sessionId, $requestId, (array)$supplied[$requestId]);
+
+            return $requestId;
+        }
+
+        $pending[$requestId] = ['method' => $method, 'params' => $params];
+
+        $this->protocolManager->storeSessionValues($sessionId, ['input_requests' => $pending]);
+
+        return $requestId;
+    }
+
+    /**
+     * Assert this server extension is available at the negotiated version
+     *
+     * A version that carries server to client requests as input requests admits
+     * only the three the specification names, so there is nowhere to put these.
+     *
+     * @throws ProtocolException when the version has no place for the request
+     */
+    private function requireHandshakeEra(string $method, string $sessionId): void
+    {
+        if (!$this->protocolManager->isStateless()) {
+            return;
+        }
+
+        throw new ProtocolException(
+            "{$method} is an extension of the handshake protocol versions. Protocol version "
+            . $this->protocolManager->getSessionVersion($sessionId)
+            . ' carries server to client requests as input requests, which admit only roots/list, sampling/createMessage and elicitation/create.',
+            -32601
+        );
+    }
+
+    /**
+     * Assert the client declared a capability it is about to be asked to act on
      *
      * @throws ProtocolException when the capability was not declared
      */
@@ -208,12 +275,25 @@ class SamplingHandler
     {
         $capabilities = $this->protocolManager->getSessionValue($sessionId, 'client_capabilities', []);
 
-        if (!isset($capabilities[$capability])) {
+        if (isset($capabilities[$capability])) {
+            return;
+        }
+
+        $version = $this->protocolManager->getSessionVersion($sessionId);
+
+        if (!$this->protocolManager->isFeatureSupported('stateless', $version)) {
             throw new ProtocolException(
                 "This client did not declare the '{$capability}' capability when it initialized, so the server cannot send it a {$capability} request.",
                 -32601
             );
         }
+
+        throw new ProtocolException(
+            "Server requires the {$capability} capability for this request. Declare it in the request's io.modelcontextprotocol/clientCapabilities and send the request again.",
+            -32021,
+            null,
+            ['requiredCapabilities' => [$capability => new \stdClass()]]
+        );
     }
 
     /**
@@ -357,6 +437,10 @@ class SamplingHandler
         'id' => $requestId,
         'params' => $params
         ];
+
+        if ($this->protocolManager->isStateless()) {
+            return $this->recordInputRequest($sessionId, 'elicitation/create', $params);
+        }
 
         $this->storage->storeMessage($sessionId, $elicitationRequest, $context);
         $this->rememberRequest($sessionId, $requestId, 'elicitation/create');

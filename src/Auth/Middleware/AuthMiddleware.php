@@ -7,6 +7,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\StreamFactoryInterface;
 use Psr\Http\Server\RequestHandlerInterface as RequestHandler;
+use Seolinkmap\Waasup\Config;
 use Seolinkmap\Waasup\Exception\AuthenticationException;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 
@@ -39,7 +40,7 @@ class AuthMiddleware
         $this->storage = $storage;
         $this->responseFactory = $responseFactory;
         $this->streamFactory = $streamFactory;
-        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
+        $this->config = Config::merge($this->getDefaultConfig(), $config);
     }
 
     /**

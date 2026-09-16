@@ -5,6 +5,7 @@ namespace Seolinkmap\Waasup\Transport;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\StreamInterface;
+use Seolinkmap\Waasup\Config;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 use Slim\Psr7\NonBufferedBody;
 
@@ -19,7 +20,7 @@ class SSETransport implements TransportInterface
     public function __construct(StorageInterface $storage, array $config = [])
     {
         $this->storage = $storage;
-        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
+        $this->config = Config::merge($this->getDefaultConfig(), $config);
     }
 
     /**
@@ -42,8 +43,11 @@ class SSETransport implements TransportInterface
             exec('renice 10 ' . getmypid());
         }
 
+        if (!$isTestMode) {
+            $response = $response->withBody(new NonBufferedBody());
+        }
+
         $response = $response
-            ->withBody(new NonBufferedBody())
             ->withHeader('Content-Type', 'text/event-stream')
             ->withHeader('Cache-Control', 'no-cache')
             ->withHeader('Connection', 'keep-alive')

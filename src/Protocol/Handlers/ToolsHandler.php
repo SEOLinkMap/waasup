@@ -67,7 +67,12 @@ class ToolsHandler
             $result['nextCursor'] = $page['nextCursor'];
         }
 
-        return $this->responseManager->storeSuccessResponse($sessionId, $result, $id, $response);
+        return $this->responseManager->storeSuccessResponse(
+            $sessionId,
+            $this->responseManager->cacheable($result, $sessionId),
+            $id,
+            $response
+        );
     }
 
     public function handleToolsCall(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
@@ -126,6 +131,8 @@ class ToolsHandler
 
         try {
             $result = $this->toolRegistry->execute($toolName, $arguments, $context);
+        } catch (ProtocolException $e) {
+            throw $e;
         } catch (\Throwable $e) {
             $failure = [
                 'content' => [
@@ -166,11 +173,77 @@ class ToolsHandler
             }
         }
 
+        $inputRequests = $this->protocolManager->getSessionValue($sessionId, 'input_requests', []);
+
+        if ($this->usesTaskExtension($sessionId, $context)) {
+            return $this->createExtensionTask($sessionId, $toolResult, $inputRequests, $id, $response);
+        }
+
+        $interim = $this->responseManager->inputRequired($sessionId, $id, $response);
+
+        if ($interim !== null) {
+            return $interim;
+        }
+
         if ($asTask) {
             return $this->createTask($sessionId, $params['task'], $toolResult, $id, $response);
         }
 
         return $this->responseManager->storeSuccessResponse($sessionId, $toolResult, $id, $response);
+    }
+
+    /**
+     * Whether this call should answer with a task from the tasks extension
+     */
+    private function usesTaskExtension(string $sessionId, array $context): bool
+    {
+        $version = $this->protocolManager->getSessionVersion($sessionId);
+
+        if (!$this->protocolManager->isFeatureSupported('tasks_extension', $version)) {
+            return false;
+        }
+
+        $capabilities = $this->protocolManager->getSessionValue($sessionId, 'client_capabilities', []);
+
+        return isset($capabilities['extensions']['io.modelcontextprotocol/tasks']);
+    }
+
+    /**
+     * Answer with a durable task handle instead of the call result
+     *
+     * @param array $toolResult the CallToolResult the call produced
+     * @param array $inputRequests input the call still needs, keyed by input request id
+     */
+    private function createExtensionTask(string $sessionId, array $toolResult, array $inputRequests, mixed $id, Response $response): Response
+    {
+        $status = 'completed';
+
+        if ($inputRequests !== []) {
+            $status = 'input_required';
+        } elseif (($toolResult['isError'] ?? false) === true) {
+            $status = 'failed';
+        }
+
+        $task = $this->protocolManager->createTaskRecord($status, null);
+
+        if ($inputRequests !== []) {
+            $task['inputRequests'] = $inputRequests;
+        } elseif ($status === 'failed') {
+            $task['error'] = [
+                'code' => -32603,
+                'message' => $toolResult['content'][0]['text'] ?? 'The tool call failed.'
+            ];
+        } else {
+            $task['result'] = $toolResult;
+        }
+
+        $this->protocolManager->storeTask($sessionId, $task);
+
+        unset($task['result'], $task['error'], $task['inputRequests']);
+
+        $task['resultType'] = 'task';
+
+        return $this->responseManager->storeSuccessResponse($sessionId, $task, $id, $response);
     }
 
     /**
@@ -306,9 +379,10 @@ class ToolsHandler
             case 'null':
                 return $value === null;
             case 'array':
-                return is_array($value) && array_keys($value) === range(0, count($value) - 1);
+                return is_array($value) && array_is_list($value);
             case 'object':
-                return is_array($value) || $value instanceof \stdClass;
+                return $value instanceof \stdClass
+                    || (is_array($value) && ($value === [] || !array_is_list($value)));
             default:
                 return true;
         }

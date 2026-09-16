@@ -76,6 +76,24 @@ class VersionNegotiatorTest extends TestCase
         $this->assertEquals('2025-03-26', $result2);
     }
 
+    public function testConfiguredOrderDoesNotChangeWhatIsNegotiated(): void
+    {
+        $ascending = new VersionNegotiator(
+            ['supported_versions' => ['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25']]
+        );
+
+        $this->assertEquals('2025-11-25', $ascending->negotiate('2026-01-01'));
+        $this->assertEquals('2025-03-26', $ascending->negotiate('2025-05-01'));
+        $this->assertEquals('2025-11-25', $ascending->negotiate('1900-01-01'));
+    }
+
+    public function testAVersionWithNoFeatureSetIsRefused(): void
+    {
+        $this->expectException(\Seolinkmap\Waasup\Exception\ProtocolException::class);
+        $this->expectExceptionMessage("Unknown protocol version '2030-01-01'");
+
+        new VersionNegotiator(['supported_versions' => ['2030-01-01']]);
+    }
     public function testEmptyVersionsArray(): void
     {
         $emptyNegotiator = new VersionNegotiator([]);

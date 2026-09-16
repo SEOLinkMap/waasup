@@ -52,9 +52,14 @@ class ResourcesHandler
         }
 
         if (!$this->resourceRegistry->hasResource($uri)) {
+            $notFound = $this->protocolManager->isFeatureSupported(
+                'stateless',
+                $this->protocolManager->getSessionVersion($sessionId)
+            ) ? -32602 : -32002;
+
             return $this->responseManager->storeErrorResponse(
                 $sessionId,
-                -32002,
+                $notFound,
                 "Resource not found: {$uri}. Call resources/list or resources/templates/list to see what this server exposes.",
                 $id,
                 $response
@@ -63,6 +68,8 @@ class ResourcesHandler
 
         try {
             $result = $this->resourceRegistry->read($uri, $context);
+        } catch (ProtocolException $e) {
+            throw $e;
         } catch (\Throwable $e) {
             return $this->responseManager->storeErrorResponse(
                 $sessionId,
@@ -73,9 +80,16 @@ class ResourcesHandler
             );
         }
 
-        $wrappedResult = [
-            'contents' => $result['contents'] ?? []
-        ];
+        $interim = $this->responseManager->inputRequired($sessionId, $id, $response);
+
+        if ($interim !== null) {
+            return $interim;
+        }
+
+        $wrappedResult = $this->responseManager->cacheable(
+            ['contents' => $result['contents'] ?? []],
+            $sessionId
+        );
 
         return $this->responseManager->storeSuccessResponse($sessionId, $wrappedResult, $id, $response);
     }
@@ -184,6 +198,11 @@ class ResourcesHandler
             $result['nextCursor'] = $page['nextCursor'];
         }
 
-        return $this->responseManager->storeSuccessResponse($sessionId, $result, $id, $response);
+        return $this->responseManager->storeSuccessResponse(
+            $sessionId,
+            $this->responseManager->cacheable($result, $sessionId),
+            $id,
+            $response
+        );
     }
 }

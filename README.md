@@ -93,9 +93,8 @@ WaaSuP implements the complete MCP specification across multiple protocol versio
 | Tool Calling in Sampling | ❌ | ❌ | ❌ | ✅ |
 | Tasks (experimental) | ❌ | ❌ | ❌ | ✅ |
 
-The `2026-07-28` revision is not implemented. It removes the `initialize` handshake
-and protocol sessions in favour of per-request metadata, and a client that speaks it
-is answered with `2025-11-25`, the newest version this server negotiates.
+`2026-07-28` is served alongside these. It replaces the `initialize` handshake and sessions with per-request metadata, so it is selected per request rather than negotiated, and is not shown in the matrix above.
+
 
 ## Installation
 
@@ -405,7 +404,6 @@ $server->sendProgressNotification($sessionId, 50, 'Processing data...');
 | `sampling/createMessage` | Request LLM sampling | All |
 | `roots/list` | List available root directories | All |
 | `elicitation/create` | Request user input | 2025-06-18 |
-
 
 ### Error Codes
 

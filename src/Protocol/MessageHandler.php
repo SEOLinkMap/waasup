@@ -3,6 +3,7 @@
 namespace Seolinkmap\Waasup\Protocol;
 
 use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\StreamInterface;
 use Seolinkmap\Waasup\Exception\ProtocolException;
 use Seolinkmap\Waasup\Prompts\Registry\PromptRegistry;
 use Seolinkmap\Waasup\Protocol\Handlers\ContentProcessor;
@@ -20,6 +21,8 @@ use Seolinkmap\Waasup\Tools\Registry\ToolRegistry;
 class MessageHandler
 {
     public const SEEN_REQUEST_ID_LIMIT = 500;
+
+    public const STATELESS_SESSION = 'stateless';
 
     private ToolRegistry $toolRegistry;
     private PromptRegistry $promptRegistry;
@@ -120,6 +123,39 @@ class MessageHandler
         return $this->processSingleMessage($data, $sessionId, $context, $response, $protocolVersion);
     }
 
+    /**
+     * Handle a request that carries its protocol version per request
+     *
+     * @param array $data the decoded JSON-RPC request
+     * @param string $version the version named in the request metadata
+     * @param StreamInterface|null $stream the response stream this request's notifications travel on
+     */
+    public function processStatelessMessage(array $data, array $context, Response $response, string $version, ?StreamInterface $stream = null): Response
+    {
+        $this->protocolManager->useStatelessVersion($version, ProtocolManager::contextOwner($context));
+        $this->responseManager->useStream($stream);
+
+        try {
+            return $this->processSingleMessage($data, self::STATELESS_SESSION, $context, $response, $version);
+        } finally {
+            $this->protocolManager->useStatelessVersion(null);
+            $this->responseManager->useStream(null);
+        }
+    }
+
+    /**
+     * Register the notification filter of a subscriptions/listen request
+     *
+     * @param array $params the request parameters
+     * @param mixed $id the request id, which becomes the subscription id
+     * @param string $streamKey the key the notification stream polls
+     * @return array the honoured filter, or an error message under 'error'
+     */
+    public function registerSubscription(array $params, mixed $id, string $streamKey): array
+    {
+        return $this->systemHandler->registerSubscription($params, $id, $streamKey);
+    }
+
     public function handleInitialize(array $params, mixed $id, ?string $sessionId, string $selectedVersion, Response $response): Response
     {
         return $this->systemHandler->handleInitialize($params, $id, $sessionId, $selectedVersion, $response);
@@ -205,7 +241,7 @@ class MessageHandler
             $notification['params']['message'] = $message;
         }
 
-        $this->storage->storeMessage($sessionId, $notification);
+        $this->responseManager->emitNotification($sessionId, $notification);
     }
 
     /**
@@ -219,12 +255,19 @@ class MessageHandler
             throw new ProtocolException("List type must be tools, prompts or resources, {$listType} given.", -32602);
         }
 
+        if (!$this->isSubscribedTo($sessionId, $listType . 'ListChanged')) {
+            return;
+        }
+
         $this->storage->storeMessage(
             $sessionId,
-            [
-                'jsonrpc' => '2.0',
-                'method' => "notifications/{$listType}/list_changed"
-            ]
+            $this->tagSubscription(
+                [
+                    'jsonrpc' => '2.0',
+                    'method' => "notifications/{$listType}/list_changed"
+                ],
+                $sessionId
+            )
         );
     }
 
@@ -239,13 +282,20 @@ class MessageHandler
             return;
         }
 
+        if (!$this->isSubscribedTo($sessionId, 'resourceSubscriptions')) {
+            return;
+        }
+
         $this->storage->storeMessage(
             $sessionId,
-            [
-                'jsonrpc' => '2.0',
-                'method' => 'notifications/resources/updated',
-                'params' => ['uri' => $uri]
-            ]
+            $this->tagSubscription(
+                [
+                    'jsonrpc' => '2.0',
+                    'method' => 'notifications/resources/updated',
+                    'params' => ['uri' => $uri]
+                ],
+                $sessionId
+            )
         );
     }
 
@@ -275,7 +325,7 @@ class MessageHandler
             $params['logger'] = $logger;
         }
 
-        $this->storage->storeMessage(
+        $this->responseManager->emitNotification(
             $sessionId,
             [
                 'jsonrpc' => '2.0',
@@ -283,6 +333,41 @@ class MessageHandler
                 'params' => $params
             ]
         );
+    }
+
+    /**
+     * Mark a notification with the subscription that asked for it
+     *
+     * @param array $notification the notification being queued
+     * @return array the notification, tagged when the key is a subscription
+     */
+    private function tagSubscription(array $notification, string $sessionId): array
+    {
+        $subscriptionId = $this->protocolManager->getSessionValue($sessionId, 'subscriptionId');
+
+        if ($subscriptionId !== null) {
+            $notification['params']['_meta']['io.modelcontextprotocol/subscriptionId'] = $subscriptionId;
+        }
+
+        return $notification;
+    }
+
+    /**
+     * Whether a session opted in to a notification type
+     *
+     * Sessions on versions without subscriptions/listen receive every notification.
+     */
+    private function isSubscribedTo(string $sessionId, string $type): bool
+    {
+        if (!isset($this->sessionVersionCache[$sessionId])) {
+            $this->sessionVersionCache[$sessionId] = $this->protocolManager->getSessionVersion($sessionId);
+        }
+
+        if (!$this->protocolManager->isFeatureSupported('subscriptions', $this->sessionVersionCache[$sessionId])) {
+            return true;
+        }
+
+        return in_array($type, $this->protocolManager->getSessionValue($sessionId, 'subscriptions', []), true);
     }
 
     public function requestElicitation(
@@ -297,7 +382,7 @@ class MessageHandler
 
     private function isBatchRequest(array $data): bool
     {
-        return array_keys($data) === range(0, count($data) - 1);
+        return array_is_list($data);
     }
 
     private function processBatchRequest(
@@ -420,17 +505,33 @@ class MessageHandler
 
         $isNotification = $isExplicitNotification || !$hasId;
 
-        if ($method !== 'initialize') {
+        if ($method !== 'initialize' || $this->protocolManager->isStateless()) {
             if (!$this->protocolManager->isMethodSupported($method, $protocolVersion)) {
                 if ($isNotification) {
                     return $response
                         ->withHeader('Content-Type', 'application/json')
                         ->withHeader('Access-Control-Allow-Origin', '*')
                         ->withStatus(202);
-                } else {
-                    return $this->responseManager->storeErrorResponse($sessionId, -32601, "Method not supported in protocol version {$protocolVersion}", $id, $response);
                 }
+
+                if ($this->protocolManager->isStateless()) {
+                    throw new ProtocolException("Method not found: {$method} is not part of protocol version {$protocolVersion}.", -32601);
+                }
+
+                return $this->responseManager->storeErrorResponse($sessionId, -32601, "Method not supported in protocol version {$protocolVersion}", $id, $response);
             }
+        }
+
+        if (!$isNotification && $this->protocolManager->isStateless()) {
+            $this->protocolManager->storeSessionValues(
+                (string)$sessionId,
+                [
+                    'progress_token' => $params['_meta']['progressToken'] ?? null,
+                    'log_level' => $params['_meta']['io.modelcontextprotocol/logLevel'] ?? null,
+                    'client_capabilities' => $params['_meta']['io.modelcontextprotocol/clientCapabilities'] ?? [],
+                    'input_responses' => $params['inputResponses'] ?? []
+                ]
+            );
         }
 
         if (!$isNotification && $sessionId !== null) {
@@ -497,11 +598,17 @@ class MessageHandler
                 case 'resources/unsubscribe':
                     return $this->resourcesHandler->handleResourcesUnsubscribe($params, $id, $sessionId, $context, $response);
 
+                case 'server/discover':
+                    return $this->systemHandler->handleServerDiscover($params, $id, $sessionId, $context, $response);
+
                 case 'tasks/get':
                     return $this->systemHandler->handleTasksGet($params, $id, $sessionId, $context, $response);
 
                 case 'tasks/result':
                     return $this->systemHandler->handleTasksResult($params, $id, $sessionId, $context, $response);
+
+                case 'tasks/update':
+                    return $this->systemHandler->handleTasksUpdate($params, $id, $sessionId, $context, $response);
 
                 case 'tasks/cancel':
                     return $this->systemHandler->handleTasksCancel($params, $id, $sessionId, $context, $response);
@@ -530,6 +637,9 @@ class MessageHandler
                     return $this->samplingHandler->handleRootsReadResponse($params, $id, $sessionId, $context, $response);
 
                 default:
+                    if ($this->protocolManager->isStateless()) {
+                        throw new ProtocolException("Method not found: {$method}. Call server/discover to see what this server implements.", -32601);
+                    }
                     if (!$sessionId) {
                         throw new ProtocolException('Session required. Send an initialize request first and reuse the returned Mcp-Session-Id header.', -32001);
                     }

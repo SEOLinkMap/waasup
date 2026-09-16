@@ -53,7 +53,12 @@ class PromptsHandler
             $result['nextCursor'] = $page['nextCursor'];
         }
 
-        return $this->responseManager->storeSuccessResponse($sessionId, $result, $id, $response);
+        return $this->responseManager->storeSuccessResponse(
+            $sessionId,
+            $this->responseManager->cacheable($result, $sessionId),
+            $id,
+            $response
+        );
     }
 
     public function handlePromptsGet(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
@@ -87,6 +92,8 @@ class PromptsHandler
 
         try {
             $result = $this->promptRegistry->execute($promptName, $arguments, $context);
+        } catch (ProtocolException $e) {
+            throw $e;
         } catch (\Throwable $e) {
             return $this->responseManager->storeErrorResponse(
                 $sessionId,
@@ -95,6 +102,12 @@ class PromptsHandler
                 $id,
                 $response
             );
+        }
+
+        $interim = $this->responseManager->inputRequired($sessionId, $id, $response);
+
+        if ($interim !== null) {
+            return $interim;
         }
 
         $wrappedResult = [

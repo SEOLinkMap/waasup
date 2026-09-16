@@ -154,6 +154,52 @@ class ToolRegistry
         return 'forbidden';
     }
 
+    /**
+     * Parameters a tool mirrors into Mcp-Param headers
+     *
+     * @return array header name mapped to the property path carrying its value
+     */
+    public function getHeaderParameters(string $toolName): array
+    {
+        $schema = isset($this->tools[$toolName])
+            ? $this->tools[$toolName]->getInputSchema()
+            : ($this->callables[$toolName]['schema']['inputSchema'] ?? []);
+
+        return $this->collectHeaderParameters($schema['properties'] ?? [], []);
+    }
+
+    /**
+     * Walk a schema's properties for x-mcp-header annotations
+     *
+     * Only chains of 'properties' keys are followed, as the transport requires.
+     *
+     * @param array $properties the properties at this level
+     * @param array $path the property path reached so far
+     * @return array header name mapped to property path
+     */
+    private function collectHeaderParameters(array $properties, array $path): array
+    {
+        $found = [];
+
+        foreach ($properties as $name => $definition) {
+            if (!is_array($definition)) {
+                continue;
+            }
+
+            $here = array_merge($path, [$name]);
+
+            if (isset($definition['x-mcp-header']) && is_string($definition['x-mcp-header'])) {
+                $found[$definition['x-mcp-header']] = $here;
+            }
+
+            if (isset($definition['properties']) && is_array($definition['properties'])) {
+                $found = array_merge($found, $this->collectHeaderParameters($definition['properties'], $here));
+            }
+        }
+
+        return $found;
+    }
+
     public function hasTool(string $toolName): bool
     {
         return isset($this->tools[$toolName]) || isset($this->callables[$toolName]);

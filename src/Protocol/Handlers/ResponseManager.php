@@ -3,12 +3,14 @@
 namespace Seolinkmap\Waasup\Protocol\Handlers;
 
 use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\StreamInterface;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 
 class ResponseManager
 {
     private StorageInterface $storage;
     private ProtocolManager $protocolManager;
+    private ?StreamInterface $stream = null;
 
     public function __construct(StorageInterface $storage, ProtocolManager $protocolManager)
     {
@@ -20,11 +22,42 @@ class ResponseManager
     {
         $responseData = [
             'jsonrpc' => '2.0',
-            'result' => $result,
+            'result' => $this->decorateResult($result, $sessionId),
             'id' => $id
         ];
 
         return $this->emit($sessionId, $responseData, $response);
+    }
+
+    /**
+     * Add the result fields the negotiated version requires
+     *
+     * @param mixed $result the handler's result
+     * @return mixed the result as it goes on the wire
+     */
+    private function decorateResult(mixed $result, string $sessionId): mixed
+    {
+        $version = $this->protocolManager->getSessionVersion($sessionId);
+
+        if (!$this->protocolManager->isFeatureSupported('stateless', $version)) {
+            return $result;
+        }
+
+        $result = $result instanceof \stdClass ? (array)$result : $result;
+
+        if (!is_array($result)) {
+            return $result;
+        }
+
+        $result['resultType'] = $result['resultType'] ?? 'complete';
+
+        $serverInfo = $this->protocolManager->getServerInfo($version);
+
+        if ($serverInfo !== []) {
+            $result['_meta']['io.modelcontextprotocol/serverInfo'] = $serverInfo;
+        }
+
+        return $result;
     }
 
     public function storeErrorResponse(
@@ -47,10 +80,58 @@ class ResponseManager
     }
 
     /**
+     * Send this request's messages on its own response stream instead of a queue
+     *
+     * @param StreamInterface|null $stream the response body, or null to use the queue
+     */
+    public function useStream(?StreamInterface $stream): void
+    {
+        $this->stream = $stream;
+    }
+
+    /**
+     * Send a notification raised while the request it belongs to is being handled
+     *
+     * @param array $notification the JSON-RPC notification
+     */
+    public function emitNotification(string $sessionId, array $notification): void
+    {
+        if ($this->stream === null) {
+            $this->storage->storeMessage($sessionId, $notification);
+
+            return;
+        }
+
+        $this->writeEvent($this->stream, $notification);
+    }
+
+    /**
+     * Write one SSE event, which this revision sends without an id
+     *
+     * @param array $message the JSON-RPC message
+     */
+    public static function writeEvent(StreamInterface $stream, array $message): void
+    {
+        $encoded = json_encode($message);
+
+        $stream->write("event: message\ndata: " . ($encoded === false ? '{}' : $encoded) . "\n\n");
+
+        if (method_exists($stream, 'flush')) {
+            $stream->flush();
+        }
+    }
+
+    /**
      * Deliver a JSON-RPC response using the transport for the session's protocol version.
      */
     private function emit(string $sessionId, array $responseData, Response $response): Response
     {
+        if ($this->stream !== null) {
+            $this->writeEvent($this->stream, $responseData);
+
+            return $response;
+        }
+
         if ($this->protocolManager->usesDirectResponse($this->protocolManager->getSessionVersion($sessionId))) {
             $encoded = json_encode($responseData);
             $response->getBody()->write($encoded === false ? '{}' : $encoded);
@@ -117,6 +198,47 @@ class ResponseManager
         }
 
         return ['items' => $page, 'nextCursor' => $nextCursor];
+    }
+
+    /**
+     * Answer with the input a handler still needs from the client
+     *
+     * @return Response|null the interim result, null when nothing further is needed
+     */
+    public function inputRequired(string $sessionId, mixed $id, Response $response): ?Response
+    {
+        $inputRequests = $this->protocolManager->getSessionValue($sessionId, 'input_requests', []);
+
+        if ($inputRequests === []) {
+            return null;
+        }
+
+        return $this->storeSuccessResponse(
+            $sessionId,
+            ['resultType' => 'input_required', 'inputRequests' => $inputRequests],
+            $id,
+            $response
+        );
+    }
+
+    /**
+     * Add the caching fields a cacheable result carries
+     *
+     * @param array $result a list or read result
+     * @return array the result, with ttlMs and cacheScope where the version defines them
+     */
+    public function cacheable(array $result, string $sessionId): array
+    {
+        $version = $this->protocolManager->getSessionVersion($sessionId);
+
+        if (!$this->protocolManager->isFeatureSupported('cacheable_results', $version)) {
+            return $result;
+        }
+
+        $result['ttlMs'] = $this->protocolManager->getCacheTtlMs();
+        $result['cacheScope'] = $this->protocolManager->getCacheScope();
+
+        return $result;
     }
 
     public function sanitizeHeaderValue(?string $value): string

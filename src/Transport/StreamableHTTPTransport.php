@@ -7,6 +7,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\StreamInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Seolinkmap\Waasup\Config;
 use Seolinkmap\Waasup\Storage\StorageInterface;
 use Slim\Psr7\NonBufferedBody;
 
@@ -27,7 +28,7 @@ class StreamableHTTPTransport implements TransportInterface
     ) {
         $this->logger = $logger ?? new NullLogger();
         $this->storage = $storage;
-        $this->config = array_replace_recursive($this->getDefaultConfig(), $config);
+        $this->config = Config::merge($this->getDefaultConfig(), $config);
     }
 
     public function handleConnection(
@@ -48,9 +49,13 @@ class StreamableHTTPTransport implements TransportInterface
         }
 
         $protocolVersion = $context['protocol_version'] ?? '';
+        $this->resumable = !\Seolinkmap\Waasup\Protocol\Handlers\ProtocolManager::isStatelessVersion($protocolVersion);
+
+        if (!$isTestMode) {
+            $response = $response->withBody(new NonBufferedBody());
+        }
 
         $response = $response
-            ->withBody(new NonBufferedBody())
             ->withHeader('Content-Type', 'text/event-stream')
             ->withHeader('Cache-Control', 'no-cache')
             ->withHeader('Connection', 'keep-alive')
@@ -145,7 +150,8 @@ class StreamableHTTPTransport implements TransportInterface
             return;
         }
 
-        $sseData = "id: " . $eventId . "\nevent: message\ndata: " . $jsonData . "\n\n";
+        $sseData = ($this->resumable ? "id: " . $eventId . "\n" : '')
+            . "event: message\ndata: " . $jsonData . "\n\n";
         $body->write($sseData);
 
         if (method_exists($body, 'flush')) {
@@ -158,10 +164,25 @@ class StreamableHTTPTransport implements TransportInterface
     private ?string $lastEventId = null;
 
     /**
+     * Whether the negotiated version replays what a dropped connection missed
+     */
+    private bool $resumable = true;
+
+    /**
      * Resume from the id the client reconnected with, or from where the session left off
+     *
+     * A version without resumption carries no event ids for a client to have kept,
+     * so both the header and any stored position are ignored and the stream starts
+     * at its first message.
      */
     private function resolveResumePoint(Request $request, string $sessionId): void
     {
+        if (!$this->resumable) {
+            $this->lastEventId = null;
+
+            return;
+        }
+
         $header = $request->getHeaderLine('Last-Event-ID');
 
         if ($header !== '') {
@@ -178,6 +199,10 @@ class StreamableHTTPTransport implements TransportInterface
      */
     private function rememberResumePoint(string $sessionId): void
     {
+        if (!$this->resumable) {
+            return;
+        }
+
         $sessionData = $this->storage->getSession($sessionId);
 
         if ($sessionData === null) {

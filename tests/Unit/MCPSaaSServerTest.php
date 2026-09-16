@@ -161,10 +161,18 @@ class MCPSaaSServerTest extends TestCase
 
         $this->assertEquals(200, $response->getStatusCode());
         $this->assertEquals('*', $response->getHeaderLine('Access-Control-Allow-Origin'));
-        $this->assertStringContainsString('GET, POST, OPTIONS', $response->getHeaderLine('Access-Control-Allow-Methods'));
-        $this->assertStringContainsString('Authorization', $response->getHeaderLine('Access-Control-Allow-Headers'));
-        $this->assertStringContainsString('Content-Type', $response->getHeaderLine('Access-Control-Allow-Headers'));
-        $this->assertStringContainsString('Mcp-Session-Id', $response->getHeaderLine('Access-Control-Allow-Headers'));
+        $methods = $response->getHeaderLine('Access-Control-Allow-Methods');
+        $headers = $response->getHeaderLine('Access-Control-Allow-Headers');
+
+        foreach (['GET', 'POST', 'DELETE', 'OPTIONS'] as $method) {
+            $this->assertStringContainsString($method, $methods);
+        }
+
+        foreach (['Authorization', 'Content-Type', 'Mcp-Session-Id', 'MCP-Protocol-Version', 'Mcp-Method', 'Mcp-Name'] as $header) {
+            $this->assertStringContainsString($header, $headers);
+        }
+
+        $this->assertStringContainsString('Mcp-Session-Id', $response->getHeaderLine('Access-Control-Expose-Headers'));
     }
 
     public function testHandleGetWithoutSessionId(): void
@@ -778,7 +786,10 @@ class MCPSaaSServerTest extends TestCase
 
         $this->assertEquals('*', $response->getHeaderLine('Access-Control-Allow-Origin'));
         $this->assertStringContainsString('Authorization', $response->getHeaderLine('Access-Control-Allow-Headers'));
-        $this->assertStringContainsString('POST, GET, OPTIONS', $response->getHeaderLine('Access-Control-Allow-Methods'));
+
+        foreach (['GET', 'POST', 'DELETE', 'OPTIONS'] as $method) {
+            $this->assertStringContainsString($method, $response->getHeaderLine('Access-Control-Allow-Methods'));
+        }
     }
 
     public function testHandlePostToolsListWithSessionDEBUG(): void
