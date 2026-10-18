@@ -79,7 +79,7 @@ class ContentProcessor
                     try {
                         $processedContent[] = AudioContentHandler::processAudioContent($item);
                     } catch (\Exception $e) {
-                        throw new ProtocolException("Invalid audio content: " . $e->getMessage(), -32602);
+                        throw new ProtocolException('Invalid audio content.', -32602, $e);
                     }
                     break;
 

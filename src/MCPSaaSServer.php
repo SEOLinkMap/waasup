@@ -83,7 +83,7 @@ class MCPSaaSServer
                 )
             ]
         );
-        $this->messageHandler = new MessageHandler($this->toolRegistry, $this->promptRegistry, $this->resourceRegistry, $this->storage, $this->config);
+        $this->messageHandler = new MessageHandler($this->toolRegistry, $this->promptRegistry, $this->resourceRegistry, $this->storage, $this->config, $this->logger);
         $this->sseTransport = new SSETransport($this->storage, $this->config);
         $this->streamableTransport = new StreamableHTTPTransport($this->storage, $this->config, $this->logger);
     }

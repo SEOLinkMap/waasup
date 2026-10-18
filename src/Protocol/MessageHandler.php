@@ -4,6 +4,8 @@ namespace Seolinkmap\Waasup\Protocol;
 
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\StreamInterface;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Seolinkmap\Waasup\Exception\ProtocolException;
 use Seolinkmap\Waasup\Prompts\Registry\PromptRegistry;
 use Seolinkmap\Waasup\Protocol\Handlers\ContentProcessor;
@@ -28,6 +30,7 @@ class MessageHandler
     private PromptRegistry $promptRegistry;
     private ResourceRegistry $resourceRegistry;
     private StorageInterface $storage;
+    private LoggerInterface $logger;
     private array $config;
     private array $sessionVersionCache = [];
     private ProtocolManager $protocolManager;
@@ -44,13 +47,15 @@ class MessageHandler
         PromptRegistry $promptRegistry,
         ResourceRegistry $resourceRegistry,
         StorageInterface $storage,
-        array $config = []
+        array $config = [],
+        ?LoggerInterface $logger = null
     ) {
         $this->toolRegistry = $toolRegistry;
         $this->promptRegistry = $promptRegistry;
         $this->resourceRegistry = $resourceRegistry;
         $this->storage = $storage;
         $this->config = $config;
+        $this->logger = $logger ?? new NullLogger();
 
         $this->protocolManager = new ProtocolManager($storage, $config);
         $this->contentProcessor = new ContentProcessor($this->protocolManager);
@@ -62,19 +67,22 @@ class MessageHandler
             $this->protocolManager,
             $this->contentProcessor,
             $this->responseManager,
-            $this->resourceRegistry
+            $this->resourceRegistry,
+            $this->logger
         );
 
         $this->promptsHandler = new PromptsHandler(
             $this->promptRegistry,
             $this->responseManager,
-            $this->protocolManager
+            $this->protocolManager,
+            $this->logger
         );
 
         $this->resourcesHandler = new ResourcesHandler(
             $this->resourceRegistry,
             $this->responseManager,
-            $this->protocolManager
+            $this->protocolManager,
+            $this->logger
         );
 
         $this->samplingHandler = new SamplingHandler(
@@ -648,10 +656,12 @@ class MessageHandler
         } catch (ProtocolException $e) {
             throw $e;
         } catch (\Exception $e) {
+            $this->logger->error('MCP method failed', ['method' => $method, 'exception' => $e]);
+
             if (!$sessionId) {
-                throw new ProtocolException('Internal error: ' . $e->getMessage(), -32603);
+                throw new ProtocolException('Internal error', -32603);
             }
-            return $this->responseManager->storeErrorResponse($sessionId, -32603, "Internal error handling {$method}: " . $e->getMessage(), $id, $response);
+            return $this->responseManager->storeErrorResponse($sessionId, -32603, "Internal error handling {$method}.", $id, $response);
         }
     }
 

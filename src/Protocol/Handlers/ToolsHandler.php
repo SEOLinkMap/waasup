@@ -3,6 +3,8 @@
 namespace Seolinkmap\Waasup\Protocol\Handlers;
 
 use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Seolinkmap\Waasup\Exception\ProtocolException;
 use Seolinkmap\Waasup\Prompts\Registry\PromptRegistry;
 use Seolinkmap\Waasup\Resources\Registry\ResourceRegistry;
@@ -18,6 +20,7 @@ class ToolsHandler
     private ProtocolManager $protocolManager;
     private ContentProcessor $contentProcessor;
     private ResponseManager $responseManager;
+    private LoggerInterface $logger;
 
     public function __construct(
         ToolRegistry $toolRegistry,
@@ -25,7 +28,8 @@ class ToolsHandler
         ProtocolManager $protocolManager,
         ContentProcessor $contentProcessor,
         ResponseManager $responseManager,
-        ?ResourceRegistry $resourceRegistry = null
+        ?ResourceRegistry $resourceRegistry = null,
+        ?LoggerInterface $logger = null
     ) {
         $this->toolRegistry = $toolRegistry;
         $this->promptRegistry = $promptRegistry;
@@ -33,6 +37,7 @@ class ToolsHandler
         $this->contentProcessor = $contentProcessor;
         $this->responseManager = $responseManager;
         $this->resourceRegistry = $resourceRegistry ?? new ResourceRegistry();
+        $this->logger = $logger ?? new NullLogger();
     }
 
     public function handleToolsList(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
@@ -134,11 +139,13 @@ class ToolsHandler
         } catch (ProtocolException $e) {
             throw $e;
         } catch (\Throwable $e) {
+            $this->logger->error('MCP tool failed', ['tool' => $toolName, 'exception' => $e]);
+
             $failure = [
                 'content' => [
                     [
                         'type' => 'text',
-                        'text' => "Tool '{$toolName}' failed: " . $e->getMessage()
+                        'text' => "Tool '{$toolName}' failed."
                     ]
                 ],
                 'isError' => true

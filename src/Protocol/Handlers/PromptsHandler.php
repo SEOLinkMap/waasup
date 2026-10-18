@@ -3,6 +3,8 @@
 namespace Seolinkmap\Waasup\Protocol\Handlers;
 
 use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Seolinkmap\Waasup\Exception\ProtocolException;
 use Seolinkmap\Waasup\Prompts\Registry\PromptRegistry;
 
@@ -11,15 +13,18 @@ class PromptsHandler
     private PromptRegistry $promptRegistry;
     private ResponseManager $responseManager;
     private ProtocolManager $protocolManager;
+    private LoggerInterface $logger;
 
     public function __construct(
         PromptRegistry $promptRegistry,
         ResponseManager $responseManager,
-        ProtocolManager $protocolManager
+        ProtocolManager $protocolManager,
+        ?LoggerInterface $logger = null
     ) {
         $this->promptRegistry = $promptRegistry;
         $this->responseManager = $responseManager;
         $this->protocolManager = $protocolManager;
+        $this->logger = $logger ?? new NullLogger();
     }
 
     public function handlePromptsList(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
@@ -95,10 +100,12 @@ class PromptsHandler
         } catch (ProtocolException $e) {
             throw $e;
         } catch (\Throwable $e) {
+            $this->logger->error('MCP prompt failed', ['prompt' => $promptName, 'exception' => $e]);
+
             return $this->responseManager->storeErrorResponse(
                 $sessionId,
                 -32603,
-                "Prompt '{$promptName}' failed: " . $e->getMessage(),
+                "Prompt '{$promptName}' failed.",
                 $id,
                 $response
             );

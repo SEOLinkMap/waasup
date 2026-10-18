@@ -1558,7 +1558,8 @@ class ProtocolFeaturesTest extends TestCase
 
         $this->assertArrayHasKey('result', $data);
         $this->assertTrue($data['result']['isError']);
-        $this->assertStringContainsString('upstream is down', $data['result']['content'][0]['text']);
+        $this->assertSame("Tool 'failing_tool' failed.", $data['result']['content'][0]['text']);
+        $this->assertStringNotContainsString('upstream is down', (string) $response->getBody());
     }
 
     public function testUnknownToolIsAProtocolError(): void

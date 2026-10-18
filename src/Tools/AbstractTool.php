@@ -155,7 +155,7 @@ abstract class AbstractTool implements ToolInterface
             try {
                 AudioContentHandler::processAudioContent($parameters[$paramName]);
             } catch (\Exception $e) {
-                throw new \InvalidArgumentException("Invalid audio parameter '{$paramName}': " . $e->getMessage());
+                throw new \InvalidArgumentException("Invalid audio parameter '{$paramName}'.", 0, $e);
             }
         }
     }

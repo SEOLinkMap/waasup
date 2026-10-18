@@ -3,6 +3,8 @@
 namespace Seolinkmap\Waasup\Protocol\Handlers;
 
 use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Seolinkmap\Waasup\Exception\ProtocolException;
 use Seolinkmap\Waasup\Resources\Registry\ResourceRegistry;
 
@@ -11,15 +13,18 @@ class ResourcesHandler
     private ResourceRegistry $resourceRegistry;
     private ResponseManager $responseManager;
     private ProtocolManager $protocolManager;
+    private LoggerInterface $logger;
 
     public function __construct(
         ResourceRegistry $resourceRegistry,
         ResponseManager $responseManager,
-        ProtocolManager $protocolManager
+        ProtocolManager $protocolManager,
+        ?LoggerInterface $logger = null
     ) {
         $this->resourceRegistry = $resourceRegistry;
         $this->responseManager = $responseManager;
         $this->protocolManager = $protocolManager;
+        $this->logger = $logger ?? new NullLogger();
     }
 
     public function handleResourcesList(array $params, mixed $id, ?string $sessionId, array $context, Response $response): Response
@@ -71,10 +76,12 @@ class ResourcesHandler
         } catch (ProtocolException $e) {
             throw $e;
         } catch (\Throwable $e) {
+            $this->logger->error('MCP resource read failed', ['uri' => $uri, 'exception' => $e]);
+
             return $this->responseManager->storeErrorResponse(
                 $sessionId,
                 -32603,
-                "Reading resource {$uri} failed: " . $e->getMessage(),
+                "Reading resource {$uri} failed.",
                 $id,
                 $response
             );
